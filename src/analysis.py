@@ -58,26 +58,4 @@ class ReturnReasonCategorizer:
                 r'complicated', r'confusing', r'uncomfortable', r'awkward',
                 r'not\s+user\s+friendly', r'design\s+(flaw|issue|problem)'
             ],
-            'keywords': ['uncomfortable', 'difficult', 'hard to use', 'unstable', 'design']
-        },
-        'COMPATIBILITY_ISSUES': {
-            'patterns': [
-                r'doesn\'?t?\s+fit\s+(my|the|our)?\s*(toilet|chair|walker|bed)',
-                r'not\s+compatible', r'incompatible',
-                r'won\'?t?\s+(fit|work)\s+with'
-            ],
-            'keywords': ['compatible', 'incompatible', 'fit with']
-        }
-    }
-
-    def __init__(self):
-        self.compiled_patterns = {
-            category: [re.compile(p, re.IGNORECASE) for p in data['patterns']]
-            for category, data in self.CATEGORIES.items()
-        }
-
-    def categorize_reason(self, reason: str, comment: str = "") -> Tuple[str, float]:
-        """Categorizes a single return reason based on text analysis."""
-        combined_text = f"{reason or ''} {comment or ''}".lower().strip()
-        if not combined_text:
-            return "UNCATEGORIZED",
+            'keywords': ['uncomfortable', 'difficult', '

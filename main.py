@@ -1465,22 +1465,40 @@ def main():
         display_document_generation()
 
 def process_uploaded_files(sales_files, returns_files, screenshots):
-    """Process all uploaded files"""
+    """Process all uploaded files with specialized parsers"""
     
     with st.spinner("Processing files..."):
+        # Import specialized parsers
+        from odoo_return_parser import (
+            OdooInventoryParser, PivotReturnReportParser, 
+            AmazonVOCParser, DataIntegrator
+        )
+        
         processor = UniversalFileProcessor()
         
         # Process sales files
         all_sales_data = []
+        odoo_sales = None
+        
         if sales_files:
             for file in sales_files:
                 try:
-                    df = processor.process_file(file, file.name)
-                    if not df.empty:
+                    # Check if it's an Odoo Inventory Forecast file
+                    if 'odoo' in file.name.lower() and 'inventory' in file.name.lower():
+                        df = OdooInventoryParser.parse_inventory_forecast(file)
+                        odoo_sales = df  # Keep reference for integration
                         sales_df = DataProcessor.process_sales_data(df)
                         if sales_df is not None:
                             all_sales_data.append(sales_df)
-                            st.success(f"✅ Processed {file.name}: {len(sales_df)} sales records")
+                            st.success(f"✅ Processed Odoo Inventory Forecast: {len(sales_df)} sales records")
+                    else:
+                        # Use generic processor
+                        df = processor.process_file(file, file.name)
+                        if not df.empty:
+                            sales_df = DataProcessor.process_sales_data(df)
+                            if sales_df is not None:
+                                all_sales_data.append(sales_df)
+                                st.success(f"✅ Processed {file.name}: {len(sales_df)} sales records")
                 except Exception as e:
                     st.error(f"Error processing {file.name}: {e}")
             
@@ -1497,23 +1515,35 @@ def process_uploaded_files(sales_files, returns_files, screenshots):
         
         # Process returns files
         all_returns_data = []
+        pivot_returns = None
+        
         if returns_files:
             for file in returns_files:
                 try:
+                    # Check if it's a Pivot Return Report
+                    if 'pivot' in file.name.lower() and 'return' in file.name.lower():
+                        df = PivotReturnReportParser.parse_return_report(file)
+                        pivot_returns = df  # Keep reference for integration
+                        all_returns_data.append(df)
+                        st.success(f"✅ Processed Pivot Return Report: {len(df)} return records")
                     # Check if it's an FBA returns file
-                    if file.name.endswith('.txt'):
+                    elif file.name.endswith('.txt'):
                         content = file.read().decode('utf-8')
                         if 'return-date' in content and 'order-id' in content:
                             df = DataProcessor.process_amazon_fba_returns(content)
+                            all_returns_data.append(df)
+                            st.success(f"✅ Processed Amazon FBA returns: {len(df)} records")
                         else:
                             file.seek(0)
                             df = processor.process_file(file, file.name)
+                            if df is not None and not df.empty:
+                                all_returns_data.append(df)
                     else:
+                        # Use generic processor
                         df = processor.process_file(file, file.name)
-                    
-                    if df is not None and not df.empty:
-                        all_returns_data.append(df)
-                        st.success(f"✅ Processed {file.name}: {len(df)} return records")
+                        if df is not None and not df.empty:
+                            all_returns_data.append(df)
+                            st.success(f"✅ Processed {file.name}: {len(df)} return records")
                 except Exception as e:
                     st.error(f"Error processing {file.name}: {e}")
             
@@ -1528,13 +1558,38 @@ def process_uploaded_files(sales_files, returns_files, screenshots):
                 st.session_state.returns_data = combined_returns
                 st.success(f"✅ Total return records: {len(combined_returns)}")
         
-        # Store screenshots
+        # Process screenshots (Amazon VOC)
+        voc_data = None
         if screenshots:
             st.session_state.screenshots = screenshots
-            st.success(f"✅ Loaded {len(screenshots)} screenshots")
+            # Process VOC data from screenshots
+            screenshot_data = ScreenshotProcessor.process_screenshots(screenshots)
+            st.session_state.screenshot_data = screenshot_data
+            
+            # Extract VOC insights
+            for item in screenshot_data.get('data', []):
+                if item.get('type') in ['returns_data', 'quality_report']:
+                    voc_data = AmazonVOCParser.parse_voc_data(item.get('text', ''))
+                    if voc_data and voc_data['issues']:
+                        st.info("📸 Extracted Amazon VOC data from screenshots (reference only)")
+                        break
         
-        # Calculate metrics
-        if st.session_state.sales_data is not None and st.session_state.returns_data is not None:
+        # Integrate all data sources
+        if st.session_state.sales_data is not None or st.session_state.returns_data is not None:
+            integrated_data = DataIntegrator.integrate_multi_channel_data(
+                odoo_sales=odoo_sales,
+                return_reports=pivot_returns,
+                amazon_voc=voc_data,
+                manual_entries=st.session_state.manual_entries
+            )
+            
+            st.session_state.integrated_data = integrated_data
+            
+            # Display integrated metrics with warnings
+            from odoo_return_parser import display_integrated_metrics
+            display_integrated_metrics(integrated_data)
+            
+            # Calculate standard metrics
             calculate_metrics()
 
 def process_manual_data():
@@ -1721,57 +1776,160 @@ def display_detailed_analysis():
         )
 
 def display_capa_form():
-    """Display CAPA form"""
+    """Display CAPA form with ISO 13485 compliance validation"""
     
-    st.markdown('<div class="section-header"><h2>📝 CAPA Information</h2></div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header"><h2>📝 CAPA Information - ISO 13485 Compliant</h2></div>', unsafe_allow_html=True)
+    
+    # Import compliance validator
+    from odoo_return_parser import validate_capa_compliance
+    
+    # Show current metrics summary if available
+    if st.session_state.metrics:
+        st.info(f"""
+        📊 **Current Analysis Summary:**
+        - Overall Return Rate: {st.session_state.metrics.get('overall_return_rate', 0):.2f}%
+        - Total Returns: {st.session_state.metrics.get('total_returns', 0):,}
+        - Products Affected: {st.session_state.metrics.get('products_affected', 0)}
+        """)
     
     with st.form("capa_form"):
+        st.markdown("### Administrative Information")
         col1, col2 = st.columns(2)
         
         with col1:
-            capa_number = st.text_input("CAPA Number", value=f"CAPA-{datetime.now().strftime('%Y%m%d')}-001")
-            product = st.text_input("Product Name", placeholder="e.g., Wheelchair Bag Advanced")
-            sku = st.text_input("Primary SKU", placeholder="e.g., LVA3100BLK")
-            prepared_by = st.text_input("Prepared By", value="Quality Team")
+            capa_number = st.text_input(
+                "CAPA Number*", 
+                value=f"CAPA-{datetime.now().strftime('%Y%m%d')}-001",
+                help="Unique identifier for this CAPA"
+            )
+            product = st.text_input(
+                "Product Name*", 
+                placeholder="e.g., Vive Mobility Sit to Stand Patient Lift",
+                help="Full product name as registered"
+            )
+            sku = st.text_input(
+                "Primary SKU*", 
+                placeholder="e.g., MOB1043WHTFBM",
+                help="Primary SKU affected"
+            )
+            prepared_by = st.text_input(
+                "Prepared By*", 
+                value=st.session_state.get('user_name', 'Quality Team'),
+                help="Person responsible for CAPA creation"
+            )
         
         with col2:
-            date = st.date_input("Date", value=datetime.now())
-            department = st.selectbox("Department", ["Quality", "Engineering", "Production", "Supply Chain"])
-            severity = st.selectbox("Severity", ["Critical", "Major", "Minor"])
-            priority = st.selectbox("Priority", ["High", "Medium", "Low"])
+            date = st.date_input("Date*", value=datetime.now())
+            department = st.selectbox(
+                "Department*", 
+                ["Quality", "Engineering", "Production", "Supply Chain", "Regulatory"]
+            )
+            severity = st.selectbox(
+                "Severity* (ISO 13485)", 
+                ["Critical", "Major", "Minor"],
+                help="Critical: Patient safety risk, Major: Performance impact, Minor: Non-conformance"
+            )
+            priority = st.selectbox(
+                "Priority*", 
+                ["High", "Medium", "Low"],
+                help="Based on risk assessment and business impact"
+            )
         
-        st.markdown("### Issue Description")
+        st.markdown("### Problem Identification")
         issue_description = st.text_area(
-            "Describe the issue",
+            "Issue Description* (min. 50 characters)",
             height=150,
-            placeholder="Provide detailed description of the quality issue, including impact on customers and products"
+            placeholder="""Provide detailed description including:
+- What is the problem?
+- When was it discovered?
+- How was it discovered?
+- What is the scope/impact?
+- Supporting data (return rates, complaint counts, etc.)""",
+            help="Comprehensive problem statement per ISO 13485 requirements"
         )
+        
+        # Quick fill suggestions based on data
+        if st.session_state.get('quality_issues') is not None and not st.session_state.quality_issues.empty:
+            st.markdown("**📋 Quick Fill Suggestions from Analysis:**")
+            top_issues = st.session_state.quality_issues.head(3)
+            for _, issue in top_issues.iterrows():
+                if st.button(f"Use: {issue['reason']} - {issue['incident_count']} incidents", key=f"issue_{issue['sku']}"):
+                    issue_description = f"Product {issue['sku']} has received {issue['incident_count']} returns due to '{issue['reason']}' representing {issue['qty_returned']} units."
         
         st.markdown("### Root Cause Analysis")
         root_cause = st.text_area(
-            "Root Cause Analysis",
+            "Root Cause Analysis* (min. 50 characters)",
             height=150,
-            placeholder="Describe investigation findings and identified root causes"
+            placeholder="""Include:
+- Investigation methodology (5 Whys, Fishbone, etc.)
+- Data analysis findings
+- Contributing factors
+- Verification of root cause""",
+            help="Systematic approach to identify true root cause"
         )
         
         st.markdown("### Corrective Actions")
         corrective_action = st.text_area(
-            "Proposed Corrective Actions",
+            "Corrective Actions* (Include Timeline)",
             height=150,
-            placeholder="Detail immediate and long-term corrective actions"
+            placeholder="""Specify:
+- Immediate containment actions
+- Short-term corrections
+- Implementation timeline with specific dates
+- Responsible parties for each action
+- Resources required""",
+            help="Actions to address the current problem"
         )
         
         st.markdown("### Preventive Actions")
         preventive_action = st.text_area(
-            "Proposed Preventive Actions",
+            "Preventive Actions* (Include Monitoring Plan)",
             height=150,
-            placeholder="Describe actions to prevent recurrence"
+            placeholder="""Include:
+- System/process improvements
+- Training requirements
+- Documentation updates
+- Monitoring and verification plans
+- Effectiveness check schedule""",
+            help="Actions to prevent recurrence"
         )
         
-        submitted = st.form_submit_button("💾 Save CAPA Data", type="primary")
+        st.markdown("### Risk Assessment")
+        col1, col2 = st.columns(2)
+        with col1:
+            risk_to_patient = st.selectbox(
+                "Risk to Patient Safety",
+                ["None", "Low", "Medium", "High"],
+                help="Assess potential patient safety impact"
+            )
         
-        if submitted:
-            st.session_state.capa_data = {
+        with col2:
+            regulatory_impact = st.selectbox(
+                "Regulatory Impact",
+                ["None", "Notification Required", "Reportable Event", "Recall Risk"],
+                help="Assess regulatory reporting requirements"
+            )
+        
+        st.markdown("### Effectiveness Verification")
+        effectiveness_plan = st.text_area(
+            "Effectiveness Verification Plan",
+            placeholder="""Define:
+- Success criteria/metrics
+- Verification timeline (30, 60, 90 days)
+- Data collection method
+- Responsible party""",
+            help="How will you verify the actions were effective?"
+        )
+        
+        # Form submission
+        col1, col2, col3 = st.columns([1, 1, 2])
+        with col1:
+            submitted = st.form_submit_button("💾 Save CAPA Data", type="primary")
+        with col2:
+            validate = st.form_submit_button("✓ Validate ISO 13485", type="secondary")
+        
+        if submitted or validate:
+            capa_data = {
                 'capa_number': capa_number,
                 'date': date.strftime('%Y-%m-%d'),
                 'product': product,
@@ -1783,85 +1941,480 @@ def display_capa_form():
                 'issue_description': issue_description,
                 'root_cause': root_cause,
                 'corrective_action': corrective_action,
-                'preventive_action': preventive_action
+                'preventive_action': preventive_action,
+                'risk_to_patient': risk_to_patient,
+                'regulatory_impact': regulatory_impact,
+                'effectiveness_plan': effectiveness_plan,
+                'metrics_summary': st.session_state.get('metrics', {})
             }
-            st.success("✅ CAPA data saved successfully!")
+            
+            # Validate compliance
+            is_valid = validate_capa_compliance(capa_data)
+            
+            if submitted:
+                if is_valid:
+                    st.session_state.capa_data = capa_data
+                    st.success("✅ CAPA data saved and validated for ISO 13485 compliance!")
+                    
+                    # Auto-navigate to document generation
+                    st.info("💡 Proceed to 'Documents' tab to generate your CAPA report")
+                else:
+                    st.session_state.capa_data = capa_data  # Save anyway but warn
+                    st.warning("⚠️ CAPA data saved but has compliance issues. Please address before finalizing.")
+            
+            elif validate:
+                if is_valid:
+                    st.success("✅ CAPA data meets all ISO 13485 requirements!")
+                else:
+                    st.error("❌ Please address the compliance issues above")
 
 def display_document_generation():
-    """Display document generation tab"""
+    """Display streamlined document generation for ISO 13485 CAPA"""
     
-    st.markdown('<div class="section-header"><h2>📄 Generate CAPA Document</h2></div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header"><h2>📄 Generate CAPA Document - ISO 13485 Format</h2></div>', unsafe_allow_html=True)
     
     if not st.session_state.capa_data:
-        st.warning("⚠️ Please fill out the CAPA form first")
+        st.warning("⚠️ Please complete the CAPA form first")
+        if st.button("Go to CAPA Form"):
+            st.info("Navigate to the 'CAPA Form' tab to enter your data")
         return
     
-    col1, col2 = st.columns([2, 1])
+    # Quick summary of what will be included
+    st.success("✅ CAPA data ready for document generation")
+    
+    # Show summary of data to be included
+    with st.expander("📋 Review CAPA Summary", expanded=True):
+        capa = st.session_state.capa_data
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown(f"""
+            **Administrative:**
+            - CAPA Number: {capa['capa_number']}
+            - Product: {capa['product']}
+            - SKU: {capa['sku']}
+            - Severity: {capa['severity']}
+            - Date: {capa['date']}
+            """)
+        
+        with col2:
+            if 'metrics_summary' in capa:
+                metrics = capa['metrics_summary']
+                st.markdown(f"""
+                **Metrics:**
+                - Return Rate: {metrics.get('overall_return_rate', 0):.2f}%
+                - Total Returns: {metrics.get('total_returns', 0):,}
+                - Total Sales: {metrics.get('total_sales', 0):,}
+                - Analysis Period: {metrics.get('period', 'All available data')}
+                """)
+    
+    # Simplified generation options
+    st.markdown("### Generation Options")
+    
+    col1, col2 = st.columns([3, 1])
     
     with col1:
-        st.subheader("Document Options")
+        # AI provider selection with explanation
+        ai_provider = st.radio(
+            "Select AI Enhancement",
+            ["Anthropic Claude (Recommended)", "OpenAI GPT-4", "No AI (Template Only)"],
+            index=0,
+            help="AI will enhance your CAPA with industry best practices and ensure comprehensive documentation"
+        )
         
-        use_ai = st.checkbox("Use AI to enhance document", value=True)
-        if use_ai:
-            ai_provider = st.radio("AI Provider", ["Anthropic (Claude)", "OpenAI (GPT-4)"])
-        
-        include_metrics = st.checkbox("Include metrics summary", value=True)
-        include_charts = st.checkbox("Include charts", value=True)
-        include_screenshots = st.checkbox("Include uploaded screenshots", value=True)
+        # Data inclusion options
+        st.markdown("**Include in Document:**")
+        col_a, col_b = st.columns(2)
+        with col_a:
+            include_metrics = st.checkbox("✓ Metrics & Analysis", value=True)
+            include_charts = st.checkbox("✓ Trend Charts", value=True)
+        with col_b:
+            include_screenshots = st.checkbox("✓ Evidence Screenshots", value=True)
+            include_appendix = st.checkbox("✓ Raw Data Appendix", value=False)
     
     with col2:
-        st.subheader("Export Format")
-        export_format = st.radio("Format", ["Word Document (.docx)", "PDF (coming soon)"])
+        st.markdown("**Export Format:**")
+        st.info("📄 Word Document (.docx)")
+        st.caption("PDF export coming soon")
     
-    if st.button("🚀 Generate Document", type="primary"):
-        generate_capa_document(use_ai, ai_provider if use_ai else None, include_metrics, include_charts, include_screenshots)
+    # One-click generation
+    st.markdown("---")
+    
+    if st.button("🚀 Generate CAPA Document", type="primary", use_container_width=True):
+        generate_iso_compliant_capa(
+            ai_provider, 
+            include_metrics, 
+            include_charts, 
+            include_screenshots,
+            include_appendix
+        )
+    
+    # Tips for efficiency
+    with st.expander("💡 Tips for Faster CAPA Generation"):
+        st.markdown("""
+        1. **Pre-fill data**: Use the quick-fill suggestions in the CAPA form
+        2. **Batch process**: Upload all files at once in the sidebar
+        3. **Use templates**: Your corrective actions are saved for future use
+        4. **AI Enhancement**: Let AI expand your brief inputs into comprehensive documentation
+        5. **Validation**: The system automatically checks ISO 13485 compliance
+        """)
 
-def generate_capa_document(use_ai, ai_provider, include_metrics, include_charts, include_screenshots):
-    """Generate the CAPA document"""
+def generate_iso_compliant_capa(ai_provider, include_metrics, include_charts, include_screenshots, include_appendix):
+    """Generate ISO 13485 compliant CAPA document with minimal user effort"""
     
-    with st.spinner("Generating document..."):
-        generator = AIDocumentGenerator()
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    try:
+        # Step 1: Prepare data
+        status_text.text("📊 Preparing data...")
+        progress_bar.progress(20)
         
-        # Generate content
-        if use_ai:
-            quality_issues = st.session_state.quality_issues if 'quality_issues' in st.session_state else pd.DataFrame()
-            screenshot_data = st.session_state.get('screenshot_data', None)
-            
+        generator = AIDocumentGenerator()
+        quality_issues = st.session_state.quality_issues if 'quality_issues' in st.session_state else pd.DataFrame()
+        screenshot_data = st.session_state.get('screenshot_data', None)
+        integrated_data = st.session_state.get('integrated_data', {})
+        
+        # Step 2: Generate content
+        status_text.text("✍️ Generating CAPA content...")
+        progress_bar.progress(40)
+        
+        if ai_provider == "No AI (Template Only)":
+            content = generate_enhanced_template_content(integrated_data)
+        else:
+            use_anthropic = "Claude" in ai_provider
             content = generator.generate_capa_document(
                 st.session_state.capa_data,
                 st.session_state.metrics,
                 quality_issues,
                 screenshot_data,
-                use_anthropic=(ai_provider == "Anthropic (Claude)")
+                use_anthropic=use_anthropic
             )
             
-            if content:
-                st.success("✅ AI content generated successfully!")
-            else:
-                st.warning("⚠️ AI generation failed, using template format")
-                content = generate_template_content()
-        else:
-            content = generate_template_content()
+            if not content:
+                st.warning("⚠️ AI generation failed, using enhanced template")
+                content = generate_enhanced_template_content(integrated_data)
         
-        # Export to Word
-        doc_buffer = generator.export_to_docx(
-            content, 
+        # Step 3: Create document
+        status_text.text("📄 Creating Word document...")
+        progress_bar.progress(60)
+        
+        # Enhanced document creation
+        doc_buffer = create_enhanced_capa_document(
+            content,
             st.session_state.capa_data,
-            include_screenshots=include_screenshots,
-            screenshots=st.session_state.screenshots if include_screenshots else []
+            include_metrics,
+            include_charts,
+            include_screenshots,
+            include_appendix,
+            integrated_data
         )
         
+        # Step 4: Finalize
+        status_text.text("✅ Finalizing document...")
+        progress_bar.progress(100)
+        
         if doc_buffer:
-            st.download_button(
-                label="📥 Download CAPA Document",
-                data=doc_buffer,
-                file_name=f"CAPA_{st.session_state.capa_data['capa_number']}.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
+            # Clear progress indicators
+            progress_bar.empty()
+            status_text.empty()
             
-            # Display preview
-            st.markdown("### Document Preview")
-            st.text_area("Content", content, height=500)
+            # Success message and download
+            st.success("🎉 CAPA document generated successfully!")
+            
+            col1, col2, col3 = st.columns([2, 2, 1])
+            
+            with col1:
+                st.download_button(
+                    label="📥 Download CAPA Document",
+                    data=doc_buffer,
+                    file_name=f"CAPA_{st.session_state.capa_data['capa_number']}_{datetime.now().strftime('%Y%m%d')}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True
+                )
+            
+            with col2:
+                # Save to session for quick re-download
+                st.session_state.last_generated_doc = doc_buffer
+                st.info("Document saved to session")
+            
+            # Show preview
+            with st.expander("📄 Document Preview", expanded=False):
+                st.text_area("Content Preview", content[:2000] + "...", height=400)
+            
+            # Next steps
+            st.markdown("### ✅ Next Steps")
+            st.markdown("""
+            1. Review the generated document for accuracy
+            2. Add any additional supporting documentation
+            3. Route for approval per your quality procedures
+            4. Upload to your document control system
+            5. Schedule effectiveness checks as defined
+            """)
+            
+        else:
+            progress_bar.empty()
+            status_text.empty()
+            st.error("❌ Failed to generate document. Please check your data and try again.")
+            
+    except Exception as e:
+        progress_bar.empty()
+        status_text.empty()
+        st.error(f"❌ Error generating document: {str(e)}")
+        logger.error(f"Document generation error: {e}")
+
+def generate_enhanced_template_content(integrated_data):
+    """Generate enhanced template content with integrated data insights"""
+    
+    capa = st.session_state.capa_data
+    metrics = st.session_state.metrics
+    
+    # Add data source summary
+    data_sources = integrated_data.get('data_sources', [])
+    sources_text = f"Data compiled from: {', '.join(data_sources)}" if data_sources else "Manual data entry"
+    
+    # Add warnings if any
+    warnings_text = ""
+    if integrated_data.get('warnings'):
+        warnings_text = "\n\nDATA CONSIDERATIONS:\n" + "\n".join(f"• {w}" for w in integrated_data['warnings'])
+    
+    content = f"""CORRECTIVE AND PREVENTIVE ACTION (CAPA) REPORT
+ISO 13485:2016 Compliant
+
+================================================================================
+1. CAPA IDENTIFICATION
+================================================================================
+
+CAPA Number: {capa['capa_number']}
+Date Initiated: {capa['date']}
+Product: {capa['product']}
+Product SKU: {capa['sku']}
+Department: {capa['department']}
+Prepared By: {capa['prepared_by']}
+
+Severity Classification: {capa['severity']}
+Priority Level: {capa['priority']}
+Risk to Patient: {capa.get('risk_to_patient', 'To be assessed')}
+Regulatory Impact: {capa.get('regulatory_impact', 'To be assessed')}
+
+================================================================================
+2. PROBLEM IDENTIFICATION
+================================================================================
+
+Issue Description:
+{capa['issue_description']}
+
+Data Analysis Summary:
+{sources_text}
+
+Overall Return Rate: {metrics.get('overall_return_rate', 0):.2f}%
+Total Units Returned: {metrics.get('total_returns', 0):,}
+Total Units Sold: {metrics.get('total_sales', 0):,}
+Products Affected: {metrics.get('products_affected', 0)}
+Analysis Period: {integrated_data.get('date_range', {}).get('start', 'N/A')} to {integrated_data.get('date_range', {}).get('end', 'N/A')}
+
+{warnings_text}
+
+================================================================================
+3. ROOT CAUSE ANALYSIS
+================================================================================
+
+Investigation Methodology and Findings:
+{capa['root_cause']}
+
+Contributing Factors:
+[To be determined through investigation]
+
+Verification of Root Cause:
+[To be completed]
+
+================================================================================
+4. CORRECTIVE ACTIONS
+================================================================================
+
+Immediate Containment Actions:
+{capa['corrective_action']}
+
+Implementation Timeline:
+[As specified in corrective action plan]
+
+Responsible Parties:
+{capa['prepared_by']} - CAPA Coordinator
+[Additional parties to be assigned]
+
+================================================================================
+5. PREVENTIVE ACTIONS
+================================================================================
+
+System/Process Improvements:
+{capa['preventive_action']}
+
+Training Requirements:
+[To be determined based on root cause]
+
+Documentation Updates Required:
+☐ Work Instructions
+☐ Specifications
+☐ Quality Procedures
+☐ Training Materials
+
+================================================================================
+6. EFFECTIVENESS VERIFICATION
+================================================================================
+
+Verification Plan:
+{capa.get('effectiveness_plan', '[To be developed]')}
+
+Success Criteria:
+- Return rate reduced to <5%
+- No recurrence of root cause
+- Sustained improvement over 90 days
+
+Verification Schedule:
+- 30-day check: [Date]
+- 60-day check: [Date]
+- 90-day check: [Date]
+
+================================================================================
+7. APPROVAL SIGNATURES
+================================================================================
+
+Prepared By: _________________________ Date: _________
+            {capa['prepared_by']}
+
+Reviewed By: _________________________ Date: _________
+             Quality Manager
+
+Approved By: _________________________ Date: _________
+             Management Representative
+
+================================================================================
+Document Control: {capa['capa_number']} Rev. 1.0
+"""
+    
+    return content
+
+def create_enhanced_capa_document(content, capa_data, include_metrics, include_charts, 
+                                 include_screenshots, include_appendix, integrated_data):
+    """Create enhanced Word document with all requested elements"""
+    try:
+        from docx import Document
+        from docx.shared import Inches, Pt, RGBColor
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        
+        doc = Document()
+        
+        # Set document properties
+        doc.core_properties.title = f"CAPA Report {capa_data['capa_number']}"
+        doc.core_properties.subject = "ISO 13485 Corrective and Preventive Action"
+        doc.core_properties.author = capa_data['prepared_by']
+        doc.core_properties.keywords = f"CAPA, {capa_data['sku']}, {capa_data['severity']}"
+        
+        # Add header with company branding
+        header = doc.sections[0].header
+        header_para = header.paragraphs[0]
+        header_para.text = "CORRECTIVE AND PREVENTIVE ACTION (CAPA) REPORT"
+        header_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        header_para.style.font.bold = True
+        
+        # Add ISO reference
+        iso_para = header.add_paragraph()
+        iso_para.text = "ISO 13485:2016 Compliant"
+        iso_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        iso_para.style.font.size = Pt(10)
+        
+        # Add main content
+        for paragraph in content.split('\n'):
+            if paragraph.strip():
+                if paragraph.startswith('=' * 10):
+                    continue  # Skip separator lines
+                elif paragraph.isupper() and len(paragraph) < 100:
+                    # Section header
+                    p = doc.add_heading(paragraph.strip(), level=1)
+                else:
+                    # Regular paragraph
+                    p = doc.add_paragraph(paragraph.strip())
+        
+        # Add metrics table if requested
+        if include_metrics and st.session_state.metrics:
+            doc.add_page_break()
+            doc.add_heading('APPENDIX A: Detailed Metrics Analysis', level=1)
+            
+            # Create metrics table
+            table = doc.add_table(rows=5, cols=2)
+            table.style = 'Light List Accent 1'
+            
+            metrics_data = [
+                ('Overall Return Rate', f"{st.session_state.metrics.get('overall_return_rate', 0):.2f}%"),
+                ('Total Units Sold', f"{st.session_state.metrics.get('total_sales', 0):,}"),
+                ('Total Units Returned', f"{st.session_state.metrics.get('total_returns', 0):,}"),
+                ('Unique Products Affected', str(st.session_state.metrics.get('products_affected', 0))),
+                ('Data Sources', ', '.join(integrated_data.get('data_sources', ['Not specified'])))
+            ]
+            
+            for i, (label, value) in enumerate(metrics_data):
+                table.rows[i].cells[0].text = label
+                table.rows[i].cells[1].text = value
+        
+        # Add screenshots if requested
+        if include_screenshots and st.session_state.screenshots:
+            doc.add_page_break()
+            doc.add_heading('APPENDIX B: Supporting Evidence', level=1)
+            
+            for idx, screenshot in enumerate(st.session_state.screenshots):
+                try:
+                    doc.add_paragraph(f"Figure {idx + 1}: {screenshot.name}")
+                    
+                    # Add image
+                    from PIL import Image
+                    image = Image.open(screenshot)
+                    
+                    # Save to BytesIO
+                    img_buffer = BytesIO()
+                    image.save(img_buffer, format='PNG')
+                    img_buffer.seek(0)
+                    
+                    # Add to document
+                    doc.add_picture(img_buffer, width=Inches(6))
+                    doc.add_paragraph()
+                    
+                except Exception as e:
+                    logger.error(f"Error adding screenshot: {e}")
+                    doc.add_paragraph(f"[Error loading screenshot {idx + 1}]")
+        
+        # Add raw data appendix if requested
+        if include_appendix and st.session_state.get('return_summary'):
+            doc.add_page_break()
+            doc.add_heading('APPENDIX C: Raw Data Summary', level=1)
+            doc.add_paragraph("Top 10 Products by Return Rate:")
+            
+            # Add summary table
+            summary = st.session_state.metrics['return_summary'].head(10)
+            table = doc.add_table(rows=len(summary) + 1, cols=4)
+            table.style = 'Light Grid Accent 1'
+            
+            # Headers
+            headers = ['SKU', 'Units Sold', 'Units Returned', 'Return Rate (%)']
+            for i, header in enumerate(headers):
+                table.rows[0].cells[i].text = header
+            
+            # Data
+            for idx, row in summary.iterrows():
+                table.rows[idx + 1].cells[0].text = str(row['sku'])
+                table.rows[idx + 1].cells[1].text = str(int(row['total_sold']))
+                table.rows[idx + 1].cells[2].text = str(int(row['total_returned']))
+                table.rows[idx + 1].cells[3].text = f"{row['return_rate']:.1f}%"
+        
+        # Save to BytesIO
+        bio = BytesIO()
+        doc.save(bio)
+        bio.seek(0)
+        
+        return bio
+        
+    except Exception as e:
+        logger.error(f"Error creating enhanced document: {e}")
+        return None
 
 def generate_template_content():
     """Generate basic template content without AI"""

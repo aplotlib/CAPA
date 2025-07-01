@@ -9,6 +9,7 @@ from the modules located in the 'src' directory.
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+from io import StringIO
 
 # Import functions from the new backend modules
 from src.parsers import parse_file
@@ -24,11 +25,25 @@ st.set_page_config(
     layout="wide"
 )
 
-# Professional medical device styling (remains unchanged)
 st.markdown("""
 <style>
-    /* CSS Styles go here - unchanged from your original file */
-    /* ... */
+    .main-header {
+        background-color: #00466B;
+        color: white;
+        padding: 20px;
+        border-radius: 10px;
+        text-align: center;
+        margin-bottom: 30px;
+    }
+    .stMetric {
+        background-color: #F0F2F6;
+        border-radius: 10px;
+        padding: 10px;
+        border: 1px solid #E0E0E0;
+    }
+    .stButton>button {
+        width: 100%;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -98,6 +113,52 @@ def process_uploaded_files(sales_files, returns_files):
 
 
 # --- UI Components ---
+def display_manual_entry_form():
+    """Displays a form for manual data entry."""
+    st.markdown("#### Manually Enter Sales and Returns Data")
+    
+    with st.form("manual_data_form"):
+        st.subheader("Sales Data")
+        sales_manual_data = st.text_area(
+            "Enter sales data (CSV format). Required columns: sku, quantity.",
+            "sku,quantity\nSKU001,50\nSKU002,30",
+            height=150
+        )
+
+        st.subheader("Returns Data")
+        returns_manual_data = st.text_area(
+            "Enter returns data (CSV format). Required columns: return_date, sku, quantity, reason.",
+            "return_date,sku,quantity,reason\n2023-10-03,SKU001,2,Defective\n2023-10-04,SKU002,1,Wrong size",
+            height=150
+        )
+        
+        submitted = st.form_submit_button("Process Manual Data")
+
+        if submitted:
+            with st.spinner("Processing manual data..."):
+                try:
+                    # Process manual sales data
+                    sales_df = pd.read_csv(StringIO(sales_manual_data))
+                    st.session_state.sales_df = standardize_sales_data(sales_df)
+                    
+                    # Process manual returns data
+                    returns_df = pd.read_csv(StringIO(returns_manual_data))
+                    st.session_state.returns_df = standardize_returns_data(returns_df)
+
+                    # Run Analysis
+                    if st.session_state.sales_df is not None and not st.session_state.sales_df.empty and \
+                       st.session_state.returns_df is not None and not st.session_state.returns_df.empty:
+                        st.session_state.analysis_results = run_full_analysis(
+                            st.session_state.sales_df,
+                            st.session_state.returns_df
+                        )
+                        st.success("✅ Manual data processed and analyzed successfully!")
+                    else:
+                        st.error("⚠️ Could not process the manual data. Please ensure the data has the correct column headers (e.g., 'sku', 'quantity', 'return_date', 'reason').")
+                except Exception as e:
+                    st.error(f"An error occurred while processing manual data: {e}")
+
+
 def display_metrics_dashboard(results):
     """Displays the main metrics dashboard."""
     if not results or 'overall_return_rate' not in results:
@@ -120,22 +181,43 @@ def display_capa_form():
     """Displays the form for entering CAPA details."""
     st.markdown("## CAPA Information - ISO 13485 Compliant")
 
+    # Pre-fill form with data from analysis if available
+    prefill_sku = ""
+    prefill_product = ""
+    if st.session_state.analysis_results and not st.session_state.analysis_results['return_summary'].empty:
+        top_returned_sku = st.session_state.analysis_results['return_summary'].iloc[0]['sku']
+        prefill_sku = top_returned_sku
+        prefill_product = top_returned_sku # Assuming SKU is the product identifier
+
     with st.form("capa_form"):
-        # CAPA Form fields remain the same as your original file
-        # ...
         capa_number = st.text_input("CAPA Number*", value=f"CAPA-{datetime.now().strftime('%Y%m%d')}-001")
-        # ... more fields ...
-        preventive_action = st.text_area("Preventive Actions*", height=150)
+        product_name = st.text_input("Product Name*", value=prefill_product)
+        sku = st.text_input("Primary SKU*", value=prefill_sku)
+        prepared_by = st.text_input("Prepared By*")
+        date = st.date_input("Date*", value=datetime.now())
+        
+        severity = st.selectbox("Severity Assessment*", ["Critical", "Major", "Minor"])
+        
+        issue_description = st.text_area("Issue Description*", height=150, placeholder="Provide a detailed problem statement including scope and impact.")
+        root_cause = st.text_area("Root Cause Analysis*", height=150, placeholder="Describe the investigation methodology (e.g., 5 Whys, Fishbone) and findings.")
+        corrective_action = st.text_area("Corrective Actions*", height=150, placeholder="Describe the actions to correct the issue, including an implementation timeline.")
+        preventive_action = st.text_area("Preventive Actions*", height=150, placeholder="Describe actions to prevent recurrence and include a plan for monitoring effectiveness.")
         
         submitted = st.form_submit_button("💾 Save CAPA Data", type="primary")
 
         if submitted:
             capa_data = {
                 'capa_number': capa_number,
-                # ... gather all other form fields ...
+                'product': product_name,
+                'sku': sku,
+                'prepared_by': prepared_by,
+                'date': date.strftime('%Y-%m-%d'),
+                'severity': severity,
+                'issue_description': issue_description,
+                'root_cause': root_cause,
+                'corrective_action': corrective_action,
                 'preventive_action': preventive_action
             }
-            # Validate and save
             is_valid, issues = validate_capa_data(capa_data)
             if is_valid:
                 st.session_state.capa_data = capa_data
@@ -150,7 +232,7 @@ def display_document_generation():
     st.markdown("## Generate CAPA Document")
 
     if not st.session_state.capa_data or not st.session_state.analysis_results:
-        st.warning("⚠️ Please upload data and complete the CAPA form before generating a document.")
+        st.warning("⚠️ Please process data and complete the CAPA form before generating a document.")
         return
 
     if st.button("🚀 Generate CAPA Document", type="primary"):
@@ -187,21 +269,33 @@ def main():
 
     with st.sidebar:
         st.header("📁 Data Input")
-        sales_files = st.file_uploader(
-            "Upload Sales Data",
-            type=['csv', 'xlsx', 'xls', 'txt'],
-            accept_multiple_files=True
+        input_method = st.radio(
+            "Choose your data input method:",
+            ('File Upload', 'Manual Entry'),
+            help="Choose 'File Upload' to analyze Excel, CSV, or other documents. Choose 'Manual Entry' to paste in your own data."
         )
-        returns_files = st.file_uploader(
-            "Upload Returns Data",
-            type=['csv', 'xlsx', 'xls', 'txt', 'pdf', 'docx'],
-            accept_multiple_files=True
-        )
-        if st.button("Process Files", type="primary"):
-            if not sales_files or not returns_files:
-                st.warning("Please upload both sales and returns data.")
-            else:
-                process_uploaded_files(sales_files, returns_files)
+
+        st.markdown("---")
+
+        if input_method == 'File Upload':
+            sales_files = st.file_uploader(
+                "Upload Sales Data",
+                type=['csv', 'xlsx', 'xls', 'txt'],
+                accept_multiple_files=True
+            )
+            returns_files = st.file_uploader(
+                "Upload Returns Data",
+                type=['csv', 'xlsx', 'xls', 'txt', 'pdf', 'docx'],
+                accept_multiple_files=True
+            )
+            if st.button("Process Files", type="primary"):
+                if not sales_files or not returns_files:
+                    st.warning("Please upload both sales and returns data.")
+                else:
+                    process_uploaded_files(sales_files, returns_files)
+        
+        elif input_method == 'Manual Entry':
+            display_manual_entry_form()
 
     # Main page tabs
     tab1, tab2, tab3 = st.tabs(["📊 Dashboard", "📋 CAPA Form", "📄 Document Generation"])
@@ -209,11 +303,16 @@ def main():
     with tab1:
         if st.session_state.analysis_results:
             display_metrics_dashboard(st.session_state.analysis_results)
-            # You can add more charts and tables here using the data in st.session_state.analysis_results
             st.markdown("### Return Rate by Product")
             st.dataframe(st.session_state.analysis_results['return_summary'])
+
+            st.markdown("### Quality Hotspots (High Volume of Quality-Related Returns)")
+            st.dataframe(st.session_state.analysis_results['quality_hotspots'])
+            
+            st.markdown("### Return Reason Categories")
+            st.bar_chart(st.session_state.analysis_results['categorized_returns_df']['category'].value_counts())
         else:
-            st.info("Upload and process files to see the dashboard.")
+            st.info("Upload and process files or enter data manually to see the dashboard.")
 
     with tab2:
         display_capa_form()

@@ -54,6 +54,7 @@ def initialize_session_state():
     state_defaults = {
         'sales_df': pd.DataFrame(),
         'returns_df': pd.DataFrame(),
+        'misc_df': pd.DataFrame(), # Added for miscellaneous files
         'analysis_results': None,
         'capa_data': {}
     }
@@ -76,7 +77,7 @@ def display_header():
 
 
 # --- Backend Orchestration ---
-def process_uploaded_files(sales_files, returns_files):
+def process_uploaded_files(sales_files, returns_files, misc_files):
     """
     Orchestrates the parsing, cleaning, and analysis of uploaded files.
     """
@@ -101,15 +102,25 @@ def process_uploaded_files(sales_files, returns_files):
                     all_returns.append(std_df)
         st.session_state.returns_df = combine_dataframes(all_returns)
 
-        # Run Analysis
+        # Process Miscellaneous Files
+        all_misc = []
+        for file in misc_files:
+            parsed_df = parse_file(file, file.name)
+            if parsed_df is not None:
+                all_misc.append(parsed_df)
+        st.session_state.misc_df = combine_dataframes(all_misc)
+
+        # Run Analysis only if sales and returns data are present
         if not st.session_state.sales_df.empty and not st.session_state.returns_df.empty:
             st.session_state.analysis_results = run_full_analysis(
                 st.session_state.sales_df,
                 st.session_state.returns_df
             )
-            st.success("✅ Files processed and analyzed successfully!")
+            st.success("✅ Sales and Returns data processed and analyzed successfully!")
+        elif not sales_files and not returns_files and not st.session_state.misc_df.empty:
+            st.success("✅ Miscellaneous files processed successfully!")
         else:
-            st.warning("⚠️ Could not process all files or data is missing. Please check files and try again.")
+            st.warning("⚠️ Could not process all required files. Please ensure both Sales and Returns data are uploaded for a full analysis.")
 
 
 # --- UI Components ---
@@ -181,13 +192,12 @@ def display_capa_form():
     """Displays the form for entering CAPA details."""
     st.markdown("## CAPA Information - ISO 13485 Compliant")
 
-    # Pre-fill form with data from analysis if available
     prefill_sku = ""
     prefill_product = ""
     if st.session_state.analysis_results and not st.session_state.analysis_results['return_summary'].empty:
         top_returned_sku = st.session_state.analysis_results['return_summary'].iloc[0]['sku']
         prefill_sku = top_returned_sku
-        prefill_product = top_returned_sku # Assuming SKU is the product identifier
+        prefill_product = top_returned_sku
 
     with st.form("capa_form"):
         capa_number = st.text_input("CAPA Number*", value=f"CAPA-{datetime.now().strftime('%Y%m%d')}-001")
@@ -207,15 +217,10 @@ def display_capa_form():
 
         if submitted:
             capa_data = {
-                'capa_number': capa_number,
-                'product': product_name,
-                'sku': sku,
-                'prepared_by': prepared_by,
-                'date': date.strftime('%Y-%m-%d'),
-                'severity': severity,
-                'issue_description': issue_description,
-                'root_cause': root_cause,
-                'corrective_action': corrective_action,
+                'capa_number': capa_number, 'product': product_name, 'sku': sku,
+                'prepared_by': prepared_by, 'date': date.strftime('%Y-%m-%d'),
+                'severity': severity, 'issue_description': issue_description,
+                'root_cause': root_cause, 'corrective_action': corrective_action,
                 'preventive_action': preventive_action
             }
             is_valid, issues = validate_capa_data(capa_data)
@@ -238,22 +243,15 @@ def display_document_generation():
     if st.button("🚀 Generate CAPA Document", type="primary"):
         with st.spinner("Generating document with AI..."):
             try:
-                # Initialize the generator with API key from secrets
-                generator = CapaDocumentGenerator(
-                    anthropic_api_key=st.secrets.get("ANTHROPIC_API_KEY")
-                )
-                # Generate structured content using AI
+                generator = CapaDocumentGenerator(anthropic_api_key=st.secrets.get("ANTHROPIC_API_KEY"))
                 ai_content = generator.generate_ai_structured_content(
-                    st.session_state.capa_data,
-                    st.session_state.analysis_results
+                    st.session_state.capa_data, st.session_state.analysis_results
                 )
                 
                 if ai_content:
-                    # Export the content to a DOCX file
                     doc_buffer = generator.export_to_docx(st.session_state.capa_data, ai_content)
                     st.download_button(
-                        label="📥 Download CAPA Document",
-                        data=doc_buffer,
+                        label="📥 Download CAPA Document", data=doc_buffer,
                         file_name=f"CAPA_{st.session_state.capa_data['capa_number']}.docx",
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     )
@@ -270,29 +268,27 @@ def main():
     with st.sidebar:
         st.header("📁 Data Input")
         input_method = st.radio(
-            "Choose your data input method:",
-            ('File Upload', 'Manual Entry'),
-            help="Choose 'File Upload' to analyze Excel, CSV, or other documents. Choose 'Manual Entry' to paste in your own data."
+            "Choose your data input method:", ('File Upload', 'Manual Entry'),
+            help="Choose 'File Upload' to analyze documents. Choose 'Manual Entry' to paste in data."
         )
-
         st.markdown("---")
 
         if input_method == 'File Upload':
-            sales_files = st.file_uploader(
-                "Upload Sales Data",
-                type=['csv', 'xlsx', 'xls', 'txt'],
+            sales_files = st.file_uploader("Upload Sales Data", type=['csv', 'xlsx', 'xls', 'txt'], accept_multiple_files=True)
+            returns_files = st.file_uploader("Upload Returns Data", type=['csv', 'xlsx', 'xls', 'txt', 'pdf', 'docx'], accept_multiple_files=True)
+            
+            # New uploader for miscellaneous files
+            misc_files = st.file_uploader(
+                "Upload Miscellaneous Data (e.g., Return Reasons, Notes)",
+                type=['csv', 'xlsx', 'xls', 'txt', 'pdf', 'docx', 'png', 'jpg', 'jpeg'],
                 accept_multiple_files=True
             )
-            returns_files = st.file_uploader(
-                "Upload Returns Data",
-                type=['csv', 'xlsx', 'xls', 'txt', 'pdf', 'docx'],
-                accept_multiple_files=True
-            )
+
             if st.button("Process Files", type="primary"):
-                if not sales_files or not returns_files:
-                    st.warning("Please upload both sales and returns data.")
+                if not sales_files and not returns_files and not misc_files:
+                    st.warning("Please upload at least one file.")
                 else:
-                    process_uploaded_files(sales_files, returns_files)
+                    process_uploaded_files(sales_files, returns_files, misc_files)
         
         elif input_method == 'Manual Entry':
             display_manual_entry_form()
@@ -305,14 +301,17 @@ def main():
             display_metrics_dashboard(st.session_state.analysis_results)
             st.markdown("### Return Rate by Product")
             st.dataframe(st.session_state.analysis_results['return_summary'])
-
             st.markdown("### Quality Hotspots (High Volume of Quality-Related Returns)")
             st.dataframe(st.session_state.analysis_results['quality_hotspots'])
-            
             st.markdown("### Return Reason Categories")
             st.bar_chart(st.session_state.analysis_results['categorized_returns_df']['category'].value_counts())
         else:
-            st.info("Upload and process files or enter data manually to see the dashboard.")
+            st.info("Upload and process files or enter data manually to see the analysis dashboard.")
+
+        # Display miscellaneous data if it exists
+        if not st.session_state.misc_df.empty:
+            st.markdown("### Miscellaneous Uploaded Data")
+            st.dataframe(st.session_state.misc_df)
 
     with tab2:
         display_capa_form()

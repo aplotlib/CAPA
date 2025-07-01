@@ -1,7 +1,7 @@
 """
-Medical Device CAPA Tool
+Medical Device CAPA Tool - Enhanced Version
 A comprehensive quality management system for analyzing returns, sales data, 
-and generating AI-powered CAPA documentation
+and generating AI-powered CAPA documentation with multi-format support
 """
 
 import streamlit as st
@@ -25,6 +25,15 @@ import re
 from PIL import Image
 import pytesseract
 import logging
+import requests
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
+import pdfplumber
+import PyPDF2
+import docx2txt
+import openpyxl
+import csv
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -114,6 +123,24 @@ st.markdown("""
     .metric-change {
         font-size: 0.9rem;
         margin-top: 0.5rem;
+    }
+    
+    /* Manual entry forms */
+    .manual-entry-section {
+        background: white;
+        padding: 2rem;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        margin-bottom: 1rem;
+    }
+    
+    .manual-entry-header {
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: #1f2937;
+        margin-bottom: 1rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 2px solid #e5e7eb;
     }
     
     /* Status indicators */
@@ -210,6 +237,21 @@ st.markdown("""
         color: #1e3a8a;
     }
     
+    /* Screenshot gallery */
+    .screenshot-gallery {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+    
+    .screenshot-item {
+        background: white;
+        padding: 0.5rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+    
     /* Buttons */
     .stButton > button {
         font-weight: 500;
@@ -222,6 +264,24 @@ st.markdown("""
         border: 2px dashed #d1d5db;
         border-radius: 8px;
         padding: 1rem;
+    }
+    
+    /* Google integration status */
+    .google-status {
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        font-size: 0.875rem;
+        margin: 0.5rem 0;
+    }
+    
+    .google-connected {
+        background-color: #d1fae5;
+        color: #059669;
+    }
+    
+    .google-disconnected {
+        background-color: #fee2e2;
+        color: #dc2626;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -237,8 +297,486 @@ if 'capa_data' not in st.session_state:
     st.session_state.capa_data = {}
 if 'screenshots' not in st.session_state:
     st.session_state.screenshots = []
+if 'manual_entries' not in st.session_state:
+    st.session_state.manual_entries = {'sales': [], 'returns': []}
 if 'ai_client' not in st.session_state:
     st.session_state.ai_client = None
+if 'google_creds' not in st.session_state:
+    st.session_state.google_creds = None
+
+# --- Enhanced File Processing ---
+class UniversalFileProcessor:
+    """Process various file formats including Google Docs/Sheets"""
+    
+    SUPPORTED_FORMATS = {
+        'spreadsheet': ['.csv', '.tsv', '.xlsx', '.xls', '.ods'],
+        'document': ['.pdf', '.docx', '.doc', '.txt', '.rtf'],
+        'image': ['.png', '.jpg', '.jpeg', '.gif', '.bmp'],
+        'google': ['application/vnd.google-apps.spreadsheet', 'application/vnd.google-apps.document']
+    }
+    
+    @staticmethod
+    def process_file(file, filename: str, file_type: str = None) -> pd.DataFrame:
+        """Process any supported file type and return standardized DataFrame"""
+        
+        if not file_type:
+            file_type = UniversalFileProcessor.detect_file_type(filename)
+        
+        try:
+            # Spreadsheet formats
+            if filename.endswith('.csv'):
+                return pd.read_csv(file, encoding='utf-8', error_bad_lines=False)
+            
+            elif filename.endswith('.tsv') or filename.endswith('.txt'):
+                # Try tab-delimited first
+                try:
+                    df = pd.read_csv(file, sep='\t', encoding='utf-8', error_bad_lines=False)
+                    if len(df.columns) > 1:
+                        return df
+                except:
+                    pass
+                # Try comma-delimited
+                return pd.read_csv(file, encoding='utf-8', error_bad_lines=False)
+            
+            elif filename.endswith(('.xlsx', '.xls')):
+                # Read all sheets and combine
+                excel_file = pd.ExcelFile(file)
+                dfs = []
+                for sheet_name in excel_file.sheet_names:
+                    df = pd.read_excel(excel_file, sheet_name=sheet_name)
+                    df['sheet_name'] = sheet_name
+                    dfs.append(df)
+                return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+            
+            # Document formats
+            elif filename.endswith('.pdf'):
+                return UniversalFileProcessor.extract_from_pdf(file)
+            
+            elif filename.endswith(('.docx', '.doc')):
+                return UniversalFileProcessor.extract_from_word(file)
+            
+            # Image formats
+            elif filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):
+                return UniversalFileProcessor.extract_from_image(file)
+            
+            else:
+                raise ValueError(f"Unsupported file format: {filename}")
+                
+        except Exception as e:
+            logger.error(f"Error processing file {filename}: {e}")
+            raise
+    
+    @staticmethod
+    def extract_from_pdf(pdf_file) -> pd.DataFrame:
+        """Extract data from PDF using multiple methods"""
+        all_data = []
+        
+        try:
+            with pdfplumber.open(pdf_file) as pdf:
+                for page in pdf.pages:
+                    # Extract tables
+                    tables = page.extract_tables()
+                    for table in tables:
+                        if table and len(table) > 1:
+                            df = pd.DataFrame(table[1:], columns=table[0])
+                            all_data.append(df)
+                    
+                    # Extract text and parse
+                    text = page.extract_text()
+                    if text:
+                        # Look for structured data patterns
+                        lines = text.split('\n')
+                        # Parse lines that look like data rows
+                        data_rows = UniversalFileProcessor.parse_text_data(lines)
+                        if data_rows:
+                            all_data.append(pd.DataFrame(data_rows))
+            
+            if all_data:
+                return pd.concat(all_data, ignore_index=True)
+            
+        except Exception as e:
+            logger.error(f"PDF extraction error: {e}")
+        
+        return pd.DataFrame()
+    
+    @staticmethod
+    def extract_from_word(doc_file) -> pd.DataFrame:
+        """Extract data from Word documents"""
+        try:
+            # Extract all text
+            text = docx2txt.process(doc_file)
+            
+            # Look for tables in the document
+            doc = Document(doc_file)
+            all_tables = []
+            
+            for table in doc.tables:
+                data = []
+                for row in table.rows:
+                    row_data = [cell.text.strip() for cell in row.cells]
+                    data.append(row_data)
+                
+                if data:
+                    df = pd.DataFrame(data[1:], columns=data[0])
+                    all_tables.append(df)
+            
+            if all_tables:
+                return pd.concat(all_tables, ignore_index=True)
+            
+            # If no tables, try to parse structured text
+            lines = text.split('\n')
+            data_rows = UniversalFileProcessor.parse_text_data(lines)
+            if data_rows:
+                return pd.DataFrame(data_rows)
+            
+        except Exception as e:
+            logger.error(f"Word extraction error: {e}")
+        
+        return pd.DataFrame()
+    
+    @staticmethod
+    def extract_from_image(image_file) -> pd.DataFrame:
+        """Extract text/data from images using OCR"""
+        try:
+            # Open image
+            image = Image.open(image_file)
+            
+            # Extract text using OCR
+            text = pytesseract.image_to_string(image)
+            
+            # Try to parse structured data
+            lines = text.split('\n')
+            data_rows = UniversalFileProcessor.parse_text_data(lines)
+            
+            if data_rows:
+                return pd.DataFrame(data_rows)
+            
+            # If no structured data, return text as single column
+            return pd.DataFrame({'extracted_text': [text]})
+            
+        except Exception as e:
+            logger.error(f"Image extraction error: {e}")
+            return pd.DataFrame()
+    
+    @staticmethod
+    def parse_text_data(lines: List[str]) -> List[Dict]:
+        """Parse text lines looking for structured data"""
+        data_rows = []
+        
+        # Common patterns for data extraction
+        patterns = {
+            'order_id': re.compile(r'\b(\d{3}-\d{7}-\d{7})\b'),
+            'sku': re.compile(r'\b([A-Z]{2,4}\d{3,6}[A-Z0-9]*)\b'),
+            'quantity': re.compile(r'\b(\d+)\s*(?:units?|qty|quantity|pcs?)\b', re.I),
+            'date': re.compile(r'(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\w{3,9}\s+\d{1,2},?\s+\d{4})'),
+            'price': re.compile(r'\$?\s*(\d+\.?\d*)')
+        }
+        
+        for line in lines:
+            if not line.strip():
+                continue
+            
+            row_data = {}
+            
+            # Try to extract data using patterns
+            for field, pattern in patterns.items():
+                match = pattern.search(line)
+                if match:
+                    row_data[field] = match.group(1)
+            
+            if row_data:
+                data_rows.append(row_data)
+        
+        return data_rows
+    
+    @staticmethod
+    def detect_file_type(filename: str) -> str:
+        """Detect file type from filename"""
+        filename_lower = filename.lower()
+        
+        for category, extensions in UniversalFileProcessor.SUPPORTED_FORMATS.items():
+            if any(filename_lower.endswith(ext) for ext in extensions):
+                return category
+        
+        return 'unknown'
+
+class GoogleIntegration:
+    """Handle Google Docs and Sheets integration"""
+    
+    @staticmethod
+    def authenticate():
+        """Authenticate with Google services"""
+        try:
+            # Check for service account credentials in secrets
+            if 'gcp_service_account' in st.secrets:
+                creds = service_account.Credentials.from_service_account_info(
+                    st.secrets['gcp_service_account'],
+                    scopes=[
+                        'https://www.googleapis.com/auth/drive.readonly',
+                        'https://www.googleapis.com/auth/spreadsheets.readonly',
+                        'https://www.googleapis.com/auth/documents.readonly'
+                    ]
+                )
+                return creds
+            return None
+        except Exception as e:
+            logger.error(f"Google authentication error: {e}")
+            return None
+    
+    @staticmethod
+    def get_google_sheet_data(sheet_id: str, range_name: str = 'A:Z') -> pd.DataFrame:
+        """Fetch data from Google Sheets"""
+        try:
+            creds = GoogleIntegration.authenticate()
+            if not creds:
+                st.error("Google Sheets authentication failed")
+                return pd.DataFrame()
+            
+            service = build('sheets', 'v4', credentials=creds)
+            
+            # Get data
+            result = service.spreadsheets().values().get(
+                spreadsheetId=sheet_id,
+                range=range_name
+            ).execute()
+            
+            values = result.get('values', [])
+            
+            if not values:
+                return pd.DataFrame()
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(values[1:], columns=values[0])
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error fetching Google Sheet: {e}")
+            st.error(f"Failed to fetch Google Sheet: {str(e)}")
+            return pd.DataFrame()
+    
+    @staticmethod
+    def get_google_doc_data(doc_id: str) -> str:
+        """Fetch content from Google Docs"""
+        try:
+            creds = GoogleIntegration.authenticate()
+            if not creds:
+                return ""
+            
+            service = build('docs', 'v1', credentials=creds)
+            
+            # Get document
+            document = service.documents().get(documentId=doc_id).execute()
+            
+            # Extract text
+            content = ''
+            for element in document.get('body', {}).get('content', []):
+                if 'paragraph' in element:
+                    for text_element in element['paragraph'].get('elements', []):
+                        if 'textRun' in text_element:
+                            content += text_element['textRun'].get('content', '')
+            
+            return content
+            
+        except Exception as e:
+            logger.error(f"Error fetching Google Doc: {e}")
+            return ""
+
+class ManualDataEntry:
+    """Handle manual data entry forms"""
+    
+    @staticmethod
+    def create_sales_entry_form():
+        """Create form for manual sales data entry"""
+        st.markdown('<div class="manual-entry-section">', unsafe_allow_html=True)
+        st.markdown('<div class="manual-entry-header">📊 Manual Sales Entry</div>', unsafe_allow_html=True)
+        
+        with st.form("manual_sales_entry"):
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                sku = st.text_input("SKU", placeholder="e.g., LVA3100BLK")
+                product_name = st.text_input("Product Name", placeholder="e.g., Wheelchair Bag")
+                channel = st.selectbox("Sales Channel", ["Amazon", "B2B", "Direct", "Other"])
+            
+            with col2:
+                quantity = st.number_input("Units Sold", min_value=0, value=0)
+                date_from = st.date_input("Sales Period From", value=datetime.now() - timedelta(days=30))
+                date_to = st.date_input("Sales Period To", value=datetime.now())
+            
+            with col3:
+                order_count = st.number_input("Number of Orders", min_value=0, value=0)
+                revenue = st.number_input("Total Revenue ($)", min_value=0.0, value=0.0, format="%.2f")
+                notes = st.text_area("Notes", placeholder="Any additional information")
+            
+            submitted = st.form_submit_button("Add Sales Data", type="primary")
+            
+            if submitted and sku and quantity > 0:
+                entry = {
+                    'sku': sku,
+                    'product_name': product_name,
+                    'channel': channel,
+                    'quantity': quantity,
+                    'date_from': date_from,
+                    'date_to': date_to,
+                    'order_count': order_count,
+                    'revenue': revenue,
+                    'notes': notes,
+                    'entry_date': datetime.now()
+                }
+                
+                st.session_state.manual_entries['sales'].append(entry)
+                st.success(f"✅ Added sales data for {sku}")
+                
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    @staticmethod
+    def create_returns_entry_form():
+        """Create form for manual returns data entry"""
+        st.markdown('<div class="manual-entry-section">', unsafe_allow_html=True)
+        st.markdown('<div class="manual-entry-header">📋 Manual Returns Entry</div>', unsafe_allow_html=True)
+        
+        with st.form("manual_returns_entry"):
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                sku = st.text_input("SKU", placeholder="e.g., LVA3100BLK", key="return_sku")
+                order_id = st.text_input("Order ID", placeholder="e.g., 114-1234567-1234567")
+                return_date = st.date_input("Return Date", value=datetime.now())
+            
+            with col2:
+                quantity = st.number_input("Units Returned", min_value=1, value=1, key="return_qty")
+                reason = st.selectbox("Return Reason", [
+                    "Defective/Doesn't Work",
+                    "Not Compatible",
+                    "Wrong Item Sent",
+                    "Not As Described",
+                    "No Longer Needed",
+                    "Bought By Mistake",
+                    "Damaged in Shipping",
+                    "Size/Fit Issues",
+                    "Quality Issues",
+                    "Other"
+                ])
+                
+            with col3:
+                customer_comments = st.text_area("Customer Comments", placeholder="Customer's return comments")
+                internal_notes = st.text_area("Internal Notes", placeholder="Quality team notes")
+            
+            submitted = st.form_submit_button("Add Return Data", type="primary")
+            
+            if submitted and sku:
+                entry = {
+                    'sku': sku,
+                    'order_id': order_id,
+                    'return_date': return_date,
+                    'quantity': quantity,
+                    'reason': reason,
+                    'customer_comments': customer_comments,
+                    'internal_notes': internal_notes,
+                    'entry_date': datetime.now()
+                }
+                
+                st.session_state.manual_entries['returns'].append(entry)
+                st.success(f"✅ Added return data for {sku}")
+                
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    @staticmethod
+    def display_manual_entries():
+        """Display current manual entries"""
+        if st.session_state.manual_entries['sales'] or st.session_state.manual_entries['returns']:
+            st.markdown('<div class="section-header"><h2>📝 Manual Entries Summary</h2></div>', unsafe_allow_html=True)
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.session_state.manual_entries['sales']:
+                    st.subheader("Sales Entries")
+                    sales_df = pd.DataFrame(st.session_state.manual_entries['sales'])
+                    st.dataframe(sales_df[['sku', 'quantity', 'channel', 'date_from', 'date_to']], use_container_width=True)
+            
+            with col2:
+                if st.session_state.manual_entries['returns']:
+                    st.subheader("Returns Entries")
+                    returns_df = pd.DataFrame(st.session_state.manual_entries['returns'])
+                    st.dataframe(returns_df[['sku', 'quantity', 'reason', 'return_date']], use_container_width=True)
+
+# --- Screenshot Processing ---
+class ScreenshotProcessor:
+    """Process and analyze screenshots"""
+    
+    @staticmethod
+    def process_screenshots(screenshots: List) -> Dict:
+        """Extract data from screenshots using OCR"""
+        extracted_data = []
+        
+        for idx, screenshot in enumerate(screenshots):
+            try:
+                # Open image
+                image = Image.open(screenshot)
+                
+                # Extract text
+                text = pytesseract.image_to_string(image)
+                
+                # Try to identify data type
+                data_type = ScreenshotProcessor.identify_screenshot_type(text)
+                
+                # Extract relevant information
+                extracted_info = {
+                    'screenshot_id': idx + 1,
+                    'filename': screenshot.name,
+                    'type': data_type,
+                    'text': text,
+                    'extracted_data': ScreenshotProcessor.extract_structured_data(text, data_type)
+                }
+                
+                extracted_data.append(extracted_info)
+                
+            except Exception as e:
+                logger.error(f"Error processing screenshot {screenshot.name}: {e}")
+        
+        return {
+            'count': len(screenshots),
+            'processed': len(extracted_data),
+            'data': extracted_data
+        }
+    
+    @staticmethod
+    def identify_screenshot_type(text: str) -> str:
+        """Identify the type of data in screenshot"""
+        text_lower = text.lower()
+        
+        if 'return' in text_lower and ('reason' in text_lower or 'refund' in text_lower):
+            return 'returns_data'
+        elif 'order' in text_lower and 'quantity' in text_lower:
+            return 'sales_data'
+        elif 'defect' in text_lower or 'quality' in text_lower:
+            return 'quality_report'
+        elif 'complaint' in text_lower or 'issue' in text_lower:
+            return 'complaint'
+        else:
+            return 'unknown'
+    
+    @staticmethod
+    def extract_structured_data(text: str, data_type: str) -> Dict:
+        """Extract structured data based on type"""
+        extracted = {}
+        
+        # Common patterns
+        patterns = {
+            'order_id': re.compile(r'\b(\d{3}-\d{7}-\d{7})\b'),
+            'sku': re.compile(r'\b([A-Z]{2,4}\d{3,6}[A-Z0-9]*)\b'),
+            'date': re.compile(r'(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})'),
+            'quantity': re.compile(r'(\d+)\s*(?:units?|qty|quantity)', re.I),
+            'percentage': re.compile(r'(\d+\.?\d*)\s*%')
+        }
+        
+        for field, pattern in patterns.items():
+            matches = pattern.findall(text)
+            if matches:
+                extracted[field] = matches
+        
+        return extracted
 
 # --- Helper Functions ---
 class MetricsCalculator:
@@ -410,6 +948,55 @@ class DataProcessor:
         except Exception as e:
             logger.error(f"Error processing sales data: {e}")
             return None
+    
+    @staticmethod
+    def combine_with_manual_entries(file_data: pd.DataFrame, manual_entries: List[Dict], 
+                                  data_type: str) -> pd.DataFrame:
+        """Combine file data with manual entries"""
+        if not manual_entries:
+            return file_data
+        
+        manual_df = pd.DataFrame(manual_entries)
+        
+        if data_type == 'sales':
+            # Expand date ranges to individual records
+            expanded_records = []
+            for _, entry in manual_df.iterrows():
+                # Create daily records for the period
+                date_range = pd.date_range(entry['date_from'], entry['date_to'])
+                daily_qty = entry['quantity'] / len(date_range)
+                
+                for date in date_range:
+                    record = {
+                        'order_date': date,
+                        'sku': entry['sku'],
+                        'quantity': daily_qty,
+                        'channel': entry.get('channel', 'Manual'),
+                        'order_id': f"MANUAL-{entry['sku']}-{date.strftime('%Y%m%d')}",
+                        'source': 'manual_entry'
+                    }
+                    expanded_records.append(record)
+            
+            manual_processed = pd.DataFrame(expanded_records)
+            
+        else:  # returns
+            manual_processed = manual_df.rename(columns={
+                'return_date': 'return_date',
+                'sku': 'sku',
+                'quantity': 'quantity',
+                'reason': 'reason',
+                'customer_comments': 'customer_comments'
+            })
+            manual_processed['source'] = 'manual_entry'
+            manual_processed['return_id'] = range(len(file_data) + 1, len(file_data) + len(manual_processed) + 1)
+        
+        # Combine data
+        if file_data is not None and not file_data.empty:
+            combined = pd.concat([file_data, manual_processed], ignore_index=True)
+        else:
+            combined = manual_processed
+        
+        return combined
 
 class AIDocumentGenerator:
     """Generate CAPA documents using AI"""
@@ -432,10 +1019,10 @@ class AIDocumentGenerator:
         except Exception as e:
             logger.error(f"Error initializing AI clients: {e}")
     
-    def generate_capa_document(self, capa_data, metrics, quality_issues, use_anthropic=True):
+    def generate_capa_document(self, capa_data, metrics, quality_issues, screenshots_data=None, use_anthropic=True):
         """Generate CAPA document using AI"""
         
-        prompt = self._build_capa_prompt(capa_data, metrics, quality_issues)
+        prompt = self._build_capa_prompt(capa_data, metrics, quality_issues, screenshots_data)
         
         try:
             if use_anthropic and self.anthropic_client:
@@ -472,8 +1059,16 @@ class AIDocumentGenerator:
             logger.error(f"Error generating CAPA document: {e}")
             return None
     
-    def _build_capa_prompt(self, capa_data, metrics, quality_issues):
+    def _build_capa_prompt(self, capa_data, metrics, quality_issues, screenshots_data):
         """Build prompt for CAPA generation"""
+        
+        # Include screenshot insights if available
+        screenshot_insights = ""
+        if screenshots_data and screenshots_data.get('data'):
+            screenshot_insights = "\n\nSCREENSHOT EVIDENCE:"
+            for item in screenshots_data['data']:
+                if item.get('extracted_data'):
+                    screenshot_insights += f"\n- {item['type']}: {item.get('extracted_data', {})}"
         
         prompt = f"""Generate a formal CAPA (Corrective and Preventive Action) report for a medical device quality issue.
 
@@ -494,6 +1089,8 @@ METRICS SUMMARY:
 
 TOP QUALITY ISSUES:
 {quality_issues.to_string() if not quality_issues.empty else 'No specific quality issues identified'}
+
+{screenshot_insights}
 
 PROPOSED CORRECTIVE ACTION:
 {capa_data.get('corrective_action', 'TBD')}
@@ -537,7 +1134,7 @@ Format the response as a professional CAPA document suitable for regulatory subm
         
         return prompt
     
-    def export_to_docx(self, content, capa_data):
+    def export_to_docx(self, content, capa_data, include_screenshots=False, screenshots=[]):
         """Export CAPA content to Word document"""
         try:
             doc = Document()
@@ -570,6 +1167,32 @@ Format the response as a professional CAPA document suitable for regulatory subm
                     else:
                         # Regular paragraph
                         doc.add_paragraph(section.strip())
+            
+            # Add screenshots if requested
+            if include_screenshots and screenshots:
+                doc.add_page_break()
+                doc.add_heading('Supporting Evidence - Screenshots', level=1)
+                
+                for idx, screenshot in enumerate(screenshots):
+                    try:
+                        # Add screenshot
+                        doc.add_paragraph(f"Screenshot {idx + 1}: {screenshot.name}")
+                        
+                        # Convert to image and add to document
+                        image = Image.open(screenshot)
+                        
+                        # Save to BytesIO
+                        img_buffer = BytesIO()
+                        image.save(img_buffer, format='PNG')
+                        img_buffer.seek(0)
+                        
+                        # Add to document (max width 6 inches)
+                        doc.add_picture(img_buffer, width=Inches(6))
+                        doc.add_paragraph()
+                        
+                    except Exception as e:
+                        logger.error(f"Error adding screenshot {idx + 1}: {e}")
+                        doc.add_paragraph(f"[Error loading screenshot {idx + 1}]")
             
             # Add signature section
             doc.add_page_break()
@@ -695,43 +1318,116 @@ def display_quality_alerts(quality_issues):
         </div>
         """, unsafe_allow_html=True)
 
+def display_screenshot_gallery(screenshots):
+    """Display uploaded screenshots in a gallery"""
+    if not screenshots:
+        return
+    
+    st.markdown('<div class="section-header"><h2>📸 Uploaded Screenshots</h2></div>', unsafe_allow_html=True)
+    
+    # Process screenshots
+    screenshot_data = ScreenshotProcessor.process_screenshots(screenshots)
+    st.session_state.screenshot_data = screenshot_data
+    
+    # Display gallery
+    cols = st.columns(4)
+    for idx, (screenshot, info) in enumerate(zip(screenshots, screenshot_data['data'])):
+        with cols[idx % 4]:
+            st.image(screenshot, caption=f"{info['filename']} - {info['type']}", use_container_width=True)
+            
+            # Show extracted data if any
+            if info.get('extracted_data'):
+                with st.expander("Extracted Data"):
+                    st.json(info['extracted_data'])
+
 # --- Main Application ---
 def main():
     display_header()
     
-    # Sidebar for data upload
+    # Sidebar for data input options
     with st.sidebar:
-        st.header("📁 Data Upload")
+        st.header("📁 Data Input Options")
         
-        st.subheader("Sales Data")
-        sales_file = st.file_uploader(
-            "Upload sales data (CSV/Excel)",
-            type=['csv', 'xlsx', 'xls'],
-            help="Should contain: order_date, sku, quantity"
+        input_method = st.radio(
+            "Choose input method:",
+            ["File Upload", "Manual Entry", "Google Integration", "Combined"]
         )
         
-        st.subheader("Returns Data")
-        returns_file = st.file_uploader(
-            "Upload returns data (CSV/TXT)",
-            type=['csv', 'txt', 'xlsx'],
-            help="Amazon FBA returns report or similar format"
-        )
+        if input_method in ["File Upload", "Combined"]:
+            st.subheader("📤 File Upload")
+            
+            st.markdown("**Sales Data**")
+            sales_files = st.file_uploader(
+                "Upload sales data",
+                type=['csv', 'tsv', 'txt', 'xlsx', 'xls', 'pdf', 'docx'],
+                accept_multiple_files=True,
+                help="Supports CSV, TSV, TXT, Excel, PDF, Word formats"
+            )
+            
+            st.markdown("**Returns Data**")
+            returns_files = st.file_uploader(
+                "Upload returns data",
+                type=['csv', 'tsv', 'txt', 'xlsx', 'xls', 'pdf', 'docx'],
+                accept_multiple_files=True,
+                help="Amazon FBA returns, PDFs, or any supported format"
+            )
+            
+            st.markdown("**Screenshots**")
+            screenshots = st.file_uploader(
+                "Upload screenshots",
+                type=['png', 'jpg', 'jpeg', 'gif', 'bmp'],
+                accept_multiple_files=True,
+                help="Upload any relevant screenshots or images"
+            )
+            
+            if st.button("🔄 Process Files", type="primary"):
+                process_uploaded_files(sales_files, returns_files, screenshots)
         
-        st.subheader("Supporting Evidence")
-        screenshots = st.file_uploader(
-            "Upload screenshots",
-            type=['png', 'jpg', 'jpeg'],
-            accept_multiple_files=True,
-            help="Upload relevant screenshots or images"
-        )
-        
-        if st.button("🔄 Process Data", type="primary"):
-            process_uploaded_data(sales_file, returns_file, screenshots)
+        if input_method in ["Google Integration", "Combined"]:
+            st.subheader("🔗 Google Integration")
+            
+            # Check authentication status
+            if st.session_state.google_creds:
+                st.markdown('<div class="google-status google-connected">✅ Google Connected</div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="google-status google-disconnected">❌ Not Connected</div>', unsafe_allow_html=True)
+            
+            # Google Sheets
+            sheet_url = st.text_input("Google Sheets URL", placeholder="https://docs.google.com/spreadsheets/d/...")
+            if sheet_url and st.button("Import Sheet"):
+                import_google_sheet(sheet_url)
+            
+            # Google Docs
+            doc_url = st.text_input("Google Docs URL", placeholder="https://docs.google.com/document/d/...")
+            if doc_url and st.button("Import Doc"):
+                import_google_doc(doc_url)
     
     # Main content area
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "📈 Analysis", "📝 CAPA Form", "📄 Documents"])
+    if input_method in ["Manual Entry", "Combined"]:
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📝 Manual Entry", "📊 Dashboard", "📈 Analysis", "📋 CAPA Form", "📄 Documents"])
+    else:
+        tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "📈 Analysis", "📋 CAPA Form", "📄 Documents"])
     
-    with tab1:
+    if input_method in ["Manual Entry", "Combined"]:
+        with tab1:
+            st.header("Manual Data Entry")
+            
+            # Sales entry
+            ManualDataEntry.create_sales_entry_form()
+            
+            # Returns entry
+            ManualDataEntry.create_returns_entry_form()
+            
+            # Display current entries
+            ManualDataEntry.display_manual_entries()
+            
+            # Process manual data button
+            if st.button("📊 Calculate Metrics from Manual Data", type="primary"):
+                process_manual_data()
+    
+    # Dashboard tab
+    dashboard_tab = tab2 if input_method in ["Manual Entry", "Combined"] else tab1
+    with dashboard_tab:
         if st.session_state.metrics:
             display_metrics_dashboard(st.session_state.metrics)
             
@@ -743,68 +1439,179 @@ def main():
             # Quality alerts
             if 'quality_issues' in st.session_state and not st.session_state.quality_issues.empty:
                 display_quality_alerts(st.session_state.quality_issues)
+            
+            # Screenshots gallery
+            if st.session_state.screenshots:
+                display_screenshot_gallery(st.session_state.screenshots)
         else:
-            st.info("📤 Please upload sales and returns data to view metrics")
+            st.info("📤 Please upload data or enter manual data to view metrics")
     
-    with tab2:
+    # Analysis tab
+    analysis_tab = tab3 if input_method in ["Manual Entry", "Combined"] else tab2
+    with analysis_tab:
         if st.session_state.sales_data is not None and st.session_state.returns_data is not None:
             display_detailed_analysis()
         else:
-            st.info("📤 Please upload data to view analysis")
+            st.info("📤 Please provide data to view analysis")
     
-    with tab3:
+    # CAPA Form tab
+    capa_tab = tab4 if input_method in ["Manual Entry", "Combined"] else tab3
+    with capa_tab:
         display_capa_form()
     
-    with tab4:
+    # Documents tab
+    docs_tab = tab5 if input_method in ["Manual Entry", "Combined"] else tab4
+    with docs_tab:
         display_document_generation()
 
-def process_uploaded_data(sales_file, returns_file, screenshots):
-    """Process uploaded files and calculate metrics"""
+def process_uploaded_files(sales_files, returns_files, screenshots):
+    """Process all uploaded files"""
     
-    with st.spinner("Processing data..."):
-        # Process sales data
-        if sales_file:
-            try:
-                if sales_file.name.endswith('.csv'):
-                    sales_df = pd.read_csv(sales_file)
-                else:
-                    sales_df = pd.read_excel(sales_file)
-                
-                sales_df = DataProcessor.process_sales_data(sales_df)
-                if sales_df is not None:
-                    st.session_state.sales_data = sales_df
-                    st.success(f"✅ Loaded {len(sales_df)} sales records")
-            except Exception as e:
-                st.error(f"Error processing sales file: {e}")
+    with st.spinner("Processing files..."):
+        processor = UniversalFileProcessor()
         
-        # Process returns data
-        if returns_file:
-            try:
-                if returns_file.name.endswith('.txt'):
-                    # Amazon FBA format
-                    content = returns_file.read().decode('utf-8')
-                    returns_df = DataProcessor.process_amazon_fba_returns(content)
-                elif returns_file.name.endswith('.csv'):
-                    returns_df = pd.read_csv(returns_file)
-                    returns_df = DataProcessor.process_sales_data(returns_df)  # Use same processor
-                else:
-                    returns_df = pd.read_excel(returns_file)
-                    returns_df = DataProcessor.process_sales_data(returns_df)
-                
-                if returns_df is not None:
-                    st.session_state.returns_data = returns_df
-                    st.success(f"✅ Loaded {len(returns_df)} return records")
-            except Exception as e:
-                st.error(f"Error processing returns file: {e}")
+        # Process sales files
+        all_sales_data = []
+        if sales_files:
+            for file in sales_files:
+                try:
+                    df = processor.process_file(file, file.name)
+                    if not df.empty:
+                        sales_df = DataProcessor.process_sales_data(df)
+                        if sales_df is not None:
+                            all_sales_data.append(sales_df)
+                            st.success(f"✅ Processed {file.name}: {len(sales_df)} sales records")
+                except Exception as e:
+                    st.error(f"Error processing {file.name}: {e}")
+            
+            if all_sales_data:
+                combined_sales = pd.concat(all_sales_data, ignore_index=True)
+                # Combine with manual entries
+                combined_sales = DataProcessor.combine_with_manual_entries(
+                    combined_sales, 
+                    st.session_state.manual_entries['sales'],
+                    'sales'
+                )
+                st.session_state.sales_data = combined_sales
+                st.success(f"✅ Total sales records: {len(combined_sales)}")
         
-        # Process screenshots
+        # Process returns files
+        all_returns_data = []
+        if returns_files:
+            for file in returns_files:
+                try:
+                    # Check if it's an FBA returns file
+                    if file.name.endswith('.txt'):
+                        content = file.read().decode('utf-8')
+                        if 'return-date' in content and 'order-id' in content:
+                            df = DataProcessor.process_amazon_fba_returns(content)
+                        else:
+                            file.seek(0)
+                            df = processor.process_file(file, file.name)
+                    else:
+                        df = processor.process_file(file, file.name)
+                    
+                    if df is not None and not df.empty:
+                        all_returns_data.append(df)
+                        st.success(f"✅ Processed {file.name}: {len(df)} return records")
+                except Exception as e:
+                    st.error(f"Error processing {file.name}: {e}")
+            
+            if all_returns_data:
+                combined_returns = pd.concat(all_returns_data, ignore_index=True)
+                # Combine with manual entries
+                combined_returns = DataProcessor.combine_with_manual_entries(
+                    combined_returns,
+                    st.session_state.manual_entries['returns'],
+                    'returns'
+                )
+                st.session_state.returns_data = combined_returns
+                st.success(f"✅ Total return records: {len(combined_returns)}")
+        
+        # Store screenshots
         if screenshots:
             st.session_state.screenshots = screenshots
             st.success(f"✅ Loaded {len(screenshots)} screenshots")
         
-        # Calculate metrics if both datasets available
+        # Calculate metrics
         if st.session_state.sales_data is not None and st.session_state.returns_data is not None:
             calculate_metrics()
+
+def process_manual_data():
+    """Process manual entries and calculate metrics"""
+    
+    # Convert manual entries to DataFrames
+    if st.session_state.manual_entries['sales']:
+        sales_df = DataProcessor.combine_with_manual_entries(
+            None,
+            st.session_state.manual_entries['sales'],
+            'sales'
+        )
+        st.session_state.sales_data = sales_df
+    
+    if st.session_state.manual_entries['returns']:
+        returns_df = DataProcessor.combine_with_manual_entries(
+            None,
+            st.session_state.manual_entries['returns'],
+            'returns'
+        )
+        st.session_state.returns_data = returns_df
+    
+    # Calculate metrics
+    if st.session_state.sales_data is not None and st.session_state.returns_data is not None:
+        calculate_metrics()
+        st.success("✅ Metrics calculated from manual data")
+
+def import_google_sheet(sheet_url):
+    """Import data from Google Sheets"""
+    try:
+        # Extract sheet ID from URL
+        import re
+        match = re.search(r'/spreadsheets/d/([a-zA-Z0-9-_]+)', sheet_url)
+        if not match:
+            st.error("Invalid Google Sheets URL")
+            return
+        
+        sheet_id = match.group(1)
+        
+        # Fetch data
+        df = GoogleIntegration.get_google_sheet_data(sheet_id)
+        
+        if not df.empty:
+            # Try to determine if it's sales or returns data
+            if any(col in df.columns for col in ['return_date', 'return-date', 'reason']):
+                st.session_state.returns_data = DataProcessor.process_sales_data(df)
+                st.success(f"✅ Imported {len(df)} return records from Google Sheets")
+            else:
+                st.session_state.sales_data = DataProcessor.process_sales_data(df)
+                st.success(f"✅ Imported {len(df)} sales records from Google Sheets")
+            
+            calculate_metrics()
+        
+    except Exception as e:
+        st.error(f"Failed to import Google Sheet: {e}")
+
+def import_google_doc(doc_url):
+    """Import data from Google Docs"""
+    try:
+        # Extract doc ID from URL
+        import re
+        match = re.search(r'/document/d/([a-zA-Z0-9-_]+)', doc_url)
+        if not match:
+            st.error("Invalid Google Docs URL")
+            return
+        
+        doc_id = match.group(1)
+        
+        # Fetch content
+        content = GoogleIntegration.get_google_doc_data(doc_id)
+        
+        if content:
+            st.text_area("Document Content", content, height=300)
+            st.info("Document content extracted. You may need to manually copy relevant data.")
+        
+    except Exception as e:
+        st.error(f"Failed to import Google Doc: {e}")
 
 def calculate_metrics():
     """Calculate all metrics from loaded data"""
@@ -1018,10 +1825,13 @@ def generate_capa_document(use_ai, ai_provider, include_metrics, include_charts,
         # Generate content
         if use_ai:
             quality_issues = st.session_state.quality_issues if 'quality_issues' in st.session_state else pd.DataFrame()
+            screenshot_data = st.session_state.get('screenshot_data', None)
+            
             content = generator.generate_capa_document(
                 st.session_state.capa_data,
                 st.session_state.metrics,
                 quality_issues,
+                screenshot_data,
                 use_anthropic=(ai_provider == "Anthropic (Claude)")
             )
             
@@ -1034,7 +1844,12 @@ def generate_capa_document(use_ai, ai_provider, include_metrics, include_charts,
             content = generate_template_content()
         
         # Export to Word
-        doc_buffer = generator.export_to_docx(content, st.session_state.capa_data)
+        doc_buffer = generator.export_to_docx(
+            content, 
+            st.session_state.capa_data,
+            include_screenshots=include_screenshots,
+            screenshots=st.session_state.screenshots if include_screenshots else []
+        )
         
         if doc_buffer:
             st.download_button(
@@ -1100,6 +1915,10 @@ Department: {capa['department']}
 """
     
     return content
+
+# Initialize Google credentials on startup
+if 'google_creds' not in st.session_state:
+    st.session_state.google_creds = GoogleIntegration.authenticate()
 
 if __name__ == "__main__":
     main()

@@ -6,65 +6,45 @@ Module for cleaning, standardizing, and merging data from various sources.
 
 import pandas as pd
 from typing import Dict, List, Optional
-from datetime import datetime
 
-def standardize_sales_data(df: pd.DataFrame) -> Optional[pd.DataFrame]:
+def standardize_sales_data(df: pd.DataFrame, report_period_days: int) -> Optional[pd.DataFrame]:
     """
-    Standardizes column names and data types for sales data.
+    Standardizes sales summary data from files like the Odoo forecast.
 
     Args:
-        df: A raw DataFrame from a sales file.
+        df: A raw DataFrame from a sales summary file.
+        report_period_days: The selected reporting period in days (e.g., 30, 90).
 
     Returns:
-        A cleaned DataFrame with standardized columns, or None if essential columns are missing.
+        A cleaned DataFrame with standardized columns.
     """
-    column_mapping = {
-        # Standard names
-        'date': 'order_date',
-        'order date': 'order_date',
-        'purchase date': 'order_date',
-        'order_date': 'order_date',
-        'sku': 'sku',
-        'product sku': 'sku',
-        'product_sku': 'sku',
-        'item_sku': 'sku',
-        'quantity': 'quantity',
-        'qty': 'quantity',
-        'units': 'quantity',
-        'order id': 'order_id',
-        'order_id': 'order_id',
-        'order number': 'order_id',
-        'channel': 'channel',
-        'sales channel': 'channel',
-        'marketplace': 'channel',
-        
-        # Added for 'Odoo - Inventory Forecast' file
-        'product': 'sku',
-        'sales last 30 days': 'quantity',
-    }
-    
-    # Normalize column names to lowercase and strip spaces
+    # Normalize column names to lowercase and strip spaces for reliable mapping
     df.columns = df.columns.str.lower().str.strip()
-    df = df.rename(columns=column_mapping)
 
-    # If no date column exists (like in the Odoo file), create a placeholder
-    if 'order_date' not in df.columns:
-        df['order_date'] = datetime.now()
+    # Define the specific sales column to use based on the selected period
+    sales_col_name = f'sales last {report_period_days} days'
 
-    # Check for essential columns
-    required_cols = ['order_date', 'sku', 'quantity']
-    if not all(col in df.columns for col in required_cols):
+    # Check if the required sales column and a product identifier exist
+    if sales_col_name not in df.columns or 'product' not in df.columns:
+        # This file is not the expected Odoo forecast format, return None
         return None
 
-    # Standardize data types
-    df['order_date'] = pd.to_datetime(df['order_date'], errors='coerce')
-    df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce')
-    df['sku'] = df['sku'].astype(str)
+    # Create a new DataFrame with just the essential columns
+    # Map 'product' to 'sku' and the dynamic sales column to 'quantity'
+    standardized_df = df[['product', sales_col_name]].copy()
+    standardized_df.rename(columns={
+        'product': 'sku',
+        sales_col_name: 'quantity'
+    }, inplace=True)
 
-    # Drop rows where essential data is invalid
-    df.dropna(subset=required_cols, inplace=True)
-    
-    return df
+    # Standardize data types
+    standardized_df['sku'] = standardized_df['sku'].astype(str)
+    standardized_df['quantity'] = pd.to_numeric(standardized_df['quantity'], errors='coerce')
+
+    # Drop rows where essential data is invalid (e.g., non-numeric quantity)
+    standardized_df.dropna(subset=['sku', 'quantity'], inplace=True)
+
+    return standardized_df
 
 def standardize_returns_data(df: pd.DataFrame) -> Optional[pd.DataFrame]:
     """
@@ -74,7 +54,7 @@ def standardize_returns_data(df: pd.DataFrame) -> Optional[pd.DataFrame]:
         df: A raw DataFrame from a returns file.
 
     Returns:
-        A cleaned DataFrame with standardized columns, or None if essential columns are missing.
+        A cleaned DataFrame with standardized columns.
     """
     column_mapping = {
         # Standard names
@@ -82,19 +62,14 @@ def standardize_returns_data(df: pd.DataFrame) -> Optional[pd.DataFrame]:
         'return_date': 'return_date',
         'sku': 'sku',
         'order-id': 'order_id',
-        'order id': 'order_id',
-        'asin': 'asin',
-        'product-name': 'product_name',
         'quantity': 'quantity',
         'reason': 'reason',
-        'return reason': 'reason',
         'customer-comments': 'customer_comments',
-        'customer comments': 'customer_comments',
-        'comments': 'customer_comments',
-        'detailed-disposition': 'disposition',
-
-        # Added for 'Pivot Return Report' file
-        'fnsku': 'sku', # Amazon-specific SKU
+        
+        # Mappings for the user's 'Pivot Return Report' file
+        'fnsku': 'sku',
+        'return quantity': 'quantity',
+        'return reason': 'reason'
     }
     
     df.columns = df.columns.str.lower().str.strip()
@@ -104,11 +79,11 @@ def standardize_returns_data(df: pd.DataFrame) -> Optional[pd.DataFrame]:
     if not all(col in df.columns for col in required_cols):
         return None
         
+    # CRITICAL: Ensure 'return_date' is parsed correctly into a datetime object for filtering
     df['return_date'] = pd.to_datetime(df['return_date'], errors='coerce')
     df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce')
     df['sku'] = df['sku'].astype(str)
     
-    # Fill missing comments with empty string to avoid errors in analysis
     if 'customer_comments' not in df.columns:
         df['customer_comments'] = ''
     df['customer_comments'] = df['customer_comments'].fillna('')
@@ -120,45 +95,13 @@ def standardize_returns_data(df: pd.DataFrame) -> Optional[pd.DataFrame]:
 def combine_dataframes(dataframes: List[pd.DataFrame]) -> pd.DataFrame:
     """
     Concatenates a list of DataFrames into a single DataFrame.
-
-    Args:
-        dataframes: A list of pandas DataFrames to combine.
-
-    Returns:
-        A single, combined DataFrame.
     """
     if not dataframes:
         return pd.DataFrame()
     
-    # Filter out empty or None dataframes before concatenation
     valid_dfs = [df for df in dataframes if df is not None and not df.empty]
     
     if not valid_dfs:
         return pd.DataFrame()
         
     return pd.concat(valid_dfs, ignore_index=True)
-
-def process_manual_entries(manual_entries: List[Dict], data_type: str) -> Optional[pd.DataFrame]:
-    """
-
-    Converts a list of manual entry dictionaries to a standardized DataFrame.
-
-    Args:
-        manual_entries: A list of dictionaries, where each is a manual entry.
-        data_type: The type of data ('sales' or 'returns').
-
-    Returns:
-        A standardized DataFrame of the manual entries.
-    """
-    if not manual_entries:
-        return None
-
-    manual_df = pd.DataFrame(manual_entries)
-    manual_df['source'] = 'manual_entry'
-    
-    if data_type == 'sales':
-        return standardize_sales_data(manual_df)
-    elif data_type == 'returns':
-        return standardize_returns_data(manual_df)
-    
-    return None

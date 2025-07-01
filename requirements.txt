@@ -8,10 +8,18 @@ plotly>=5.17.0
 openai>=1.0.0
 anthropic>=0.7.0
 
-# Document generation
+# Document processing
 python-docx>=0.8.11
 PyPDF2>=3.0.0
+pdfplumber>=0.9.0
 reportlab>=4.0.0
+docx2txt>=0.8
+
+# Google integration
+google-api-python-client>=2.100.0
+google-auth>=2.23.0
+google-auth-oauthlib>=1.1.0
+google-auth-httplib2>=0.1.0
 
 # Image processing for screenshots
 Pillow>=10.0.0
@@ -20,9 +28,11 @@ pytesseract>=0.3.10
 # Date handling
 python-dateutil>=2.8.2
 
-# Excel file handling
+# File handling
 openpyxl>=3.1.0
 xlrd>=2.0.1
+chardet>=5.2.0
 
 # Additional utilities
 python-dotenv>=1.0.0
+requests>=2.31.0

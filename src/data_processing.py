@@ -6,6 +6,7 @@ Module for cleaning, standardizing, and merging data from various sources.
 
 import pandas as pd
 from typing import Dict, List, Optional
+from datetime import datetime
 
 def standardize_sales_data(df: pd.DataFrame) -> Optional[pd.DataFrame]:
     """
@@ -18,6 +19,7 @@ def standardize_sales_data(df: pd.DataFrame) -> Optional[pd.DataFrame]:
         A cleaned DataFrame with standardized columns, or None if essential columns are missing.
     """
     column_mapping = {
+        # Standard names
         'date': 'order_date',
         'order date': 'order_date',
         'purchase date': 'order_date',
@@ -35,11 +37,19 @@ def standardize_sales_data(df: pd.DataFrame) -> Optional[pd.DataFrame]:
         'channel': 'channel',
         'sales channel': 'channel',
         'marketplace': 'channel',
+        
+        # Added for 'Odoo - Inventory Forecast' file
+        'product': 'sku',
+        'sales last 30 days': 'quantity',
     }
     
     # Normalize column names to lowercase and strip spaces
     df.columns = df.columns.str.lower().str.strip()
     df = df.rename(columns=column_mapping)
+
+    # If no date column exists (like in the Odoo file), create a placeholder
+    if 'order_date' not in df.columns:
+        df['order_date'] = datetime.now()
 
     # Check for essential columns
     required_cols = ['order_date', 'sku', 'quantity']
@@ -67,6 +77,7 @@ def standardize_returns_data(df: pd.DataFrame) -> Optional[pd.DataFrame]:
         A cleaned DataFrame with standardized columns, or None if essential columns are missing.
     """
     column_mapping = {
+        # Standard names
         'return-date': 'return_date',
         'return_date': 'return_date',
         'sku': 'sku',
@@ -80,7 +91,10 @@ def standardize_returns_data(df: pd.DataFrame) -> Optional[pd.DataFrame]:
         'customer-comments': 'customer_comments',
         'customer comments': 'customer_comments',
         'comments': 'customer_comments',
-        'detailed-disposition': 'disposition'
+        'detailed-disposition': 'disposition',
+
+        # Added for 'Pivot Return Report' file
+        'fnsku': 'sku', # Amazon-specific SKU
     }
     
     df.columns = df.columns.str.lower().str.strip()

@@ -2,64 +2,59 @@
 
 """
 Module for validating CAPA data against ISO 13485 compliance requirements.
+Now separates critical errors from non-critical warnings.
 """
 
 from typing import Dict, List, Tuple
 
-def validate_capa_data(capa_data: Dict) -> Tuple[bool, List[str]]:
+def validate_capa_data(capa_data: Dict) -> Tuple[bool, List[str], List[str]]:
     """
-    Validates CAPA data for ISO 13485 compliance.
+    Validates CAPA data, distinguishing between errors and warnings.
 
     Args:
         capa_data: A dictionary containing the CAPA form data.
 
     Returns:
         A tuple containing:
-        - bool: True if the data is valid, False otherwise.
-        - List[str]: A list of compliance issues found.
+        - bool: True if the data has no blocking errors, False otherwise.
+        - List[str]: A list of blocking errors found.
+        - List[str]: A list of non-blocking warnings/suggestions.
     """
-    issues = []
+    errors = []
+    warnings = []
 
-    # --- Check for presence of required fields ---
+    # --- CRITICAL ERRORS: Check for presence of absolutely required fields ---
+    # These fields are essential for record-keeping and will block saving.
     required_fields = {
         'capa_number': 'CAPA Number',
         'product': 'Product Name',
         'sku': 'Primary SKU',
-        'issue_description': 'Issue Description',
-        'root_cause': 'Root Cause Analysis',
-        'corrective_action': 'Corrective Actions',
-        'preventive_action': 'Preventive Actions',
-        'severity': 'Severity Assessment',
         'prepared_by': 'Prepared By',
         'date': 'Date'
     }
-
     for field, label in required_fields.items():
         if not capa_data.get(field):
-            issues.append(f"Missing required field: {label} is mandatory.")
+            errors.append(f"Missing required field: {label} cannot be empty.")
 
-    # --- Validate content quality and specific requirements ---
+    # --- WARNINGS: Check for content quality and best practices ---
+    # These are suggestions and will not block saving.
     issue_desc = capa_data.get('issue_description', '')
-    if len(issue_desc) < 50:
-        issues.append("Issue Description is too brief. Please provide a detailed problem statement including scope and impact.")
+    if len(issue_desc) > 0 and len(issue_desc) < 25: # Relaxed from 50
+        warnings.append("Suggestion: The 'Issue Description' is very brief. Consider providing more detail about the problem.")
 
     root_cause = capa_data.get('root_cause', '')
-    if len(root_cause) < 50:
-        issues.append("Root Cause Analysis is insufficient. Describe the investigation methodology (e.g., 5 Whys, Fishbone) and findings.")
+    if len(root_cause) > 0 and len(root_cause) < 25: # Relaxed from 50
+        warnings.append("Suggestion: The 'Root Cause Analysis' is very brief. A more detailed analysis is recommended.")
 
-    # Check for evidence of a timeline in corrective actions
     corrective_action = capa_data.get('corrective_action', '')
-    if not any(keyword in corrective_action.lower() for keyword in ['timeline', 'date', 'within', 'by', 'immediate']):
-        issues.append("Corrective Actions must include an implementation timeline or specific dates.")
+    if corrective_action and not any(keyword in corrective_action.lower() for keyword in ['timeline', 'date', 'within', 'by', 'immediate', 'complete']):
+        warnings.append("Suggestion: For 'Corrective Actions', consider adding an implementation timeline or target completion dates.")
 
-    # Check for evidence of a monitoring plan in preventive actions
     preventive_action = capa_data.get('preventive_action', '')
-    if not any(keyword in preventive_action.lower() for keyword in ['monitor', 'verify', 'review', 'check', 'schedule']):
-        issues.append("Preventive Actions must include a plan for monitoring or verifying effectiveness.")
-
-    # Validate the severity classification against allowed values
-    severity = capa_data.get('severity')
-    if severity and severity not in ["Critical", "Major", "Minor"]:
-        issues.append(f"Severity must be classified as 'Critical', 'Major', or 'Minor', but was '{severity}'.")
-
-    return not issues, issues
+    if preventive_action and not any(keyword in preventive_action.lower() for keyword in ['monitor', 'verify', 'review', 'check', 'audit', 'schedule']):
+        warnings.append("Suggestion: For 'Preventive Actions', consider including a plan for monitoring or verifying its effectiveness.")
+    
+    # The first element of the tuple is True if there are no blocking errors.
+    is_valid = not errors
+    
+    return is_valid, errors, warnings

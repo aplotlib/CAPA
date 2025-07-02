@@ -173,6 +173,10 @@ def process_files_with_ai(sales_file, returns_file, misc_files, target_sku, repo
                 st.error("Could not extract returns data.")
                 return
             
+            # Store processed data
+            st.session_state.sales_data = sales_data
+            st.session_state.returns_data = returns_data
+            
             # Run analysis
             st.session_state.analysis_results = run_full_analysis(sales_data, returns_data, report_period_days)
             progress_bar.progress(100)
@@ -194,7 +198,7 @@ def process_files_with_ai(sales_file, returns_file, misc_files, target_sku, repo
                         st.warning(f"Could not process {file.name}: {str(e)}")
                 
                 if misc_data:
-                    st.session_state.misc_df = pd.DataFrame(misc_data, index=range(len(misc_data)))
+                    st.session_state.misc_df = pd.DataFrame(misc_data)
                 else:
                     st.session_state.misc_df = pd.DataFrame()
                     
@@ -306,7 +310,9 @@ def process_files_with_ai(sales_file, returns_file, misc_files, target_sku, repo
             
             if misc_data:
                 # Create DataFrame with explicit index
-                st.session_state.misc_df = pd.DataFrame(misc_data, index=range(len(misc_data)))
+                st.session_state.misc_df = pd.DataFrame(misc_data)
+            else:
+                st.session_state.misc_df = pd.DataFrame()
         
         # Complete
         progress_bar.progress(100)
@@ -355,6 +361,33 @@ def display_manual_entry_form(report_period_days):
                 )
                 st.success(f"✅ Manual analysis complete for SKU: {target_sku}")
 
+def calculate_quality_score(return_rate):
+    """Calculate quality score appropriate for medical devices."""
+    # Medical device industry standards:
+    # < 5% return rate: Excellent (90-100 score)
+    # 5-10% return rate: Good (70-90 score) - Industry standard
+    # 10-15% return rate: Acceptable (50-70 score)
+    # 15-20% return rate: Needs Improvement (30-50 score)
+    # > 20% return rate: Poor (0-30 score)
+    
+    if return_rate < 5:
+        # Excellent: Linear scale from 90-100
+        quality_score = 90 + (5 - return_rate) * 2
+    elif return_rate < 10:
+        # Good: Linear scale from 70-90
+        quality_score = 70 + (10 - return_rate) * 4
+    elif return_rate < 15:
+        # Acceptable: Linear scale from 50-70
+        quality_score = 50 + (15 - return_rate) * 4
+    elif return_rate < 20:
+        # Needs Improvement: Linear scale from 30-50
+        quality_score = 30 + (20 - return_rate) * 4
+    else:
+        # Poor: Scale from 0-30
+        quality_score = max(0, 30 - (return_rate - 20) * 3)
+    
+    return round(quality_score)
+
 def display_metrics_dashboard(results):
     """Display analysis metrics dashboard."""
     if not results or 'return_summary' not in results or results['return_summary'].empty:
@@ -368,11 +401,19 @@ def display_metrics_dashboard(results):
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
+        # Color code based on medical device standards
+        if summary['return_rate'] < 5:
+            delta_color = "off"  # Green - excellent
+        elif summary['return_rate'] < 10:
+            delta_color = "off"  # Still green - industry standard
+        else:
+            delta_color = "inverse"  # Red - above standard
+            
         st.metric(
             "Return Rate", 
             f"{summary['return_rate']:.2f}%",
-            delta=f"{summary['return_rate'] - 5:.2f}%" if summary['return_rate'] > 5 else None,
-            delta_color="inverse"
+            delta=f"{summary['return_rate'] - 10:.2f}%" if summary['return_rate'] != 10 else "Industry Standard",
+            delta_color=delta_color
         )
     
     with col2:
@@ -388,13 +429,54 @@ def display_metrics_dashboard(results):
         )
     
     with col4:
-        # Quality score based on return rate
-        quality_score = max(0, 100 - (summary['return_rate'] * 10))
+        # Updated quality score calculation
+        quality_score = calculate_quality_score(summary['return_rate'])
+        
+        # Determine quality status based on medical device standards
+        if quality_score >= 90:
+            quality_status = "Excellent"
+        elif quality_score >= 70:
+            quality_status = "Good"
+        elif quality_score >= 50:
+            quality_status = "Acceptable"
+        else:
+            quality_status = "Needs Improvement"
+            
         st.metric(
             "Quality Score",
-            f"{quality_score:.0f}/100",
-            delta="Good" if quality_score > 80 else "Needs Improvement"
+            f"{quality_score}/100",
+            delta=quality_status
         )
+    
+    # Additional context for medical devices
+    st.markdown("---")
+    st.markdown("#### 📊 Medical Device Industry Context")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.info(f"""
+        **Return Rate Analysis:**
+        - Industry standard: 5-10%
+        - Your rate: {summary['return_rate']:.2f}%
+        - Status: {quality_status}
+        """)
+    
+    with col2:
+        # Severity recommendation based on medical device standards
+        if summary['return_rate'] > 15:
+            severity_rec = "Critical - Immediate action required"
+            color = "🔴"
+        elif summary['return_rate'] > 10:
+            severity_rec = "Major - Investigation recommended"
+            color = "🟡"
+        else:
+            severity_rec = "Minor - Monitor trends"
+            color = "🟢"
+            
+        st.info(f"""
+        **Recommended CAPA Severity:**
+        {color} {severity_rec}
+        """)
     
     # Additional insights
     if results.get('insights'):
@@ -413,10 +495,10 @@ def display_capa_form():
         summary = st.session_state.analysis_results['return_summary'].iloc[0]
         prefill_sku = summary['sku']
         
-        # Auto-determine severity based on return rate
-        if summary['return_rate'] > 10:
+        # Auto-determine severity based on medical device standards
+        if summary['return_rate'] > 15:
             prefill_severity = "Critical"
-        elif summary['return_rate'] > 5:
+        elif summary['return_rate'] > 10:
             prefill_severity = "Major"
         
     with st.form("capa_form"):
@@ -618,14 +700,30 @@ def display_doc_gen():
                     
                     # Write raw data if available
                     if st.session_state.sales_data is not None:
-                        st.session_state.sales_data.to_excel(
-                            writer, sheet_name='Sales Data', index=False
-                        )
+                        # Ensure it's a DataFrame
+                        if isinstance(st.session_state.sales_data, pd.DataFrame):
+                            st.session_state.sales_data.to_excel(
+                                writer, sheet_name='Sales Data', index=False
+                            )
+                        else:
+                            pd.DataFrame(st.session_state.sales_data).to_excel(
+                                writer, sheet_name='Sales Data', index=False
+                            )
                     
                     if st.session_state.returns_data is not None:
-                        pd.DataFrame(st.session_state.returns_data).to_excel(
-                            writer, sheet_name='Returns Data', index=False
-                        )
+                        # Ensure it's a DataFrame
+                        if isinstance(st.session_state.returns_data, pd.DataFrame):
+                            st.session_state.returns_data.to_excel(
+                                writer, sheet_name='Returns Data', index=False
+                            )
+                        elif isinstance(st.session_state.returns_data, dict):
+                            pd.DataFrame([st.session_state.returns_data]).to_excel(
+                                writer, sheet_name='Returns Data', index=False
+                            )
+                        else:
+                            pd.DataFrame(st.session_state.returns_data).to_excel(
+                                writer, sheet_name='Returns Data', index=False
+                            )
                 
                 buffer.seek(0)
                 
@@ -738,12 +836,20 @@ def main():
                 with col1:
                     if st.session_state.sales_data is not None:
                         st.markdown("### Sales Data")
-                        st.dataframe(st.session_state.sales_data)
+                        if isinstance(st.session_state.sales_data, pd.DataFrame):
+                            st.dataframe(st.session_state.sales_data)
+                        else:
+                            st.dataframe(pd.DataFrame(st.session_state.sales_data))
                 
                 with col2:
                     if st.session_state.returns_data is not None:
                         st.markdown("### Returns Data")
-                        st.dataframe(pd.DataFrame(st.session_state.returns_data))
+                        if isinstance(st.session_state.returns_data, pd.DataFrame):
+                            st.dataframe(st.session_state.returns_data)
+                        elif isinstance(st.session_state.returns_data, dict):
+                            st.dataframe(pd.DataFrame([st.session_state.returns_data]))
+                        else:
+                            st.dataframe(pd.DataFrame(st.session_state.returns_data))
         else:
             st.markdown(
                 '<div class="info-box">'
@@ -753,7 +859,7 @@ def main():
             )
 
         # Display miscellaneous files
-        if hasattr(st.session_state, 'misc_df') and not st.session_state.misc_df.empty:
+        if hasattr(st.session_state, 'misc_df') and isinstance(st.session_state.misc_df, pd.DataFrame) and not st.session_state.misc_df.empty:
             st.markdown("---")
             st.markdown("### 📎 Additional Files Processed")
             try:

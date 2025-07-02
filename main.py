@@ -183,7 +183,7 @@ def process_files_with_ai(sales_file, returns_file, misc_files, target_sku, repo
             st.session_state.returns_data = returns_data
             
             # Run analysis
-            st.session_state.analysis_results = run_full_analysis(sales_data, returns_data, report_period_days)
+            st.session_state.analysis_results = run_full_analysis(sales_data, returns_data, report_period_days, st.session_state.unit_price)
             progress_bar.progress(100)
             status_text.text("✅ Analysis complete!")
             
@@ -286,7 +286,8 @@ def process_files_with_ai(sales_file, returns_file, misc_files, target_sku, repo
         st.session_state.analysis_results = run_full_analysis(
             processed_sales, 
             processed_returns, 
-            report_period_days
+            report_period_days,
+            st.session_state.unit_price
         )
         
         # Step 5: Process miscellaneous files if provided
@@ -380,7 +381,7 @@ def display_manual_entry_form(report_period_days):
                 st.session_state.unit_price = unit_price if unit_price > 0 else None
                 
                 st.session_state.analysis_results = run_full_analysis(
-                    sales_df, returns_df, report_period_days
+                    sales_df, returns_df, report_period_days, st.session_state.unit_price
                 )
                 st.success(f"✅ Manual analysis complete for SKU: {target_sku}")
 
@@ -945,6 +946,12 @@ def main():
         if hasattr(st.session_state, 'misc_df') and isinstance(st.session_state.misc_df, pd.DataFrame) and not st.session_state.misc_df.empty:
             st.markdown("---")
             st.markdown("### 📎 Additional Files Processed")
+            
+            # Check for FBA return reports
+            fba_reports = st.session_state.misc_df[st.session_state.misc_df['content_type'] == 'fba_returns']
+            if not fba_reports.empty:
+                st.info("**FBA Return Report Detected**: Consider analyzing return reasons for additional insights")
+            
             try:
                 st.dataframe(st.session_state.misc_df)
             except Exception as e:

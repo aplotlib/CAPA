@@ -20,12 +20,11 @@ def standardize_sales_data(df: pd.DataFrame, target_sku: str) -> Optional[pd.Dat
     if not sku_col or not sales_col:
         return None
 
-    # **THE FIX**: Ensure the SKU column is treated as a string BEFORE filtering.
+    # Ensure the SKU column is treated as a string BEFORE filtering.
     df[sku_col] = df[sku_col].astype(str)
     
     df = df.rename(columns={sku_col: 'sku', sales_col: 'quantity'})
     
-    # Now, the comparison will be string vs. string.
     product_data = df[df['sku'] == target_sku].copy()
 
     if product_data.empty:

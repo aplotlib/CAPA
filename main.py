@@ -268,15 +268,25 @@ def process_files_with_ai(sales_file, returns_file, misc_files, target_sku, repo
             misc_data = []
             for file in misc_files:
                 try:
-                    # Try to read as image or document
-                    misc_analysis = st.session_state.file_parser.analyze_misc_file(file)
+                    if st.session_state.file_parser:
+                        # Use AI file parser if available
+                        misc_analysis = st.session_state.file_parser.analyze_misc_file(file)
+                    else:
+                        # Fallback analysis
+                        misc_analysis = {
+                            'filename': file.name,
+                            'type': file.type,
+                            'size': file.size,
+                            'content_type': 'misc'
+                        }
                     if misc_analysis:
                         misc_data.append(misc_analysis)
                 except Exception as e:
                     st.warning(f"Could not process {file.name}: {str(e)}")
             
             if misc_data:
-                st.session_state.misc_df = pd.DataFrame(misc_data)
+                # Create DataFrame with explicit index
+                st.session_state.misc_df = pd.DataFrame(misc_data, index=range(len(misc_data)))
         
         # Complete
         progress_bar.progress(100)

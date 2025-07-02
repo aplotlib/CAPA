@@ -42,5 +42,8 @@ def parse_file(uploaded_file: IO[bytes], filename: str) -> Optional[pd.DataFrame
     if 'return' in filename_lower:
         return _parse_pivot_returns(uploaded_file)
     
-    # Fallback for misc files
-    return _robust_read_csv(uploaded_file)
+    # Fallback for misc files (images will not parse to a dataframe here, but won't error)
+    try:
+        return _robust_read_csv(uploaded_file)
+    except Exception:
+        return pd.DataFrame({'file_content': [f"Could not parse file: {filename}"]})

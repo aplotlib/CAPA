@@ -72,7 +72,12 @@ def initialize_session_state():
         'sales_data': None,
         'returns_data': None,
         'ai_analysis': None,
-        'debug_info': {}
+        'debug_info': {},
+        'unit_price': None,
+        'manual_entry': False,
+        'override_manual': False,
+        'generated_doc': None,
+        'doc_filename': None
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -330,14 +335,28 @@ def display_manual_entry_form(report_period_days):
     """Display form for manual data entry."""
     st.markdown("#### Manually Enter Data")
     with st.form("manual_data_form"):
-        target_sku = st.text_input("Enter SKU for Analysis*", 
-                                  help="Enter the exact SKU code")
-        sales_units = st.number_input("Enter Total Sales Units for SKU", 
-                                     min_value=0,
-                                     help="Total units sold in the period")
-        return_units = st.number_input("Enter Total Return Units for SKU", 
-                                      min_value=0,
-                                      help="Total units returned in the period")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            target_sku = st.text_input("Enter SKU for Analysis*", 
+                                      help="Enter the exact SKU code")
+            sales_units = st.number_input("Enter Total Sales Units for SKU", 
+                                         min_value=0,
+                                         help="Total units sold in the period")
+            return_units = st.number_input("Enter Total Return Units for SKU", 
+                                          min_value=0,
+                                          help="Total units returned in the period")
+        
+        with col2:
+            unit_price = st.number_input("Product Unit Price (Optional)", 
+                                        min_value=0.0,
+                                        value=0.0,
+                                        help="Enter price for financial impact calculation. Leave as 0 to skip cost estimates.",
+                                        format="%.2f")
+            
+            st.markdown("##### Data Period")
+            st.info(f"📅 Analysis period: Last {report_period_days} days")
+            
         submitted = st.form_submit_button("Process Manual Data", type="primary")
 
         if submitted:
@@ -355,6 +374,10 @@ def display_manual_entry_form(report_period_days):
                     'quantity': return_units,
                     'date': datetime.now()
                 }])
+                
+                # Store manual entry flag and price
+                st.session_state.manual_entry = True
+                st.session_state.unit_price = unit_price if unit_price > 0 else None
                 
                 st.session_state.analysis_results = run_full_analysis(
                     sales_df, returns_df, report_period_days
@@ -397,6 +420,11 @@ def display_metrics_dashboard(results):
     
     # Main metrics
     st.markdown(f"### Analysis for SKU: **{summary['sku']}**")
+    
+    # Check for date range warnings
+    if st.session_state.returns_data and isinstance(st.session_state.returns_data, dict):
+        if 'date_warning' in st.session_state.returns_data and st.session_state.returns_data['date_warning']:
+            st.warning(st.session_state.returns_data['date_warning'])
     
     col1, col2, col3, col4 = st.columns(4)
     
@@ -460,6 +488,15 @@ def display_metrics_dashboard(results):
         - Your rate: {summary['return_rate']:.2f}%
         - Status: {quality_status}
         """)
+        
+        # Show financial impact only if price is provided
+        if hasattr(st.session_state, 'unit_price') and st.session_state.unit_price:
+            return_cost = summary['total_returned'] * st.session_state.unit_price
+            st.info(f"""
+            **Financial Impact:**
+            - Unit Price: ${st.session_state.unit_price:,.2f}
+            - Return Cost: ${return_cost:,.2f}
+            """)
     
     with col2:
         # Severity recommendation based on medical device standards
@@ -481,7 +518,14 @@ def display_metrics_dashboard(results):
     # Additional insights
     if results.get('insights'):
         st.markdown("### 🔍 AI-Generated Insights")
-        st.markdown(results['insights'])
+        # Remove cost estimates if no price provided
+        insights_text = results['insights']
+        if not (hasattr(st.session_state, 'unit_price') and st.session_state.unit_price):
+            # Remove financial impact section from insights
+            lines = insights_text.split('\n')
+            filtered_lines = [line for line in lines if '💰' not in line and 'cost' not in line.lower()]
+            insights_text = '\n'.join(filtered_lines)
+        st.markdown(insights_text)
 
 def display_capa_form():
     """Displays the full CAPA form for data input."""
@@ -671,13 +715,9 @@ def display_doc_gen():
                             ai_content
                         )
                         
-                        # Offer download
-                        st.download_button(
-                            label="📥 Download CAPA Document",
-                            data=doc_buffer,
-                            file_name=f"CAPA_{st.session_state.capa_data['capa_number']}.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                        )
+                        # Store in session state for persistent download
+                        st.session_state.generated_doc = doc_buffer
+                        st.session_state.doc_filename = f"CAPA_{st.session_state.capa_data['capa_number']}.docx"
                         
                         st.success("✅ CAPA document generated successfully!")
                     else:
@@ -733,6 +773,21 @@ def display_doc_gen():
                     file_name=f"CAPA_Analysis_{st.session_state.capa_data.get('sku', 'data')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadshingml.sheet"
                 )
+    
+    # Show download button if document was generated
+    if hasattr(st.session_state, 'generated_doc') and st.session_state.generated_doc:
+        st.markdown("---")
+        st.markdown("### 📥 Download Generated Document")
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.download_button(
+                label="📄 Download CAPA Document (.docx)",
+                data=st.session_state.generated_doc,
+                file_name=st.session_state.doc_filename,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True
+            )
 
 # --- Main Application Flow ---
 def main():
@@ -772,6 +827,23 @@ def main():
                 placeholder="e.g., ABC123-001"
             )
             
+            # Product price input
+            unit_price = st.number_input(
+                "Product Unit Price (Optional)",
+                min_value=0.0,
+                value=0.0,
+                help="Enter price for financial impact calculation. Leave as 0 to skip cost estimates.",
+                format="%.2f"
+            )
+            
+            # Date range reminder
+            st.info(f"""
+            📅 **Important**: Analysis period is set to {report_period_days} days.
+            
+            Please ensure your return report is filtered for the same period, or adjust the period above.
+            The tool will analyze whatever data you provide - it won't force date filtering.
+            """)
+            
             # File uploads
             st.markdown("### Required Files")
             
@@ -790,9 +862,16 @@ def main():
             st.markdown("### Optional Files")
             
             misc_files = st.file_uploader(
-                "3. Additional Files (Images, PDFs, etc.)",
+                "3. Additional Files (FBA Returns, Images, PDFs, etc.)",
                 accept_multiple_files=True,
-                help="Supporting documentation or images"
+                type=['txt', 'csv', 'xlsx', 'xls', 'pdf', 'png', 'jpg'],
+                help="FBA return reports (.txt), supporting documentation, or images"
+            )
+            
+            # Override option
+            override_with_manual = st.checkbox(
+                "Override with manual data if entered",
+                help="If checked, manual data entry will override uploaded file data"
             )
             
             # Process button
@@ -802,6 +881,10 @@ def main():
                 elif not sales_file or not returns_file:
                     st.warning("⚠️ Please upload both required files.")
                 else:
+                    # Store unit price
+                    st.session_state.unit_price = unit_price if unit_price > 0 else None
+                    st.session_state.override_manual = override_with_manual
+                    
                     process_files_with_ai(
                         sales_file, returns_file, misc_files, 
                         target_sku, report_period_days

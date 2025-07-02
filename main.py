@@ -46,7 +46,8 @@ def display_header():
 def process_uploaded_files(sales_files, returns_files, report_period_days):
     """Orchestrates the parsing, cleaning, and analysis of uploaded files."""
     with st.spinner("Processing and analyzing files..."):
-        all_sales = []
+        all_sales, all_returns = [], []
+        
         for file in sales_files:
             raw_df = parse_file(file, file.name)
             if raw_df is not None:
@@ -54,7 +55,6 @@ def process_uploaded_files(sales_files, returns_files, report_period_days):
                 if std_df is not None: all_sales.append(std_df)
         st.session_state.sales_df = combine_dataframes(all_sales)
 
-        all_returns = []
         for file in returns_files:
             raw_df = parse_file(file, file.name)
             if raw_df is not None:
@@ -62,7 +62,11 @@ def process_uploaded_files(sales_files, returns_files, report_period_days):
                 if std_df is not None: all_returns.append(std_df)
         st.session_state.returns_df = combine_dataframes(all_returns)
 
-        if not st.session_state.sales_df.empty and not st.session_state.returns_df.empty:
+        # Improved Error Handling
+        sales_ok = not st.session_state.sales_df.empty
+        returns_ok = not st.session_state.returns_df.empty
+
+        if sales_ok and returns_ok:
             st.session_state.analysis_results = run_full_analysis(
                 st.session_state.sales_df, st.session_state.returns_df, report_period_days
             )
@@ -71,7 +75,10 @@ def process_uploaded_files(sales_files, returns_files, report_period_days):
             else:
                 st.success("✅ Files processed and analyzed successfully!")
         else:
-            st.warning("⚠️ Sales or Returns file could not be processed. Please check the file format.")
+            if not sales_ok:
+                st.error("⚠️ Sales file processing failed. Please ensure your file contains columns for 'Product' (or 'SKU') and 'Sales Last [period] Days' that matches your selection in the sidebar.")
+            if not returns_ok:
+                st.error("⚠️ Returns file processing failed. Please ensure your file contains columns for 'FNSKU' (or 'SKU'), 'Return date', 'Quantity', and 'Return reason'.")
 
 # --- UI Components ---
 def display_metrics_dashboard(results):
@@ -85,12 +92,10 @@ def display_metrics_dashboard(results):
     with col4: st.metric("Products with Quality Issues", results['quality_issues_count'])
 
 def display_capa_form():
-    """Displays the CAPA form and handles validation with new relaxed rules."""
     st.markdown("## CAPA Information - ISO 13485 Compliant")
     prefill_sku = ""
     if st.session_state.analysis_results and not st.session_state.analysis_results.get('return_summary', pd.DataFrame()).empty:
         prefill_sku = st.session_state.analysis_results['return_summary'].iloc[0]['sku']
-        
     with st.form("capa_form"):
         c1, c2 = st.columns(2)
         with c1:
@@ -101,15 +106,13 @@ def display_capa_form():
             prepared_by = st.text_input("Prepared By*")
             date = st.date_input("Date*", value=datetime.now())
             severity = st.selectbox("Severity Assessment", ["Critical", "Major", "Minor"])
-        
-        issue_description = st.text_area("Issue Description", height=100, placeholder="Provide a detailed problem statement...")
-        root_cause = st.text_area("Root Cause Analysis", height=100, placeholder="Describe the investigation methodology...")
-        corrective_action = st.text_area("Corrective Actions", height=100, placeholder="Describe actions to correct the issue...")
-        preventive_action = st.text_area("Preventive Actions", height=100, placeholder="Describe actions to prevent recurrence...")
-        
-        submitted = st.form_submit_button("💾 Save CAPA Data", type="primary")
-
-        if submitted:
+        issue_description, root_cause, corrective_action, preventive_action = (
+            st.text_area("Issue Description", height=100, placeholder="Provide a detailed problem statement..."),
+            st.text_area("Root Cause Analysis", height=100, placeholder="Describe the investigation methodology..."),
+            st.text_area("Corrective Actions", height=100, placeholder="Describe actions to correct the issue..."),
+            st.text_area("Preventive Actions", height=100, placeholder="Describe actions to prevent recurrence...")
+        )
+        if st.form_submit_button("💾 Save CAPA Data", type="primary"):
             capa_data = {
                 'capa_number': capa_number, 'product': product_name, 'sku': sku,
                 'prepared_by': prepared_by, 'date': date.strftime('%Y-%m-%d'),
@@ -117,21 +120,13 @@ def display_capa_form():
                 'root_cause': root_cause, 'corrective_action': corrective_action,
                 'preventive_action': preventive_action
             }
-            # Get validation results: is_valid (bool), errors (list), warnings (list)
             is_valid, errors, warnings = validate_capa_data(capa_data)
-            
             if is_valid:
-                # If there are no blocking errors, save the data
                 st.session_state.capa_data = capa_data
                 st.success("✅ CAPA data saved successfully!")
-                
-                # Display any non-blocking warnings as suggestions
-                for warning in warnings:
-                    st.warning(warning)
+                for warning in warnings: st.warning(warning)
             else:
-                # If there are blocking errors, display them and don't save
-                for error in errors:
-                    st.error(f"Failed to save: {error}")
+                for error in errors: st.error(f"Failed to save: {error}")
 
 def display_document_generation():
     st.markdown("## Generate CAPA Document")
@@ -160,7 +155,7 @@ def main():
         
         st.markdown("---")
         st.header("📁 Data Input")
-        sales_files = st.file_uploader("Upload Sales Forecast (Odoo)", type=['csv', 'xlsx'], accept_multiple_files=True)
+        sales_files = st.file_uploader("Upload Sales Forecast", type=['csv', 'xlsx'], accept_multiple_files=True)
         returns_files = st.file_uploader("Upload Returns Report", type=['csv', 'xlsx'], accept_multiple_files=True)
         
         if st.button("Process Files", type="primary"):
@@ -175,7 +170,7 @@ def main():
             display_metrics_dashboard(st.session_state.analysis_results)
             st.markdown("### Return Rate by Product")
             st.dataframe(st.session_state.analysis_results['return_summary'])
-            st.markdown("### Quality Hotspots (High Volume of Quality-Related Returns)")
+            st.markdown("### Quality Hotspots")
             st.dataframe(st.session_state.analysis_results['quality_hotspots'])
             st.markdown("### Return Reason Categories")
             st.bar_chart(st.session_state.analysis_results['categorized_returns_df']['category'].value_counts())

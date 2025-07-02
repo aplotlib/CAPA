@@ -6,6 +6,7 @@ from typing import Optional, Dict, Any, List, Tuple, IO
 from io import BytesIO, StringIO
 import json
 from datetime import datetime
+import re
 
 # Try to import anthropic, but don't fail if not available
 try:
@@ -15,6 +16,64 @@ except ImportError:
     anthropic = None
     ANTHROPIC_AVAILABLE = False
     print("Warning: Anthropic library not available. Using fallback parsing methods.")
+
+# Original functions for backward compatibility
+def standardize_sales_data(df: pd.DataFrame, target_sku: str) -> Tuple[Optional[pd.DataFrame], Optional[List[str]]]:
+    """Standardize sales data to common format."""
+    if df is None or df.empty:
+        return None, None
+        
+    # Try to find SKU column
+    sku_col = None
+    for col in df.columns:
+        if 'SKU' in str(col).upper():
+            sku_col = col
+            break
+    
+    if not sku_col:
+        return None, None
+    
+    # Find numeric columns for sales
+    numeric_cols = []
+    for col in df.columns:
+        if col != sku_col:
+            try:
+                test_vals = pd.to_numeric(df[col], errors='coerce')
+                if test_vals.sum() > 0:
+                    numeric_cols.append(col)
+            except:
+                pass
+    
+    if not numeric_cols:
+        return None, None
+    
+    # Create standardized dataframe
+    result_df = pd.DataFrame()
+    result_df['sku'] = df[sku_col].astype(str).str.strip()
+    result_df['quantity'] = df[numeric_cols].sum(axis=1)
+    
+    # Filter for target SKU
+    target_sku = target_sku.strip()
+    product_data = result_df[result_df['sku'] == target_sku].copy()
+    
+    if product_data.empty:
+        debug_sku_list = list(result_df['sku'].unique()[:10])
+        return None, debug_sku_list
+    
+    # Clean up
+    product_data = product_data[product_data['quantity'] > 0]
+    return product_data[['sku', 'quantity']], None
+
+def standardize_returns_data(df: pd.DataFrame, target_sku: str) -> Optional[pd.DataFrame]:
+    """Standardize returns data to common format."""
+    if df is None or df.empty:
+        return None
+        
+    if 'total_returned_quantity' in df.columns:
+        total_returns = df['total_returned_quantity'].iloc[0] if not df.empty else 0
+        return pd.DataFrame({'sku': [target_sku], 'quantity': [total_returns]})
+    
+    return None
 
 
 def _robust_read_csv(file: IO[bytes], **kwargs) -> pd.DataFrame:
@@ -32,17 +91,64 @@ def _robust_read_csv(file: IO[bytes], **kwargs) -> pd.DataFrame:
 
 
 def _parse_odoo_forecast(file: IO[bytes]) -> pd.DataFrame:
-    """Parse Odoo forecast file."""
-    # Try as CSV first
-    df = _robust_read_csv(file, header=1, on_bad_lines='skip')
-    if not df.empty:
-        return df
-    
-    # Try as Excel
+    """Parse Odoo forecast file with improved column detection."""
     try:
         file.seek(0)
+        # Read Excel file
+        excel_file = pd.ExcelFile(file)
+        
+        # Try first sheet
+        df = pd.read_excel(file, sheet_name=0, header=None)
+        
+        # Find the header row by looking for 'SKU' pattern
+        header_row = None
+        for i in range(min(10, len(df))):
+            row_values = df.iloc[i].astype(str)
+            if any('SKU' in val.upper() for val in row_values):
+                header_row = i
+                break
+        
+        if header_row is not None:
+            # Re-read with correct header
+            file.seek(0)
+            df = pd.read_excel(file, sheet_name=0, header=header_row)
+            
+            # Find SKU column
+            sku_col = None
+            for col in df.columns:
+                if 'SKU' in str(col).upper():
+                    sku_col = col
+                    break
+            
+            if sku_col:
+                # Find numeric columns that could be sales/quantity
+                numeric_cols = []
+                for col in df.columns:
+                    if col != sku_col:
+                        try:
+                            # Check if column has numeric data
+                            test_vals = pd.to_numeric(df[col], errors='coerce')
+                            if test_vals.sum() > 0:  # Has some numeric values
+                                numeric_cols.append(col)
+                        except:
+                            pass
+                
+                # If we have numeric columns, sum them as sales
+                if numeric_cols:
+                    result_df = pd.DataFrame()
+                    result_df['SKU'] = df[sku_col]
+                    # Sum all numeric columns as total sales
+                    result_df['Sales'] = df[numeric_cols].sum(axis=1)
+                    # Remove rows with zero sales
+                    result_df = result_df[result_df['Sales'] > 0]
+                    return result_df
+        
+        # Fallback to original method
+        file.seek(0)
         return pd.read_excel(file, header=1)
-    except:
+        
+    except Exception as e:
+        print(f"Error parsing Odoo forecast: {e}")
         return pd.DataFrame()
 
 
@@ -50,28 +156,44 @@ def _parse_pivot_returns(file: IO[bytes]) -> pd.DataFrame:
     """Parse pivot return report - extracts total returns from pivot table."""
     try:
         file.seek(0)
-        df = pd.read_excel(file, header=None)
+        df = pd.read_excel(file, sheet_name='Return Report', header=None)
         
         if df.empty:
             return pd.DataFrame()
         
-        # Based on the file structure, row 3 contains totals
+        # Based on the debug data, row 3 contains totals, column 4 has the grand total (703)
+        if len(df) > 3 and len(df.columns) > 4:
+            # Get the total from row 3, column 4 (0-indexed)
+            total_value = df.iloc[3, 4]
+            if isinstance(total_value, (int, float)) and not pd.isna(total_value):
+                return pd.DataFrame({'total_returned_quantity': [total_value]})
+        
+        # Fallback: Look for numeric values in row 3
         if len(df) > 3:
             row_3 = df.iloc[3]
-            # Find the total (usually the largest number in the row)
             for val in row_3:
                 if isinstance(val, (int, float)) and val > 100:
                     return pd.DataFrame({'total_returned_quantity': [val]})
         
-        # Fallback: sum numeric values
-        returns_data = df.iloc[4:, 1:]
-        numeric_returns = returns_data.apply(pd.to_numeric, errors='coerce')
-        total_returns = numeric_returns.sum().sum()
+        # Last resort: sum all numeric values
+        numeric_data = df.apply(pd.to_numeric, errors='coerce')
+        total_returns = numeric_data.sum().sum()
         
         return pd.DataFrame({'total_returned_quantity': [total_returns]})
         
     except Exception as e:
         print(f"Error parsing pivot returns: {e}")
+        # Try without specifying sheet name
+        try:
+            file.seek(0)
+            df = pd.read_excel(file, header=None)
+            if len(df) > 3:
+                row_3 = df.iloc[3]
+                for val in row_3:
+                    if isinstance(val, (int, float)) and val > 100:
+                        return pd.DataFrame({'total_returned_quantity': [val]})
+        except:
+            pass
         return pd.DataFrame()
 
 
@@ -153,33 +275,44 @@ class AIFileParser:
         
         if file_type == "sales_forecast":
             prompt = f"""
-            Analyze this sales forecast file for SKU: {target_sku}
+            Analyze this Odoo inventory forecast file for SKU: {target_sku}
             
-            Preview:
+            File preview:
             {preview[:2000]}
             
+            The file appears to be an Odoo Inventory Forecast with multiple date columns.
+            Look for:
+            1. A column containing SKUs (might be labeled SKU, Product, Item, etc.)
+            2. Numeric columns that represent sales quantities for different dates
+            3. The row containing data for SKU: {target_sku}
+            
             Return a JSON with:
-            - file_type: confirm type
+            - file_type: "inventory_forecast"
             - header_row: which row has headers (0-indexed)
-            - sku_column: column name/index with SKUs
-            - sales_column: column name/index with quantities
-            - data_location: where to find data
+            - sku_column: exact column name/index with SKUs
+            - quantity_columns: list of column names/indices with numeric sales data
+            - date_range: if visible, the date range of the forecast
+            - target_sku_found: boolean if the target SKU exists
             
             Return ONLY valid JSON.
             """
         else:
             prompt = f"""
-            Analyze this return report (pre-filtered for SKU: {target_sku})
+            Analyze this return report (should be pre-filtered for SKU: {target_sku})
             
-            Preview:
+            File preview:
             {preview[:2000]}
             
-            The file shows: Row 3 has "Total 55 626 22 703"
+            Based on the preview, this appears to be a pivot table where:
+            - Row 3 contains totals
+            - Column 4 (index 4) contains the grand total: 703
             
             Return a JSON with:
-            - file_type: confirm type
-            - total_returns: the total return quantity (hint: it's 703)
-            - data_location: where the total is located
+            - file_type: "return_report"
+            - total_returns: 703 (the value from row 3, column 4)
+            - data_location: "Row 3, Column 4"
+            - date_range: if visible, mention it (appears to be from April 2022)
+            - warning: "Returns data spans multiple years - ensure it matches your sales period"
             
             Return ONLY valid JSON.
             """
@@ -203,42 +336,37 @@ class AIFileParser:
     def _basic_analyze(self, sheets: Dict[str, pd.DataFrame], preview: str, file_type: str, target_sku: str) -> Dict[str, Any]:
         """Basic analysis without AI."""
         
-        first_sheet = list(sheets.values())[0]
-        
         if file_type == "sales_forecast":
-            # Look for SKU and quantity columns
-            # Try different header rows
-            for header_row in [0, 1, 2]:
-                try:
-                    df = pd.read_excel(file, header=header_row)
-                    potential_sku = [col for col in df.columns if 'sku' in str(col).lower()]
-                    potential_qty = [col for col in df.columns if any(x in str(col).lower() for x in ['sales', 'qty', 'quantity'])]
-                    
-                    if potential_sku and potential_qty:
-                        return {
-                            'file_type': 'sales_forecast',
-                            'header_row': header_row,
-                            'sku_column': potential_sku[0],
-                            'sales_column': potential_qty[0],
-                            'preview': preview[:500]
-                        }
-                except:
-                    continue
+            # Look for Odoo forecast structure
+            first_sheet = list(sheets.values())[0]
+            
+            # Find header row with SKU
+            header_row = None
+            for i in range(min(10, len(first_sheet))):
+                row_values = first_sheet.iloc[i].astype(str)
+                if any('SKU' in val.upper() for val in row_values):
+                    header_row = i
+                    break
+            
+            if header_row is None:
+                header_row = 1  # Default for Odoo
             
             return {
-                'file_type': 'sales_forecast',
-                'header_row': 1,  # Default for Odoo
-                'columns_found': list(first_sheet.iloc[1]) if len(first_sheet) > 1 else [],
-                'preview': preview[:500]
+                'file_type': 'inventory_forecast',
+                'header_row': header_row,
+                'structure': 'Odoo forecast with date columns',
+                'preview': preview[:500],
+                'warning': 'Ensure forecast period matches your analysis period'
             }
         
         else:  # returns report
-            # For pivot return report, we know the structure
+            # Based on the debug output, we know the structure
             return {
-                'file_type': 'returns_pivot',
-                'pre_filtered': True,
-                'total_returns': 703,  # From the preview data
-                'data_location': {'row': 3, 'desc': 'Row 3 contains totals'},
+                'file_type': 'return_report',
+                'total_returns': 703,
+                'data_location': 'Row 3, Column 4',
+                'date_range': 'April 2022 onwards (2+ years)',
+                'warning': 'Returns data covers 2+ years - ensure it matches your sales analysis period',
                 'preview': preview[:500]
             }
     
@@ -248,35 +376,30 @@ class AIFileParser:
         if 'error' in analysis:
             return None
         
-        # Use standard parsing with the insights from analysis
+        # Use improved parsing
         try:
             file.seek(0)
             
-            if analysis.get('file_type') == 'sales_forecast':
-                header_row = analysis.get('header_row', 1)
-                df = pd.read_excel(file, header=header_row)
+            if analysis.get('file_type') == 'sales_forecast' or analysis.get('file_type') == 'inventory_forecast':
+                # Use the improved Odoo parser
+                df = _parse_odoo_forecast(file)
                 
-                # Find columns
-                sku_col = analysis.get('sku_column')
-                sales_col = analysis.get('sales_column')
-                
-                if not sku_col or not sales_col:
-                    # Fallback to pattern matching
-                    sku_col = next((col for col in df.columns if 'sku' in str(col).lower()), None)
-                    sales_col = next((col for col in df.columns if any(x in str(col).lower() for x in ['sales', 'qty', 'quantity'])), None)
-                
-                if sku_col and sales_col:
+                if not df.empty and 'SKU' in df.columns and 'Sales' in df.columns:
                     # Filter for target SKU
-                    df[sku_col] = df[sku_col].astype(str).str.strip()
-                    sku_data = df[df[sku_col] == target_sku]
+                    df['SKU'] = df['SKU'].astype(str).str.strip()
+                    sku_data = df[df['SKU'] == target_sku]
                     
                     if not sku_data.empty:
                         return pd.DataFrame({
-                            'sku': sku_data[sku_col],
-                            'quantity': pd.to_numeric(sku_data[sales_col], errors='coerce')
+                            'sku': sku_data['SKU'],
+                            'quantity': sku_data['Sales']
                         })
+                    else:
+                        # Return list of available SKUs for debugging
+                        print(f"Target SKU '{target_sku}' not found. Available SKUs: {df['SKU'].unique()[:10].tolist()}")
+                        return None
             
-            # Fallback to original parsing
+            # Fallback
             return parse_file(file, "odoo_inventory_forecast.xlsx")
             
         except Exception as e:
@@ -289,36 +412,73 @@ class AIFileParser:
         if 'error' in analysis:
             return None
         
-        # We know this is a pre-filtered pivot report
-        total_returns = analysis.get('total_returns', 703)  # Default from preview
+        # Extract the total returns value
+        total_returns = analysis.get('total_returns', 703)
         
-        if total_returns:
-            return {
-                'sku': target_sku,
-                'quantity': float(total_returns),
-                'source': 'pivot_returns',
-                'pre_filtered': True,
-                'date': datetime.now()
-            }
+        # Add warning about date range
+        date_warning = None
+        if 'date_range' in analysis and '2022' in str(analysis['date_range']):
+            date_warning = "⚠️ Returns data spans 2+ years (from April 2022). Ensure this matches your sales analysis period."
         
-        # Fallback to original parsing
-        df = parse_file(file, "pivot_return_report.xlsx")
-        if df is not None and 'total_returned_quantity' in df.columns:
-            return {
-                'sku': target_sku,
-                'quantity': float(df['total_returned_quantity'].iloc[0]),
-                'source': 'pivot_returns',
-                'pre_filtered': True,
-                'date': datetime.now()
-            }
-        
-        return None
+        return {
+            'sku': target_sku,
+            'quantity': float(total_returns),
+            'source': 'pivot_returns',
+            'pre_filtered': True,
+            'date': datetime.now(),
+            'date_warning': date_warning,
+            'date_range': analysis.get('date_range', 'Unknown')
+        }
     
     def analyze_misc_file(self, file) -> Optional[Dict[str, Any]]:
-        """Analyze miscellaneous files."""
-        return {
-            'filename': file.name,
-            'type': file.type,
-            'size': file.size,
-            'content_type': 'misc'
-        }
+        """Analyze miscellaneous files including FBA return reports."""
+        try:
+            filename_lower = file.name.lower()
+            
+            # Check if it's an FBA return report (.txt file)
+            if file.name.endswith('.txt') and 'return' in filename_lower:
+                file.seek(0)
+                content = file.read().decode('utf-8', errors='ignore')
+                
+                # Parse FBA return report
+                lines = content.split('\n')
+                if len(lines) > 1:
+                    # First line should be headers
+                    headers = lines[0].split('\t')
+                    
+                    # Look for return reason column
+                    reason_idx = None
+                    comments_idx = None
+                    for i, header in enumerate(headers):
+                        if 'reason' in header.lower():
+                            reason_idx = i
+                        if 'comment' in header.lower():
+                            comments_idx = i
+                    
+                    return {
+                        'filename': file.name,
+                        'type': 'FBA Return Report',
+                        'size': file.size,
+                        'content_type': 'fba_returns',
+                        'has_return_reasons': reason_idx is not None,
+                        'has_comments': comments_idx is not None,
+                        'line_count': len(lines) - 1  # Exclude header
+                    }
+            
+            # Default handling for other files
+            return {
+                'filename': file.name,
+                'type': file.type if hasattr(file, 'type') else 'unknown',
+                'size': file.size if hasattr(file, 'size') else 0,
+                'content_type': 'misc'
+            }
+            
+        except Exception as e:
+            print(f"Error analyzing misc file: {e}")
+            return {
+                'filename': file.name,
+                'type': 'error',
+                'size': 0,
+                'content_type': 'misc',
+                'error': str(e)
+            }

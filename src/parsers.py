@@ -33,24 +33,43 @@ def standardize_sales_data(df: pd.DataFrame, target_sku: str) -> Tuple[Optional[
     if not sku_col:
         return None, None
     
-    # Find numeric columns for sales
-    numeric_cols = []
+    # Look for Sales column specifically
+    sales_col = None
     for col in df.columns:
-        if col != sku_col:
-            try:
-                test_vals = pd.to_numeric(df[col], errors='coerce')
-                if test_vals.sum() > 0:
-                    numeric_cols.append(col)
-            except:
-                pass
+        col_upper = str(col).upper()
+        if col_upper == 'SALES' or (col != sku_col and 'SALES' in col_upper):
+            sales_col = col
+            break
     
-    if not numeric_cols:
+    # If no Sales column, look for quantity-related columns
+    if not sales_col:
+        for col in df.columns:
+            col_lower = str(col).lower()
+            if any(term in col_lower for term in ['quantity', 'qty', 'units']):
+                sales_col = col
+                break
+    
+    # If still no sales column, use first numeric column
+    if not sales_col:
+        for col in df.columns:
+            if col != sku_col:
+                try:
+                    test_vals = pd.to_numeric(df[col], errors='coerce')
+                    if test_vals.notna().any():
+                        sales_col = col
+                        break
+                except:
+                    pass
+    
+    if not sales_col:
         return None, None
     
     # Create standardized dataframe
     result_df = pd.DataFrame()
     result_df['sku'] = df[sku_col].astype(str).str.strip()
-    result_df['quantity'] = df[numeric_cols].sum(axis=1)
+    # Ensure sales quantities are whole numbers
+    sales_values = pd.to_numeric(df[sales_col], errors='coerce').fillna(0)
+    result_df['quantity'] = sales_values.round().astype(int)
     
     # Filter for target SKU
     target_sku = target_sku.strip()
@@ -60,7 +79,7 @@ def standardize_sales_data(df: pd.DataFrame, target_sku: str) -> Tuple[Optional[
         debug_sku_list = list(result_df['sku'].unique()[:10])
         return None, debug_sku_list
     
-    # Clean up
+    # Clean up - only keep positive quantities
     product_data = product_data[product_data['quantity'] > 0]
     return product_data[['sku', 'quantity']], None
 
@@ -71,6 +90,8 @@ def standardize_returns_data(df: pd.DataFrame, target_sku: str) -> Optional[pd.D
         
     if 'total_returned_quantity' in df.columns:
         total_returns = df['total_returned_quantity'].iloc[0] if not df.empty else 0
+        # Ensure returns are whole numbers
+        total_returns = int(round(total_returns))
         return pd.DataFrame({'sku': [target_sku], 'quantity': [total_returns]})
     
     return None
@@ -121,25 +142,46 @@ def _parse_odoo_forecast(file: IO[bytes]) -> pd.DataFrame:
                     break
             
             if sku_col:
-                # Find numeric columns that could be sales/quantity
-                numeric_cols = []
+                # Look specifically for a "Sales" column
+                sales_col = None
                 for col in df.columns:
-                    if col != sku_col:
-                        try:
-                            # Check if column has numeric data
-                            test_vals = pd.to_numeric(df[col], errors='coerce')
-                            if test_vals.sum() > 0:  # Has some numeric values
-                                numeric_cols.append(col)
-                        except:
-                            pass
+                    col_str = str(col).upper()
+                    # Look for exact "SALES" column first
+                    if col_str == 'SALES':
+                        sales_col = col
+                        break
+                    # Then look for columns containing "SALES" but not other terms
+                    elif 'SALES' in col_str and not any(x in col_str for x in ['FORECAST', 'PLAN', 'TARGET']):
+                        sales_col = col
+                        break
                 
-                # If we have numeric columns, sum them as sales
-                if numeric_cols:
+                # If no "Sales" column found, look for quantity-related columns
+                if not sales_col:
+                    for col in df.columns:
+                        col_str = str(col).lower()
+                        if any(term in col_str for term in ['quantity', 'qty', 'units', 'sold']):
+                            sales_col = col
+                            break
+                
+                # If still no sales column, use the first numeric column after SKU
+                if not sales_col:
+                    for col in df.columns:
+                        if col != sku_col:
+                            try:
+                                test_vals = pd.to_numeric(df[col], errors='coerce')
+                                if test_vals.notna().any() and test_vals.sum() > 0:
+                                    sales_col = col
+                                    break
+                            except:
+                                pass
+                
+                if sales_col:
                     result_df = pd.DataFrame()
                     result_df['SKU'] = df[sku_col]
-                    # Sum all numeric columns as total sales
-                    result_df['Sales'] = df[numeric_cols].sum(axis=1)
-                    # Remove rows with zero sales
+                    # Convert to numeric and ensure whole numbers for quantities
+                    sales_values = pd.to_numeric(df[sales_col], errors='coerce').fillna(0)
+                    result_df['Sales'] = sales_values.round().astype(int)
+                    # Remove rows with zero or negative sales
                     result_df = result_df[result_df['Sales'] > 0]
                     return result_df
         
@@ -195,8 +237,6 @@ def _parse_pivot_returns(file: IO[bytes]) -> pd.DataFrame:
         except:
             pass
         return pd.DataFrame()
-
-
 def parse_file(uploaded_file: IO[bytes], filename: str) -> Optional[pd.DataFrame]:
     """Parse file based on filename patterns - original compatibility function."""
     filename_lower = filename.lower()
@@ -280,19 +320,20 @@ class AIFileParser:
             File preview:
             {preview[:2000]}
             
-            The file appears to be an Odoo Inventory Forecast with multiple date columns.
-            Look for:
-            1. A column containing SKUs (might be labeled SKU, Product, Item, etc.)
-            2. Numeric columns that represent sales quantities for different dates
-            3. The row containing data for SKU: {target_sku}
+            The file appears to be an Odoo Inventory Forecast. Based on the preview:
+            1. Look for a column containing SKUs (might be labeled SKU, Product, Item, etc.)
+            2. Look SPECIFICALLY for a column labeled "Sales" - this should contain the sales quantity
+            3. Do NOT sum multiple columns - use only the "Sales" column
+            4. The row containing data for SKU: {target_sku}
             
             Return a JSON with:
             - file_type: "inventory_forecast"
             - header_row: which row has headers (0-indexed)
             - sku_column: exact column name/index with SKUs
-            - quantity_columns: list of column names/indices with numeric sales data
+            - sales_column: the column labeled "Sales" specifically
             - date_range: if visible, the date range of the forecast
             - target_sku_found: boolean if the target SKU exists
+            - sales_value: the specific value in the Sales column for the target SKU
             
             Return ONLY valid JSON.
             """
@@ -390,9 +431,11 @@ class AIFileParser:
                     sku_data = df[df['SKU'] == target_sku]
                     
                     if not sku_data.empty:
+                        # Ensure sales is a whole number
+                        sales_value = int(round(sku_data['Sales'].iloc[0]))
                         return pd.DataFrame({
-                            'sku': sku_data['SKU'],
-                            'quantity': sku_data['Sales']
+                            'sku': [target_sku],
+                            'quantity': [sales_value]
                         })
                     else:
                         # Return list of available SKUs for debugging

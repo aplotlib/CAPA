@@ -66,7 +66,7 @@ def initialize_session_state():
     defaults = {
         'analysis_results': None,
         'capa_data': {},
-        'misc_df': pd.DataFrame(),
+        'misc_df': pd.DataFrame(columns=['filename', 'type', 'size', 'content_type']),
         'file_parser': None,
         'data_processor': None,
         'sales_data': None,
@@ -178,6 +178,26 @@ def process_files_with_ai(sales_file, returns_file, misc_files, target_sku, repo
             progress_bar.progress(100)
             status_text.text("✅ Analysis complete!")
             
+            # Process miscellaneous files
+            if misc_files:
+                misc_data = []
+                for file in misc_files:
+                    try:
+                        misc_info = {
+                            'filename': file.name,
+                            'type': file.type if hasattr(file, 'type') else 'unknown',
+                            'size': file.size if hasattr(file, 'size') else 0,
+                            'content_type': 'misc'
+                        }
+                        misc_data.append(misc_info)
+                    except Exception as e:
+                        st.warning(f"Could not process {file.name}: {str(e)}")
+                
+                if misc_data:
+                    st.session_state.misc_df = pd.DataFrame(misc_data, index=range(len(misc_data)))
+                else:
+                    st.session_state.misc_df = pd.DataFrame()
+                    
             st.success(f"✅ Analysis complete for SKU: {target_sku}")
             return
         
@@ -733,10 +753,16 @@ def main():
             )
 
         # Display miscellaneous files
-        if not st.session_state.misc_df.empty:
+        if hasattr(st.session_state, 'misc_df') and not st.session_state.misc_df.empty:
             st.markdown("---")
             st.markdown("### 📎 Additional Files Processed")
-            st.dataframe(st.session_state.misc_df)
+            try:
+                st.dataframe(st.session_state.misc_df)
+            except Exception as e:
+                st.warning(f"Could not display additional files: {str(e)}")
+                # Try to display as JSON instead
+                for idx, row in st.session_state.misc_df.iterrows():
+                    st.json(row.to_dict())
     
     with tab2:
         display_capa_form()
@@ -745,4 +771,10 @@ def main():
         display_doc_gen()
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        st.error(f"Application error: {str(e)}")
+        st.info("Please check your data files and try again.")
+        if st.checkbox("Show error details"):
+            st.exception(e)

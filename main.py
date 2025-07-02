@@ -499,7 +499,8 @@ def display_metrics_dashboard(results):
             st.info(f"""
             **Financial Impact:**
             - Unit Price: ${st.session_state.unit_price:,.2f}
-            - Return Cost: ${return_cost:,.2f}
+            - Total Return Cost: ${return_cost:,.2f}
+            - Returns: {int(summary['total_returned']):,} units × ${st.session_state.unit_price:,.2f} = ${return_cost:,.2f}
             """)
     
     with col2:
@@ -522,14 +523,7 @@ def display_metrics_dashboard(results):
     # Additional insights
     if results.get('insights'):
         st.markdown("### 🔍 AI-Generated Insights")
-        # Remove cost estimates if no price provided
-        insights_text = results['insights']
-        if not (hasattr(st.session_state, 'unit_price') and st.session_state.unit_price):
-            # Remove financial impact section from insights
-            lines = insights_text.split('\n')
-            filtered_lines = [line for line in lines if '💰' not in line and 'cost' not in line.lower()]
-            insights_text = '\n'.join(filtered_lines)
-        st.markdown(insights_text)
+        st.markdown(results['insights'])
 
 def generate_ai_capa_suggestions(issue_summary: str, analysis_results: Dict, api_key: str) -> Dict[str, str]:
     """Generate AI suggestions for CAPA form fields based on issue summary and analysis data."""

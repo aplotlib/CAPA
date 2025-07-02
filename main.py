@@ -6,6 +6,7 @@ from datetime import datetime
 from io import BytesIO
 import json
 import os
+from typing import Dict, Optional, Any
 
 # Import custom modules
 from src.parsers import AIFileParser, parse_file

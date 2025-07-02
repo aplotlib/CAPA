@@ -53,43 +53,94 @@ class MetricsCalculator:
         # Round values
         summary_df = summary_df.round(2)
         
-        # Add quality indicators
+        # Add quality indicators based on medical device standards
         summary_df['quality_status'] = summary_df['return_rate'].apply(
-            lambda x: 'Critical' if x > 10 else ('Warning' if x > 5 else 'Good')
+            lambda x: 'Critical' if x > 15 else ('Warning' if x > 10 else 'Good')
         )
         
         return summary_df
     
     @staticmethod
+    def calculate_quality_score(return_rate: float) -> float:
+        """
+        Calculate quality score appropriate for medical devices.
+        
+        Medical device industry standards:
+        - < 5% return rate: Excellent (90-100 score)
+        - 5-10% return rate: Good (70-90 score) - Industry standard
+        - 10-15% return rate: Acceptable (50-70 score)
+        - 15-20% return rate: Needs Improvement (30-50 score)
+        - > 20% return rate: Poor (0-30 score)
+        """
+        if return_rate < 5:
+            # Excellent: Linear scale from 90-100
+            quality_score = 90 + (5 - return_rate) * 2
+        elif return_rate < 10:
+            # Good: Linear scale from 70-90
+            quality_score = 70 + (10 - return_rate) * 4
+        elif return_rate < 15:
+            # Acceptable: Linear scale from 50-70
+            quality_score = 50 + (15 - return_rate) * 4
+        elif return_rate < 20:
+            # Needs Improvement: Linear scale from 30-50
+            quality_score = 30 + (20 - return_rate) * 4
+        else:
+            # Poor: Scale from 0-30
+            quality_score = max(0, 30 - (return_rate - 20) * 3)
+        
+        return round(quality_score)
+    
+    @staticmethod
     def calculate_quality_metrics(return_rate: float) -> Dict[str, any]:
         """Calculate additional quality metrics based on return rate."""
         
+        # Calculate quality score using medical device standards
+        quality_score = MetricsCalculator.calculate_quality_score(return_rate)
+        
+        # Determine risk level based on medical device thresholds
+        if return_rate > 15:
+            risk_level = 'High'
+        elif return_rate > 10:
+            risk_level = 'Medium'
+        else:
+            risk_level = 'Low'
+        
         metrics = {
             'return_rate': return_rate,
-            'quality_score': max(0, 100 - (return_rate * 10)),  # Simple quality score
-            'risk_level': 'High' if return_rate > 10 else ('Medium' if return_rate > 5 else 'Low'),
-            'investigation_required': return_rate > 5,
-            'capa_recommended': return_rate > 10
+            'quality_score': quality_score,
+            'risk_level': risk_level,
+            'investigation_required': return_rate > 10,  # Changed from 5% to 10%
+            'capa_recommended': return_rate > 15  # Changed from 10% to 15%
         }
         
-        # Add specific recommendations based on return rate
-        if return_rate > 10:
+        # Add specific recommendations based on medical device standards
+        if return_rate > 15:
             metrics['recommendations'] = [
-                "Immediate investigation required",
-                "Consider product recall evaluation",
-                "Implement corrective actions",
-                "Review manufacturing process"
+                "Critical quality issue - immediate investigation required",
+                "Consider product hold or recall evaluation",
+                "Implement immediate corrective actions",
+                "Review manufacturing process controls",
+                "Notify quality management and regulatory affairs"
+            ]
+        elif return_rate > 10:
+            metrics['recommendations'] = [
+                "Above industry standard - investigation recommended",
+                "Analyze return reasons and patterns",
+                "Review quality control procedures",
+                "Consider preventive actions",
+                "Monitor trend closely"
             ]
         elif return_rate > 5:
             metrics['recommendations'] = [
-                "Investigate return reasons",
-                "Review quality control procedures",
-                "Consider preventive actions"
+                "Within industry standard range",
+                "Continue monitoring for trends",
+                "Review for continuous improvement opportunities"
             ]
         else:
             metrics['recommendations'] = [
-                "Continue monitoring",
-                "Maintain current quality standards"
+                "Excellent quality performance",
+                "Maintain current quality standards",
+                "Share best practices across product lines"
             ]
         
         return metrics
@@ -198,26 +249,32 @@ def _generate_insights(return_summary: pd.DataFrame, quality_metrics: Dict,
     primary_data = return_summary.iloc[0]
     insights = []
     
-    # Return rate insight
+    # Return rate insight with medical device context
     insights.append(
         f"📊 **Return Rate Analysis**: The product has a {primary_data['return_rate']:.2f}% return rate "
-        f"over the {period_days}-day period."
+        f"over the {period_days}-day period. (Medical device industry standard: 5-10%)"
     )
     
-    # Quality status
-    if primary_data['quality_status'] == 'Critical':
+    # Quality status based on medical device standards
+    if primary_data['return_rate'] > 15:
         insights.append(
-            "🚨 **Critical Alert**: Return rate exceeds 10%, indicating serious quality issues "
-            "requiring immediate investigation and corrective action."
+            "🚨 **Critical Alert**: Return rate exceeds 15%, significantly above industry standards. "
+            "This indicates serious quality issues requiring immediate investigation and corrective action."
         )
-    elif primary_data['quality_status'] == 'Warning':
+    elif primary_data['return_rate'] > 10:
         insights.append(
-            "⚠️ **Warning**: Return rate is between 5-10%, suggesting potential quality concerns "
-            "that should be investigated."
+            "⚠️ **Warning**: Return rate is between 10-15%, above the industry standard of 5-10%. "
+            "Investigation is recommended to identify and address quality concerns."
+        )
+    elif primary_data['return_rate'] > 5:
+        insights.append(
+            "✅ **Good Standing**: Return rate is between 5-10%, within industry standards. "
+            "Continue monitoring for quality improvement opportunities."
         )
     else:
         insights.append(
-            "✅ **Good Standing**: Return rate is below 5%, indicating acceptable quality levels."
+            "🌟 **Excellent Performance**: Return rate is below 5%, indicating exceptional quality. "
+            "This is well below industry standards."
         )
     
     # Financial impact
@@ -226,6 +283,15 @@ def _generate_insights(return_summary: pd.DataFrame, quality_metrics: Dict,
         insights.append(
             f"💰 **Financial Impact**: Returns have cost approximately ${return_cost:,.2f} "
             f"in the analysis period."
+        )
+    
+    # Medical device specific insights
+    if primary_data['return_rate'] > 10:
+        insights.append(
+            "\n**📋 Regulatory Considerations**:\n"
+            "• Review per ISO 13485 requirements\n"
+            "• Consider CAPA documentation\n"
+            "• Evaluate need for regulatory notifications"
         )
     
     # Recommendations
@@ -279,20 +345,37 @@ def generate_capa_metrics(analysis_results: Dict) -> Dict:
     
     primary_data = summary.iloc[0]
     
+    # Determine investigation priority based on medical device standards
+    if primary_data['return_rate'] > 15:
+        investigation_priority = 'Critical'
+    elif primary_data['return_rate'] > 10:
+        investigation_priority = 'High'
+    elif primary_data['return_rate'] > 5:
+        investigation_priority = 'Medium'
+    else:
+        investigation_priority = 'Low'
+    
     capa_metrics = {
         'defect_rate': primary_data['return_rate'],
         'total_defects': int(primary_data['total_returned']),
         'total_production': int(primary_data['total_sold']),
         'quality_level': primary_data['quality_status'],
-        'investigation_priority': 'High' if primary_data['return_rate'] > 10 else 'Medium',
-        'regulatory_risk': 'High' if primary_data['return_rate'] > 15 else 'Low'
+        'investigation_priority': investigation_priority,
+        'regulatory_risk': 'High' if primary_data['return_rate'] > 20 else 'Medium' if primary_data['return_rate'] > 15 else 'Low'
     }
     
     # Add ISO 13485 specific metrics
     capa_metrics['iso_13485_indicators'] = {
         'nonconformity_rate': primary_data['return_rate'],
-        'customer_satisfaction_impact': 'Significant' if primary_data['return_rate'] > 10 else 'Minor',
-        'process_capability': 'Needs improvement' if primary_data['return_rate'] > 5 else 'Acceptable'
+        'customer_satisfaction_impact': 'Significant' if primary_data['return_rate'] > 15 else 'Moderate' if primary_data['return_rate'] > 10 else 'Minor',
+        'process_capability': 'Needs improvement' if primary_data['return_rate'] > 10 else 'Acceptable'
+    }
+    
+    # Add medical device specific risk assessment
+    capa_metrics['medical_device_risk'] = {
+        'patient_safety_impact': 'High' if primary_data['return_rate'] > 20 else 'Medium' if primary_data['return_rate'] > 15 else 'Low',
+        'clinical_risk_assessment_required': primary_data['return_rate'] > 15,
+        'design_review_recommended': primary_data['return_rate'] > 20
     }
     
     return capa_metrics

@@ -14,6 +14,17 @@ from src.analysis import run_full_analysis
 from src.compliance import validate_capa_data, generate_compliance_checklist, get_regulatory_guidelines
 from src.document_generator import CapaDocumentGenerator
 
+# Try to import AI helper, fall back if not available
+try:
+    from src.ai_capa_helper import AICAPAHelper
+except ImportError:
+    # If the module doesn't exist yet, create a dummy class
+    class AICAPAHelper:
+        def __init__(self, api_key=None):
+            self.client = None
+        def generate_capa_suggestions(self, issue_summary, analysis_results, product_info=None):
+            return {}
+
 # --- Page Configuration and Styling ---
 st.set_page_config(page_title="Medical Device CAPA Tool", page_icon="🏥", layout="wide")
 
@@ -77,7 +88,8 @@ def initialize_session_state():
         'manual_entry': False,
         'override_manual': False,
         'generated_doc': None,
-        'doc_filename': None
+        'doc_filename': None,
+        'ai_suggestions': {}
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -430,19 +442,9 @@ def display_metrics_dashboard(results):
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        # Color code based on medical device standards
-        if summary['return_rate'] < 5:
-            delta_color = "off"  # Green - excellent
-        elif summary['return_rate'] < 10:
-            delta_color = "off"  # Still green - industry standard
-        else:
-            delta_color = "inverse"  # Red - above standard
-            
         st.metric(
             "Return Rate", 
-            f"{summary['return_rate']:.2f}%",
-            delta=f"{summary['return_rate'] - 10:.2f}%" if summary['return_rate'] != 10 else "Industry Standard",
-            delta_color=delta_color
+            f"{summary['return_rate']:.2f}%"
         )
     
     with col2:
@@ -528,6 +530,23 @@ def display_metrics_dashboard(results):
             insights_text = '\n'.join(filtered_lines)
         st.markdown(insights_text)
 
+def generate_ai_capa_suggestions(issue_summary: str, analysis_results: Dict, api_key: str) -> Dict[str, str]:
+    """Generate AI suggestions for CAPA form fields based on issue summary and analysis data."""
+    
+    if not api_key:
+        return {}
+    
+    try:
+        # Use the AI helper
+        helper = AICAPAHelper(api_key)
+        suggestions = helper.generate_capa_suggestions(issue_summary, analysis_results)
+        return suggestions
+        
+    except Exception as e:
+        st.error(f"Could not generate AI suggestions: {str(e)}")
+        return {}
+
+
 def display_capa_form():
     """Displays the full CAPA form for data input."""
     st.markdown("## CAPA Information - ISO 13485 Compliant")
@@ -545,12 +564,47 @@ def display_capa_form():
             prefill_severity = "Critical"
         elif summary['return_rate'] > 10:
             prefill_severity = "Major"
+    
+    # AI Suggestions Section
+    st.markdown("### 🤖 AI-Assisted Form Completion (Optional)")
+    
+    with st.expander("Get AI Suggestions", expanded=False):
+        st.info("Describe the issue briefly, and AI will suggest content for all form fields.")
         
+        issue_summary = st.text_area(
+            "Issue Summary",
+            placeholder="Example: High return rate due to comfort issues with the pressure mattress pad. Customers reporting discomfort and instability.",
+            height=100,
+            key="issue_summary_for_ai"
+        )
+        
+        if st.button("✨ Generate AI Suggestions", type="secondary"):
+            if not issue_summary:
+                st.warning("Please provide an issue summary first.")
+            elif not st.session_state.analysis_results:
+                st.warning("Please analyze your data first to get context-aware suggestions.")
+            else:
+                with st.spinner("Generating suggestions..."):
+                    suggestions = generate_ai_capa_suggestions(
+                        issue_summary,
+                        st.session_state.analysis_results,
+                        st.secrets.get("ANTHROPIC_API_KEY")
+                    )
+                    
+                    if suggestions:
+                        st.session_state.ai_suggestions = suggestions
+                        st.success("✅ AI suggestions generated! They have been added to the form below. Feel free to edit them.")
+                    else:
+                        st.error("Could not generate suggestions. Please fill the form manually.")
+    
+    st.markdown("---")
+    
+    # Main CAPA Form
     with st.form("capa_form"):
         st.markdown(
             '<div class="info-box">'
             'Fill out the required fields below to generate a compliant CAPA report. '
-            'Fields marked with * are required.'
+            'Fields marked with * are required. AI suggestions (if generated) are editable.'
             '</div>',
             unsafe_allow_html=True
         )
@@ -592,33 +646,57 @@ def display_capa_form():
         
         st.markdown("### Issue Details")
         
+        # Get AI suggestions if available
+        ai_issue = ""
+        ai_root_cause = ""
+        ai_corrective = ""
+        ai_preventive = ""
+        
+        if hasattr(st.session_state, 'ai_suggestions') and st.session_state.ai_suggestions:
+            ai_issue = st.session_state.ai_suggestions.get('issue_description', '')
+            ai_root_cause = st.session_state.ai_suggestions.get('root_cause', '')
+            ai_corrective = st.session_state.ai_suggestions.get('corrective_action', '')
+            ai_preventive = st.session_state.ai_suggestions.get('preventive_action', '')
+            
+            st.info("📝 AI suggestions have been added to the fields below. You can edit them as needed.")
+        
         issue_description = st.text_area(
             "Issue Description*", 
-            height=100,
+            value=ai_issue,
+            height=150,
             placeholder="Provide a detailed problem statement including the nature of returns, frequency, and impact on customers...",
             help="Be specific about the quality issue identified"
         )
         
         root_cause = st.text_area(
             "Root Cause Analysis*", 
-            height=100,
+            value=ai_root_cause,
+            height=150,
             placeholder="Describe the investigation methodology and findings. What is the underlying cause of the returns?",
             help="Use tools like 5 Whys or Fishbone diagram"
         )
         
         corrective_action = st.text_area(
             "Corrective Actions*", 
-            height=100,
+            value=ai_corrective,
+            height=150,
             placeholder="Describe immediate actions to address existing issues and prevent further occurrences...",
             help="What will you do to fix the current problem?"
         )
         
         preventive_action = st.text_area(
             "Preventive Actions*", 
-            height=100,
+            value=ai_preventive,
+            height=150,
             placeholder="Describe long-term actions to prevent recurrence across all products...",
             help="How will you prevent this from happening again?"
         )
+        
+        # Clear AI suggestions button
+        if hasattr(st.session_state, 'ai_suggestions') and st.session_state.ai_suggestions:
+            if st.form_submit_button("🗑️ Clear AI Suggestions", type="secondary"):
+                st.session_state.ai_suggestions = {}
+                st.rerun()
         
         submitted = st.form_submit_button("💾 Save CAPA Data", type="primary")
 
@@ -657,6 +735,9 @@ def display_capa_form():
                 
                 if is_valid:
                     st.session_state.capa_data = capa_data
+                    # Clear AI suggestions after saving
+                    if hasattr(st.session_state, 'ai_suggestions'):
+                        st.session_state.ai_suggestions = {}
                     st.success("✅ CAPA data saved successfully!")
                     for warning in warnings:
                         st.warning(f"⚠️ {warning}")

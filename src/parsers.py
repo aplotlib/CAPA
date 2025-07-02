@@ -42,4 +42,5 @@ def parse_file(uploaded_file: IO[bytes], filename: str) -> Optional[pd.DataFrame
     if 'return' in filename_lower:
         return _parse_pivot_returns(uploaded_file)
     
+    # Fallback for misc files
     return _robust_read_csv(uploaded_file)

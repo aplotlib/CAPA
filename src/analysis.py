@@ -163,7 +163,7 @@ class MetricsCalculator:
         return financial_metrics
 
 def run_full_analysis(sales_df: pd.DataFrame, returns_df: pd.DataFrame, 
-                     report_period_days: int = 30) -> Dict:
+                     report_period_days: int = 30, unit_price: Optional[float] = None) -> Dict:
     """Run comprehensive analysis on sales and returns data."""
     
     # Validate input data
@@ -211,18 +211,22 @@ def run_full_analysis(sales_df: pd.DataFrame, returns_df: pd.DataFrame,
             primary_sku_data['return_rate']
         )
     
-    # Calculate financial impact
-    financial_impact = calculator.calculate_financial_impact(
-        sales_df, 
-        returns_df if returns_df is not None else pd.DataFrame()
-    )
+    # Calculate financial impact only if unit price provided
+    financial_impact = {}
+    if unit_price and unit_price > 0:
+        financial_impact = calculator.calculate_financial_impact(
+            sales_df, 
+            returns_df if returns_df is not None else pd.DataFrame(),
+            unit_cost=unit_price
+        )
     
     # Prepare insights
     insights = _generate_insights(
         return_summary,
         quality_metrics,
         financial_impact,
-        report_period_days
+        report_period_days,
+        unit_price
     )
     
     # Compile results
@@ -234,13 +238,14 @@ def run_full_analysis(sales_df: pd.DataFrame, returns_df: pd.DataFrame,
         'financial_impact': financial_impact,
         'insights': insights,
         'analysis_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'report_period_days': report_period_days
+        'report_period_days': report_period_days,
+        'unit_price': unit_price
     }
     
     return results
 
 def _generate_insights(return_summary: pd.DataFrame, quality_metrics: Dict,
-                      financial_impact: Dict, period_days: int) -> str:
+                      financial_impact: Dict, period_days: int, unit_price: Optional[float] = None) -> str:
     """Generate human-readable insights from the analysis."""
     
     if return_summary.empty:
@@ -277,12 +282,12 @@ def _generate_insights(return_summary: pd.DataFrame, quality_metrics: Dict,
             "This is well below industry standards."
         )
     
-    # Financial impact
-    if financial_impact:
+    # Financial impact - only if price was provided
+    if financial_impact and unit_price and unit_price > 0:
         return_cost = financial_impact.get('return_cost', 0)
         insights.append(
             f"💰 **Financial Impact**: Returns have cost approximately ${return_cost:,.2f} "
-            f"in the analysis period."
+            f"in the analysis period (based on unit price of ${unit_price:,.2f})."
         )
     
     # Medical device specific insights

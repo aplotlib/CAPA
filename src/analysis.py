@@ -2,13 +2,35 @@
 
 import pandas as pd
 import re
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple
 from datetime import datetime, timedelta
 
 class ReturnReasonCategorizer:
-    # ... (class code is unchanged)
+    """Categorizes return reasons using a robust set of predefined patterns."""
+    CATEGORIES = {
+        'QUALITY_DEFECTS': {'patterns': [r'defective', r'broken', r'damaged', r'doesn\'?t?\s+work', r'poor\s+quality', r'fell?\s+apart', r'cheap', r'malfunction', r'not\s+working', r'stopped?\s+working', r'dead\s+on\s+arrival', r'doa', r'faulty', r'ripped', r'torn', r'hole']},
+        'SIZE_FIT_ISSUES': {'patterns': [r'too\s+(small|large|big|tight|loose)', r'doesn\'?t?\s+fit', r'wrong\s+size', r'size\s+(issue|problem)', r'(small|large)r?\s+than\s+expected', r'runs?\s+(small|large|big)', r'fit\s+(issue|problem)', r'not\s+the\s+right\s+size']},
+        'WRONG_PRODUCT_OR_DESCRIPTION': {'patterns': [r'wrong\s+(item|product|model|color)', r'not\s+as\s+described', r'incorrect\s+(item|product)', r'different\s+than\s+(pictured|described|ordered)', r'not\s+what\s+i\s+ordered', r'received?\s+(wrong|different)', r'misrepresented', r'missing\s+parts']},
+        'BUYER_REMORSE_OR_MISTAKE': {'patterns': [r'bought?\s+by\s+mistake', r'accidentally\s+ordered', r'ordered?\s+(wrong|incorrect)\s+item', r'no\s+longer\s+need', r'don\'?t?\s+need', r'changed?\s+my?\s+mind', r'found?\s+(better|cheaper|different)', r'duplicate\s+order']},
+    }
+    def __init__(self):
+        self.compiled_patterns = {cat: [re.compile(p, re.IGNORECASE) for p in data['patterns']] for cat, data in self.CATEGORIES.items()}
+    def categorize_reason(self, reason: str, comment: str = "") -> Tuple[str, float]:
+        combined_text = f"{reason or ''} {comment or ''}".lower().strip()
+        if not combined_text: return "UNCATEGORIZED", 0.0
+        scores = {cat: sum(1 for p in pats if p.search(combined_text)) for cat, pats in self.compiled_patterns.items()}
+        best_cat = max(scores, key=scores.get)
+        return (best_cat, 1.0) if scores[best_cat] > 0 else ("UNCATEGORIZED", 0.0)
+    def categorize_dataframe(self, df: pd.DataFrame, reason_col: str, comment_col: str) -> pd.DataFrame:
+        if reason_col not in df.columns: return df
+        if comment_col not in df.columns: df[comment_col] = ''
+        df[comment_col] = df[comment_col].fillna('')
+        results = df.apply(lambda row: self.categorize_reason(row.get(reason_col, ''), row.get(comment_col, '')), axis=1)
+        df['category'] = [res[0] for res in results]
+        return df
 
 class MetricsCalculator:
+    """Calculates key quality and sales metrics."""
     @staticmethod
     def calculate_return_rates(sales_df: pd.DataFrame, returns_df: pd.DataFrame) -> pd.DataFrame:
         if sales_df.empty or 'sku' not in sales_df.columns: return pd.DataFrame()
@@ -24,7 +46,7 @@ class MetricsCalculator:
         return summary_df.round(2)
 
 def run_full_analysis(sales_df: pd.DataFrame, returns_df: pd.DataFrame, report_period_days: int) -> Dict:
-    """Orchestrates the full analysis pipeline with a fix for manual entry."""
+    """Orchestrates the full analysis pipeline."""
     if sales_df is None or returns_df is None or sales_df.empty:
         return {"error": "Insufficient sales data for analysis."}
 

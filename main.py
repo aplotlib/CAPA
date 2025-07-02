@@ -8,10 +8,10 @@ import json
 import os
 
 # Import custom modules
-from src.parsers import AIFileParser
-from src.data_processing import DataProcessor
+from src.parsers import AIFileParser, parse_file
+from src.data_processing import DataProcessor, standardize_sales_data, standardize_returns_data
 from src.analysis import run_full_analysis
-from src.compliance import validate_capa_data
+from src.compliance import validate_capa_data, generate_compliance_checklist, get_regulatory_guidelines
 from src.document_generator import CapaDocumentGenerator
 
 # --- Page Configuration and Styling ---
@@ -84,11 +84,20 @@ def initialize_ai_components():
     if st.session_state.file_parser is None:
         api_key = st.secrets.get("ANTHROPIC_API_KEY")
         if api_key:
-            st.session_state.file_parser = AIFileParser(api_key)
-            st.session_state.data_processor = DataProcessor(api_key)
+            try:
+                st.session_state.file_parser = AIFileParser(api_key)
+                st.session_state.data_processor = DataProcessor(api_key)
+                return True
+            except Exception as e:
+                st.warning(f"AI features unavailable: {str(e)}. Using standard parsing.")
+                st.session_state.file_parser = None
+                st.session_state.data_processor = DataProcessor(None)
+                return True  # Continue with fallback methods
         else:
-            st.error("❌ Anthropic API key not found in secrets. Please configure it.")
-            return False
+            st.info("Anthropic API key not configured. Using standard parsing methods.")
+            st.session_state.file_parser = None
+            st.session_state.data_processor = DataProcessor(None)
+            return True  # Continue with fallback methods
     return True
 
 # --- UI Components ---
@@ -134,6 +143,43 @@ def process_files_with_ai(sales_file, returns_file, misc_files, target_sku, repo
     with progress_container:
         progress_bar = st.progress(0)
         status_text = st.empty()
+        
+        # Check if AI is available
+        if st.session_state.file_parser is None:
+            # Use fallback parsing
+            status_text.text("Processing files using standard parsing...")
+            progress_bar.progress(50)
+            
+            # Parse files using original methods
+            sales_df = parse_file(sales_file, sales_file.name)
+            returns_df = parse_file(returns_file, returns_file.name)
+            
+            if sales_df is None or sales_df.empty:
+                st.error("Could not read the Sales Forecast file.")
+                return
+                
+            # Process with original functions
+            sales_data, debug_skus = standardize_sales_data(sales_df, target_sku)
+            if sales_data is None:
+                st.error(f"SKU '{target_sku}' not found in the Sales file.")
+                if debug_skus:
+                    st.info("Available SKUs found:")
+                    for sku in debug_skus[:10]:
+                        st.write(f"- {sku}")
+                return
+            
+            returns_data = standardize_returns_data(returns_df, target_sku)
+            if returns_data is None:
+                st.error("Could not extract returns data.")
+                return
+            
+            # Run analysis
+            st.session_state.analysis_results = run_full_analysis(sales_data, returns_data, report_period_days)
+            progress_bar.progress(100)
+            status_text.text("✅ Analysis complete!")
+            
+            st.success(f"✅ Analysis complete for SKU: {target_sku}")
+            return
         
         # Step 1: Analyze file structures with AI
         status_text.text("🤖 Analyzing file structures with AI...")

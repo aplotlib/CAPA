@@ -11,9 +11,16 @@ from src.compliance import validate_capa_data
 from src.document_generator import CapaDocumentGenerator
 
 st.set_page_config(page_title="Medical Device CAPA Tool", page_icon="🏥", layout="wide")
-st.markdown("""<style>.main-header{...}</style>""", unsafe_allow_html=True)
+st.markdown("""
+<style>
+    .main-header { background-color: #00466B; color: white; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 30px; }
+    .stMetric { background-color: #F0F2F6; border-radius: 10px; padding: 10px; border: 1px solid #E0E0E0; }
+    .stButton>button { width: 100%; }
+</style>
+""", unsafe_allow_html=True)
 
 def initialize_session_state():
+    """Initializes all required session state variables."""
     defaults = {'analysis_results': None, 'capa_data': {}, 'misc_df': pd.DataFrame()}
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -25,7 +32,11 @@ def display_header():
     st.markdown('<div class="main-header"><h1>🏥 Medical Device CAPA Tool</h1><p>Quality Management System for Returns Analysis and CAPA Generation</p></div>', unsafe_allow_html=True)
 
 def process_files(sales_file, returns_file, misc_files, target_sku, report_period_days):
+    """Orchestrates the new parsing and analysis workflow for all file types."""
     with st.spinner("Processing files..."):
+        st.session_state.analysis_results = None
+        st.session_state.misc_df = pd.DataFrame()
+
         sales_raw_df = parse_file(sales_file, sales_file.name)
         if sales_raw_df is None or sales_raw_df.empty:
             st.error("Could not read the Sales Forecast file.")
@@ -33,7 +44,7 @@ def process_files(sales_file, returns_file, misc_files, target_sku, report_perio
 
         sales_df = standardize_sales_data(sales_raw_df, target_sku)
         if sales_df is None or sales_df.empty:
-            st.error(f"SKU '{target_sku}' not found in the Sales file.")
+            st.error(f"SKU '{target_sku}' not found in the Sales file. Please check for typos or formatting issues.")
             return
 
         returns_raw_df = parse_file(returns_file, returns_file.name)
@@ -56,6 +67,7 @@ def process_files(sales_file, returns_file, misc_files, target_sku, report_perio
                 st.success("✅ Miscellaneous files processed.")
 
 def display_manual_entry_form(report_period_days):
+    """Displays a form for manual data entry in the sidebar."""
     st.markdown("#### Manually Enter Data")
     with st.form("manual_data_form"):
         target_sku = st.text_input("Enter SKU for Analysis*")
@@ -71,6 +83,25 @@ def display_manual_entry_form(report_period_days):
                 returns_df = pd.DataFrame([{'sku': target_sku, 'quantity': return_units}])
                 st.session_state.analysis_results = run_full_analysis(sales_df, returns_df, report_period_days)
                 st.success(f"✅ Manual analysis complete for SKU: {target_sku}")
+
+def display_metrics_dashboard(results):
+    """Displays the analysis results on the dashboard."""
+    if not results or 'return_summary' not in results or results['return_summary'].empty:
+        return
+    summary = results['return_summary'].iloc[0]
+    st.markdown(f"### Analysis for SKU: **{summary['sku']}**")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Return Rate", f"{summary['return_rate']:.2f}%")
+    col2.metric("Total Units Sold", f"{int(summary['total_sold']):,}")
+    col3.metric("Total Units Returned", f"{int(summary['total_returned']):,}")
+
+def display_capa_form():
+    """Displays the CAPA form."""
+    st.markdown("## CAPA Information")
+    with st.form("capa_form"):
+        # Form fields would be here
+        st.text_input("CAPA Number")
+        st.form_submit_button("Save CAPA Data")
 
 def main():
     display_header()
@@ -100,4 +131,21 @@ def main():
             display_manual_entry_form(report_period_days)
 
     tab1, tab2, tab3 = st.tabs(["📊 Dashboard", "📋 CAPA Form", "📄 Document Generation"])
-    # ... (Tab display logic is unchanged)
+    with tab1:
+        if st.session_state.analysis_results:
+            display_metrics_dashboard(st.session_state.analysis_results)
+        else:
+            st.info("Enter data and click 'Process' to see the analysis.")
+
+        if not st.session_state.misc_df.empty:
+            st.markdown("---")
+            st.markdown("### Miscellaneous Uploaded Data")
+            st.dataframe(st.session_state.misc_df)
+    
+    with tab2:
+        display_capa_form()
+    with tab3:
+        st.info("Document Generation will be available here.")
+
+if __name__ == "__main__":
+    main()

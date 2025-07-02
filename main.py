@@ -36,7 +36,7 @@ def process_files(sales_file, returns_file, misc_files, target_sku, report_perio
 
         sales_df = standardize_sales_data(sales_raw_df, target_sku)
         if sales_df is None or sales_df.empty:
-            st.error(f"SKU '{target_sku}' not found in the Sales file.")
+            st.error(f"SKU '{target_sku}' not found in the Sales file. Please check for typos or formatting issues.")
             return
 
         returns_raw_df = parse_file(returns_file, returns_file.name)

@@ -5,7 +5,7 @@ from typing import Optional
 
 def _find_column_name(df_columns: list, possible_names: list) -> Optional[str]:
     """Finds the first matching original column name from a list."""
-    column_map = {col.lower().strip(): col for col in df_columns}
+    column_map = {str(col).lower().strip(): str(col) for col in df_columns}
     for name in possible_names:
         cleaned_name = name.lower().strip()
         if cleaned_name in column_map:
@@ -20,7 +20,12 @@ def standardize_sales_data(df: pd.DataFrame, target_sku: str) -> Optional[pd.Dat
     if not sku_col or not sales_col:
         return None
 
+    # **THE FIX**: Ensure the SKU column is treated as a string BEFORE filtering.
+    df[sku_col] = df[sku_col].astype(str)
+    
     df = df.rename(columns={sku_col: 'sku', sales_col: 'quantity'})
+    
+    # Now, the comparison will be string vs. string.
     product_data = df[df['sku'] == target_sku].copy()
 
     if product_data.empty:

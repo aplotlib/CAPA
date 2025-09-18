@@ -1,31 +1,16 @@
-# requirements.txt
-
-# Core dependencies
+Core dependencies
 streamlit>=1.28.0
 pandas>=2.0.0
 numpy>=1.24.0
 plotly>=5.17.0
 
-# AI integrations
-openai>=1.0.0
-anthropic>=0.21.3  # Updated for newer API standards
+AI integrations
+anthropic>=0.21.3
 
-# Document processing
+Document processing
 python-docx>=1.1.0
-PyPDF2>=3.0.0
-pdfplumber>=0.10.0
-docx2txt>=0.8
-
-# Google integration
-google-api-python-client>=2.100.0
-google-auth-oauthlib>=1.1.0
-
-# Image processing for screenshots
-Pillow>=10.0.0
-pytesseract>=0.3.10
-
-# File handling & parsing
 openpyxl>=3.1.0
 
-# Additional utilities
-requests>=2.31.0
+Image processing for screenshots
+Pillow>=10.0.0
+pytesseract>=0.3.10

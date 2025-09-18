@@ -17,6 +17,7 @@ from src.document_generator import CapaDocumentGenerator
 from src.ai_capa_helper import AICAPAHelper, AIEmailDrafter
 from src.fmea import FMEA
 from src.pre_mortem import PreMortem
+from src.returns_processor import ReturnsProcessor
 
 # --- Page Configuration and Styling ---
 st.set_page_config(page_title="Product Lifecycle Manager", page_icon="📈", layout="wide")
@@ -73,8 +74,8 @@ def initialize_session_state():
         'misc_data': [],
         'file_parser': None,
         'data_processor': None,
-        'sales_data': None,
-        'returns_data': None,
+        'sales_data': {}, # Now a dict to hold data by channel
+        'returns_data': {}, # Now a dict
         'ai_analysis': None,
         'unit_price': None,
         'generated_doc': None,
@@ -172,44 +173,58 @@ def display_sidebar():
                 process_all_files(uploaded_files, st.session_state.target_sku, st.session_state.report_period_days)
 
 def process_all_files(files, target_sku, report_period_days):
-    """Process all uploaded files using the AI parser and run analysis."""
+    """Process all uploaded files, categorize by channel, and run analysis."""
     progress_bar = st.progress(0, text="Initializing...")
     file_parser = st.session_state.file_parser
 
     # Reset data
-    st.session_state.sales_data = None
-    st.session_state.returns_data = None
+    st.session_state.sales_data = {}
+    st.session_state.returns_data = {}
     st.session_state.misc_data = []
 
     for i, file in enumerate(files):
         progress_bar.progress((i + 1) / len(files), text=f"Analyzing {file.name}...")
         try:
             analysis = file_parser.analyze_file_structure(file, target_sku)
-            
-            if analysis.get('content_type') == 'sales':
-                st.session_state.sales_data = file_parser.extract_data(file, analysis, target_sku)
-                st.success(f"Identified and processed Sales Data: {file.name}")
-            elif analysis.get('content_type') == 'returns':
-                st.session_state.returns_data = file_parser.extract_data(file, analysis, target_sku)
-                st.success(f"Identified and processed Returns Data: {file.name}")
+            content_type = analysis.get('content_type', 'other')
+            channel = analysis.get('channel', 'general') # e.g., fba, fbm, b2b
+
+            data_df = file_parser.extract_data(file, analysis, target_sku)
+
+            if data_df is not None:
+                if 'sales' in content_type:
+                    if channel not in st.session_state.sales_data:
+                        st.session_state.sales_data[channel] = []
+                    st.session_state.sales_data[channel].append(data_df)
+                    st.success(f"Processed {channel.upper()} Sales Data: {file.name}")
+                elif 'returns' in content_type:
+                    if channel not in st.session_state.returns_data:
+                        st.session_state.returns_data[channel] = []
+                    st.session_state.returns_data[channel].append(data_df)
+                    st.success(f"Processed {channel.upper()} Returns Data: {file.name}")
+                else:
+                    st.session_state.misc_data.append(analysis)
+                    st.info(f"Processed supplementary file: {file.name}")
             else:
-                # For misc files, just store the analysis
-                st.session_state.misc_data.append(analysis)
-                st.info(f"Processed supplementary file: {file.name} (Type: {analysis.get('content_type', 'Unknown')})")
+                 st.session_state.misc_data.append(analysis)
+                 st.info(f"Processed supplementary file: {file.name} (Type: {analysis.get('content_type', 'Unknown')})")
 
         except Exception as e:
             st.error(f"Could not process {file.name}: {str(e)}")
 
+    progress_bar.progress(1.0, text="Aggregating data...")
+
+    # Consolidate data for each channel
+    for channel, df_list in st.session_state.sales_data.items():
+        st.session_state.sales_data[channel] = pd.concat(df_list, ignore_index=True)
+    for channel, df_list in st.session_state.returns_data.items():
+        st.session_state.returns_data[channel] = pd.concat(df_list, ignore_index=True)
+
     progress_bar.progress(1.0, text="Running final analysis...")
-
-    # Standardize and run full analysis
-    if st.session_state.sales_data is not None and st.session_state.returns_data is not None:
-        processed_sales = st.session_state.data_processor.process_sales_data(st.session_state.sales_data, target_sku)
-        processed_returns = st.session_state.data_processor.process_returns_data(st.session_state.returns_data, target_sku)
-
+    if st.session_state.sales_data and st.session_state.returns_data:
         st.session_state.analysis_results = run_full_analysis(
-            processed_sales,
-            processed_returns,
+            st.session_state.sales_data,
+            st.session_state.returns_data,
             report_period_days,
             st.session_state.unit_price
         )
@@ -218,7 +233,7 @@ def process_all_files(files, target_sku, report_period_days):
             unsafe_allow_html=True
         )
     else:
-        st.error("Could not find both sales and returns data in the uploaded files. Please check your files.")
+        st.error("Could not find both sales and returns data. Please check your files.")
     
     progress_bar.empty()
 
@@ -233,23 +248,37 @@ def display_dashboard():
         return
 
     results = st.session_state.analysis_results
-    summary = results.get('return_summary')
+    summary = results.get('overall_summary')
 
     if summary is None or summary.empty:
         st.warning("Analysis did not produce a valid summary.")
         return
 
     summary_data = summary.iloc[0]
-    st.markdown(f"### Analysis for SKU: **{summary_data['sku']}**")
+    st.markdown(f"### Overall Analysis for SKU: **{summary_data['sku']}**")
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Return Rate", f"{summary_data['return_rate']:.2f}%")
+    col1.metric("Overall Return Rate", f"{summary_data['return_rate']:.2f}%")
     col2.metric("Total Units Sold", f"{int(summary_data['total_sold']):,}")
     col3.metric("Total Units Returned", f"{int(summary_data['total_returned']):,}")
     
     quality_metrics = results.get('quality_metrics', {})
     col4.metric("Quality Score", f"{quality_metrics.get('quality_score', 'N/A')}/100", delta=quality_metrics.get('risk_level', ''))
-
+    
+    # Per-channel breakdown
+    st.markdown("---")
+    st.subheader("📈 Channel Performance Breakdown")
+    channel_summary = results.get('channel_summary')
+    if channel_summary:
+        num_channels = len(channel_summary)
+        cols = st.columns(num_channels)
+        for i, (channel, data) in enumerate(channel_summary.items()):
+            with cols[i]:
+                st.markdown(f"#### {channel.upper()}")
+                st.metric("Return Rate", f"{data.get('return_rate', 0):.2f}%")
+                st.metric("Units Sold", f"{int(data.get('total_sold', 0)):,}")
+                st.metric("Units Returned", f"{int(data.get('total_returned', 0)):,}")
+    
     st.markdown("---")
     
     col1, col2 = st.columns(2)
@@ -265,6 +294,7 @@ def display_dashboard():
                     st.json(item)
         else:
             st.info("No supplementary files were processed.")
+
 
 def display_fmea_tab():
     st.header("🔬 Failure Mode and Effects Analysis (FMEA)")
@@ -410,7 +440,7 @@ def display_exports_tab():
     )
     
     if st.button("📦 Export Analysis Row for Logging"):
-        summary_df = st.session_state.analysis_results['return_summary']
+        summary_df = st.session_state.analysis_results['overall_summary']
         if not summary_df.empty:
             log_data = summary_df.iloc[[0]].copy() # Select first row as a DataFrame
             log_data['analysis_date'] = datetime.now().strftime('%Y-%m-%d')
@@ -468,11 +498,12 @@ def display_exports_tab():
                     st.warning("No Pre-Mortem summary available to export.")
 
         if buffer:
+            mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if filename.endswith('.xlsx') else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             st.download_button(
                 label=f"📥 Download {doc_type}",
                 data=buffer,
                 file_name=filename,
-                mime="application/octet-stream"
+                mime=mime_type
             )
 
 

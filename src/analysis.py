@@ -9,10 +9,10 @@ class MetricsCalculator:
     def calculate_return_rates(sales_df: pd.DataFrame, returns_df: pd.DataFrame) -> pd.DataFrame:
         if sales_df is None or sales_df.empty:
             return pd.DataFrame()
-        
+
         sales_summary = sales_df.groupby('sku')['quantity'].sum().reset_index()
         sales_summary.rename(columns={'quantity': 'total_sold'}, inplace=True)
-        
+
         if returns_df is None or returns_df.empty:
             summary_df = sales_summary.copy()
             summary_df['total_returned'] = 0
@@ -21,7 +21,7 @@ class MetricsCalculator:
             returns_summary.rename(columns={'quantity': 'total_returned'}, inplace=True)
             summary_df = pd.merge(sales_summary, returns_summary, on='sku', how='left')
             summary_df['total_returned'] = summary_df['total_returned'].fillna(0)
-            
+
         summary_df['return_rate'] = summary_df.apply(
             lambda row: (row['total_returned'] / row['total_sold'] * 100) if row['total_sold'] > 0 else 0,
             axis=1
@@ -50,22 +50,22 @@ class MetricsCalculator:
 
 def run_full_analysis(sales_df: pd.DataFrame, returns_df: pd.DataFrame,
                      report_period_days: int = 30, unit_price: Optional[float] = None) -> Dict:
-    if sales_df is None or sales_df.empty or returns_df is None:
-        return {"error": "Sales or returns data is missing or invalid."}
+    if sales_df is None or sales_df.empty:
+        return {"error": "Sales data is missing or invalid."}
 
     calculator = MetricsCalculator()
     return_summary = calculator.calculate_return_rates(sales_df, returns_df)
-    
+
     if return_summary.empty:
         return {"error": "Could not calculate return summary."}
 
     primary_sku_data = return_summary.iloc[0]
     quality_metrics = calculator.calculate_quality_metrics(primary_sku_data['return_rate'])
-    
+
     insights = _generate_insights(primary_sku_data, quality_metrics, report_period_days, unit_price)
 
     return {
-        'overall_summary': return_summary, # Changed from 'return_summary' for clarity
+        'return_summary': return_summary,
         'quality_metrics': quality_metrics,
         'insights': insights,
     }
@@ -79,7 +79,7 @@ def _generate_insights(summary_data: pd.Series, quality_metrics: Dict,
         f"**Return Rate Analysis**: The product's return rate is **{return_rate:.2f}%** over the last {period_days} days. "
         f"This is evaluated against the medical device industry standard of 5-10%."
     )
-    
+
     if return_rate > 15:
         insights.append(
             "🚨 **Critical Alert**: This rate is significantly above industry standards, suggesting serious quality issues that require immediate investigation and a formal CAPA process."
@@ -96,14 +96,14 @@ def _generate_insights(summary_data: pd.Series, quality_metrics: Dict,
     if unit_price and unit_price > 0:
         return_cost = summary_data['total_returned'] * unit_price
         insights.append(f"💰 **Financial Impact**: Based on a unit price of ${unit_price:,.2f}, the cost of returns for this period is approximately **${return_cost:,.2f}**.")
-    
+
     return "\n\n".join(insights)
 
 def calculate_cost_benefit(analysis_results: Dict, current_unit_cost: float, cost_change: float, expected_rr_reduction: float) -> Dict:
     """
     Calculates the cost-benefit of a proposed change.
     """
-    summary_data = analysis_results['overall_summary'].iloc[0]
+    summary_data = analysis_results['return_summary'].iloc[0]
     total_sold = summary_data['total_sold']
     current_return_rate = summary_data['return_rate']
 
@@ -111,21 +111,21 @@ def calculate_cost_benefit(analysis_results: Dict, current_unit_cost: float, cos
     new_return_rate = current_return_rate - expected_rr_reduction
     if new_return_rate < 0:
         new_return_rate = 0
-    
+
     returns_reduced = total_sold * (expected_rr_reduction / 100)
     savings_from_returns = returns_reduced * current_unit_cost
-    
+
     new_unit_cost = current_unit_cost + cost_change
     total_additional_cost = total_sold * cost_change
 
     net_savings = savings_from_returns - total_additional_cost
-    
+
     # Scale to annual
     annual_scaling_factor = 365 / 30 # Assuming analysis is for 30 days
     annual_savings = net_savings * annual_scaling_factor
 
     roi = (annual_savings / (total_additional_cost * annual_scaling_factor)) * 100 if total_additional_cost > 0 else float('inf')
-    
+
     breakeven_units = total_additional_cost / (savings_from_returns / total_sold) if savings_from_returns > 0 else float('inf')
 
     # Summary

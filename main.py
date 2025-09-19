@@ -17,7 +17,7 @@ from src.document_generator import CapaDocumentGenerator
 from src.ai_capa_helper import AICAPAHelper, AIEmailDrafter
 from src.fmea import FMEA
 from src.pre_mortem import PreMortem
-from src.returns_processor import ReturnsProcessor
+from src.fba_returns_processor import ReturnsProcessor
 
 # --- Page Configuration and Styling ---
 st.set_page_config(page_title="Product Lifecycle Manager", page_icon="📈", layout="wide")

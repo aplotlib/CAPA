@@ -3,6 +3,7 @@
 from typing import Dict, List, Optional
 import pandas as pd
 import anthropic
+import json
 
 class FMEA:
     """Handles Failure Mode and Effects Analysis logic."""

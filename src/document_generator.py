@@ -1,7 +1,7 @@
 # src/document_generator.py
 
 import json
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 from io import BytesIO
 from datetime import datetime
 from docx import Document
@@ -22,50 +22,11 @@ class CapaDocumentGenerator:
             except Exception as e:
                 print(f"Failed to initialize Anthropic client: {e}")
 
-    def generate_ai_structured_content(self, capa_data: Dict, analysis_results: Dict) -> Dict:
-        """Generate structured CAPA content using AI model."""
-        if not self.client:
-            return self._get_default_template(capa_data, analysis_results)
-        
-        summary = analysis_results.get('return_summary', {}).iloc[0] if not analysis_results.get('return_summary', {}).empty else {}
-        prompt = f"""
-        You are a medical device QA expert creating a formal CAPA report.
-        Based on the following data, generate a comprehensive JSON for each section.
-        - CAPA Number: {capa_data.get('capa_number', 'TBD')}
-        - Product: {capa_data.get('product', 'TBD')}
-        - Return Rate: {summary.get('return_rate', 'N/A')}%
-        - Quality Insights: {analysis_results.get('insights', 'N/A')}
-
-        Generate a complete CAPA report with the JSON structure: {{
-          "executive_summary": "...", "issue": "...", "immediate_actions": "...",
-          "investigation_methodology": "...", "root_cause": "...", "corrective_action_plan": "...",
-          "preventive_action_plan": "...", "effectiveness_check_plan": "..."
-        }}
-        Return ONLY valid JSON.
-        """
-        try:
-            response = self.client.messages.create(
-                model=self.model, max_tokens=3000,
-                messages=[{"role": "user", "content": prompt}]
-            ).content[0].text
-            return json.loads(response)
-        except Exception as e:
-            print(f"Error generating AI content: {e}")
-            return self._get_default_template(capa_data, analysis_results)
-
-    def _get_default_template(self, capa_data: Dict, analysis_results: Dict) -> Dict:
-        return {"executive_summary": "Default executive summary.", "issue": "Default issue description."}
-
-    def export_to_docx(self, capa_data: Dict, content: Dict) -> BytesIO:
-        """Export content to a professionally formatted Word document."""
+    def export_text_to_docx(self, text: str, title: str) -> BytesIO:
+        """Export plain text to a formatted Word document."""
         doc = Document()
-        doc.add_heading(f"CAPA Report: {capa_data.get('product', 'N/A')}", level=1)
-        doc.add_paragraph(f"CAPA Number: {capa_data.get('capa_number', 'TBD')}\nDate: {capa_data.get('date', 'TBD')}")
-
-        for section, text in content.items():
-            doc.add_heading(section.replace('_', ' ').title(), level=2)
-            doc.add_paragraph(str(text))
-
+        doc.add_heading(title, level=1)
+        doc.add_paragraph(text)
         buffer = BytesIO()
         doc.save(buffer)
         buffer.seek(0)
@@ -76,18 +37,71 @@ class CapaDocumentGenerator:
         buffer = BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             fmea_df.to_excel(writer, sheet_name='FMEA', index=False)
-            writer.book.worksheets[0].column_dimensions['A'].width = 30
-            writer.book.worksheets[0].column_dimensions['B'].width = 30
-            writer.book.worksheets[0].column_dimensions['D'].width = 30
-            writer.book.worksheets[0].column_dimensions['F'].width = 30
+            # Auto-adjust columns
+            for column in writer.book.worksheets[0].columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(cell.value)
+                    except:
+                        pass
+                adjusted_width = (max_length + 2)
+                writer.book.worksheets[0].column_dimensions[column_letter].width = adjusted_width
         buffer.seek(0)
         return buffer
-        
-    def export_text_to_docx(self, text: str, title: str) -> BytesIO:
-        """Export plain text to a formatted Word document."""
+
+    def export_all_to_docx(self, content: Dict[str, Any]) -> BytesIO:
+        """Exports a combined report of all selected analyses to a Word document."""
         doc = Document()
-        doc.add_heading(title, level=1)
-        doc.add_paragraph(text)
+        doc.add_heading(f"Combined Quality Report for SKU: {content.get('sku', 'N/A')}", level=1)
+        doc.add_paragraph(f"Report Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # --- Dashboard Section ---
+        if content.get('dashboard'):
+            doc.add_heading("Dashboard & CAPA Insights", level=2)
+            results = content['dashboard']
+            summary = results.get('return_summary')
+            if summary is not None and not summary.empty:
+                summary_data = summary.iloc[0]
+                doc.add_paragraph(
+                    f"Return Rate: {summary_data['return_rate']:.2f}% | "
+                    f"Total Sold: {int(summary_data['total_sold'])} | "
+                    f"Total Returned: {int(summary_data['total_returned'])}"
+                )
+            doc.add_paragraph(results.get('insights', 'No insights generated.'))
+            doc.add_page_break()
+
+        # --- FMEA Section ---
+        if content.get('fmea') is not None and not content.get('fmea').empty:
+            doc.add_heading("Failure Mode and Effects Analysis (FMEA)", level=2)
+            fmea_df = content['fmea']
+            
+            # Add FMEA table to the document
+            table = doc.add_table(rows=1, cols=len(fmea_df.columns))
+            table.style = 'Table Grid'
+            hdr_cells = table.rows[0].cells
+            for i, col_name in enumerate(fmea_df.columns):
+                hdr_cells[i].text = col_name
+
+            for index, row in fmea_df.iterrows():
+                row_cells = table.add_row().cells
+                for i, value in enumerate(row):
+                    row_cells[i].text = str(value)
+            doc.add_page_break()
+
+        # --- Pre-Mortem Section ---
+        if content.get('pre_mortem'):
+            doc.add_heading("Pre-Mortem Summary", level=2)
+            doc.add_paragraph(content['pre_mortem'])
+            doc.add_page_break()
+
+        # --- Vendor Email Section ---
+        if content.get('vendor_email'):
+            doc.add_heading("Vendor Email Draft", level=2)
+            doc.add_paragraph(content['vendor_email'])
+
         buffer = BytesIO()
         doc.save(buffer)
         buffer.seek(0)

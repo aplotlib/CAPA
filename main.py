@@ -2,12 +2,13 @@
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
 from io import BytesIO
 import json
 import os
 from typing import Dict, Optional, Any
 import time
+import copy
 
 # Import custom modules
 from src.parsers import AIFileParser
@@ -26,6 +27,9 @@ st.set_page_config(page_title="Product Lifecycle Manager", page_icon="📈", lay
 
 st.markdown("""
 <style>
+    body {
+        font-family: 'Inter', sans-serif;
+    }
     .main-header {
         background-color: #00466B;
         color: white;
@@ -42,6 +46,10 @@ st.markdown("""
     }
     .stButton>button {
         width: 100%;
+    }
+    div, p, span, th, td {
+        word-wrap: break-word;
+        overflow-wrap: break-word;
     }
     .info-box {
         background-color: #E3F2FD;
@@ -79,8 +87,9 @@ def initialize_session_state():
         'analysis_results': None, 'capa_data': {}, 'misc_data': [],
         'file_parser': None, 'data_processor': None,
         'sales_data': {}, 'returns_data': {},
-        'ai_analysis': None, 'unit_price': 0.0, 'target_sku': "",
-        'report_period_days': 30,
+        'ai_analysis': None, 'unit_cost': 0.0, 'sales_price': 0.0, 'target_sku': "",
+        'start_date': datetime.now().date() - pd.Timedelta(days=30),
+        'end_date': datetime.now().date(),
         'manual_sales': 0, 'manual_returns': 0,
         'generated_doc': None, 'doc_filename': None,
         'ai_suggestions': {}, 'fmea_data': None,
@@ -124,37 +133,85 @@ def display_header():
         unsafe_allow_html=True
     )
 
+def get_serializable_state() -> str:
+    """Creates a JSON-serializable representation of the session state."""
+    # Create a deep copy to avoid modifying the live session state
+    state_copy = copy.deepcopy(st.session_state)
+    
+    serializable_state = {}
+    
+    for k, v in state_copy.items():
+        # Handle DataFrames
+        if isinstance(v, pd.DataFrame):
+            serializable_state[k] = v.to_json(orient='split')
+        # Handle dictionaries that might contain DataFrames
+        elif isinstance(v, dict):
+            # Check for 'analysis_results' specifically
+            if k == 'analysis_results' and v and 'return_summary' in v and isinstance(v.get('return_summary'), pd.DataFrame):
+                v['return_summary'] = v['return_summary'].to_json(orient='split')
+            
+            # Check sales/returns data
+            if k in ['sales_data', 'returns_data']:
+                for source, df_list in v.items():
+                    if isinstance(df_list, list):
+                        v[source] = [df.to_json(orient='split') if isinstance(df, pd.DataFrame) else df for df in df_list]
+
+            serializable_state[k] = v
+        # Handle date/datetime objects
+        elif isinstance(v, (datetime, date)):
+            serializable_state[k] = v.isoformat()
+        # Handle other JSON-serializable types
+        elif isinstance(v, (list, str, int, float, bool, type(None))):
+            serializable_state[k] = v
+        # Skip non-serializable objects like modules or functions
+        else:
+            continue
+            
+    return json.dumps(serializable_state, indent=2)
+
+def load_state_from_json(uploaded_file):
+    """Loads session state from an uploaded JSON file."""
+    try:
+        loaded_state = json.load(uploaded_file)
+        for key, value in loaded_state.items():
+            if key == 'fmea_data' and isinstance(value, str):
+                st.session_state[key] = pd.read_json(value, orient='split')
+            elif key == 'analysis_results' and isinstance(value, dict) and 'return_summary' in value and isinstance(value.get('return_summary'), str):
+                value['return_summary'] = pd.read_json(value['return_summary'], orient='split')
+                st.session_state[key] = value
+            elif key in ['sales_data', 'returns_data'] and isinstance(value, dict):
+                st.session_state[key] = {
+                    source: [pd.read_json(df_json, orient='split') for df_json in df_list]
+                    for source, df_list in value.items()
+                }
+            elif key in ['start_date', 'end_date'] and isinstance(value, str):
+                 st.session_state[key] = date.fromisoformat(value)
+            else:
+                 # Check if the key exists before assigning, to avoid adding new keys from old session files
+                if key in st.session_state:
+                    st.session_state[key] = value
+        st.success("Session loaded successfully!")
+        time.sleep(1)
+        st.rerun()
+    except Exception as e:
+        st.error(f"Failed to load session: {e}")
+
+
 def display_sidebar():
     with st.sidebar:
         st.header("💾 Session Management")
         
-        serializable_state = {k: v for k, v in st.session_state.items() if isinstance(v, (list, dict, str, int, float, bool, type(None)))}
-        
-        if 'fmea_data' in st.session_state and st.session_state.fmea_data is not None:
-             serializable_state['fmea_data'] = st.session_state.fmea_data.to_json(orient='split')
-
         st.download_button(
-            label="📤 Quick Export/Save Session",
-            data=json.dumps(serializable_state, indent=2),
+            label="📤 Export/Save Session",
+            data=get_serializable_state(),
             file_name=f"capa_session_{datetime.now().strftime('%Y%m%d')}.json",
             mime="application/json",
             use_container_width=True
         )
         
-        uploaded_state = st.file_uploader("📥 Import Saved Session", type="json")
+        uploaded_state = st.file_uploader("📥 Import Session", type="json")
         if uploaded_state is not None:
-            try:
-                loaded_state = json.load(uploaded_state)
-                for key, value in loaded_state.items():
-                    if key == 'fmea_data' and isinstance(value, str):
-                        st.session_state[key] = pd.read_json(value, orient='split')
-                    else:
-                        st.session_state[key] = value
-                st.success("Session loaded successfully!")
-                time.sleep(1)
-                st.rerun()
-            except Exception as e:
-                st.error(f"Failed to load session: {e}")
+            load_state_from_json(uploaded_state)
 
         st.markdown("---")
         st.header("⚙️ Controls & Data Input")
@@ -164,14 +221,28 @@ def display_sidebar():
             value=st.session_state.get('target_sku', ''),
             help="Enter the exact SKU to analyze across all uploaded documents."
         )
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.session_state.unit_cost = st.number_input(
+                "Unit Cost ($)",
+                min_value=0.0,
+                value=st.session_state.get('unit_cost', 0.0),
+                help="The cost you pay your vendor for one unit.",
+                format="%.2f"
+            )
+        with col2:
+             st.session_state.sales_price = st.number_input(
+                "Sales Price ($)",
+                min_value=0.0,
+                value=st.session_state.get('sales_price', 0.0),
+                help="The price the customer pays for one unit.",
+                format="%.2f"
+            )
 
-        st.session_state.unit_price = st.number_input(
-            "Product Unit Price ($)",
-            min_value=0.0,
-            value=st.session_state.get('unit_price', 0.0),
-            help="Used for financial impact calculations.",
-            format="%.2f"
-        )
+        st.subheader("🗓️ Analysis Date Range")
+        st.session_state.start_date = st.date_input("Start Date", value=st.session_state.start_date)
+        st.session_state.end_date = st.date_input("End Date", value=st.session_state.end_date)
         
         st.subheader("✍️ Manual Data Entry")
         st.session_state.manual_sales = st.number_input("Total Units Sold", min_value=0, step=1, value=st.session_state.manual_sales)
@@ -219,12 +290,19 @@ def trigger_final_analysis():
                 all_returns_df = pd.concat(all_returns_dfs, ignore_index=True)
 
         st.session_state.analysis_results = None
+        
+        report_period_days = (st.session_state.end_date - st.session_state.start_date).days
+        if report_period_days <= 0:
+            st.error("Error: Start Date must be before End Date.")
+            return
+
         if not all_sales_df.empty:
             st.session_state.analysis_results = run_full_analysis(
-                all_sales_df,
-                all_returns_df,
-                st.session_state.report_period_days,
-                st.session_state.unit_price
+                sales_df=all_sales_df,
+                returns_df=all_returns_df,
+                report_period_days=report_period_days,
+                unit_cost=st.session_state.unit_cost,
+                sales_price=st.session_state.sales_price
             )
             st.success(f"Successfully analyzed all data for SKU: {st.session_state.target_sku}")
             st.balloons()
@@ -308,8 +386,8 @@ def display_ai_chat_interface(tab_name: str):
 
 def display_dashboard():
     st.info(
-        "**Instructions:** Start here. Enter your product's SKU and sales/returns data in the sidebar on the left. "
-        "You can either enter the total numbers manually (recommended) or upload files for the AI to parse. "
+        "**Instructions:** Start here. Enter your product's SKU, cost/price, and date range in the sidebar. "
+        "You can then enter sales/returns data manually or upload files for the AI to parse. "
         "Once processed, this dashboard will show the high-level quality metrics."
     )
     if st.session_state.get('pending_image_confirmations'):
@@ -362,6 +440,41 @@ def display_dashboard():
     
     st.markdown(results.get('insights', ''))
 
+    st.markdown("---")
+    st.subheader("💡 Cost-Benefit Analysis for Potential Fix")
+    st.info("Use this tool to project the financial impact of a proposed quality improvement.")
+
+    with st.form("cost_benefit_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            cost_change = st.number_input("Cost increase per unit ($)", min_value=0.0, step=0.01, format="%.2f", help="How much will the proposed fix add to the unit cost?")
+        with col2:
+            expected_rr_reduction = st.number_input("Expected return rate reduction (%)", min_value=0.0, max_value=100.0, step=0.1, format="%.1f", help="How much do you expect the return rate to drop by?")
+        
+        submitted = st.form_submit_button("Calculate Financial Impact", use_container_width=True, type="primary")
+
+        if submitted:
+            if st.session_state.unit_cost > 0:
+                report_period_days = (st.session_state.end_date - st.session_state.start_date).days
+                with st.spinner("Calculating cost-benefit..."):
+                    cost_benefit_results = calculate_cost_benefit(
+                        analysis_results=st.session_state.analysis_results,
+                        current_unit_cost=st.session_state.unit_cost,
+                        cost_change=cost_change,
+                        expected_rr_reduction=expected_rr_reduction,
+                        report_period_days=report_period_days
+                    )
+                    st.session_state.capa_feasibility_analysis = cost_benefit_results
+            else:
+                st.warning("Please set a 'Unit Cost' in the sidebar to run this analysis.")
+
+    if st.session_state.capa_feasibility_analysis:
+        cb_results = st.session_state.capa_feasibility_analysis
+        st.success(f"**Summary:** {cb_results['summary']}")
+        with st.expander("Show detailed calculation"):
+            st.table(pd.DataFrame.from_dict(cb_results['details'], orient='index', columns=["Value"]))
+
+
     display_ai_chat_interface("the Dashboard")
 
 def display_fmea_tab():
@@ -379,27 +492,29 @@ def display_fmea_tab():
         st.session_state.fmea_data = pd.DataFrame(columns=["Potential Failure Mode", "Potential Effect(s)", "Severity", "Potential Cause(s)", "Occurrence", "Current Controls", "Detection", "RPN"])
 
     with st.expander("✍️ Add Failure Mode"):
-        with st.form("manual_fmea_entry", clear_on_submit=True):
-            mode = st.text_input("Potential Failure Mode")
-            effect = st.text_input("Potential Effect(s)")
-            cause = st.text_input("Potential Cause(s)")
-            controls = st.text_input("Current Controls")
-            if st.form_submit_button("Add Entry", type="primary"):
-                new_row = pd.DataFrame([{"Potential Failure Mode": mode, "Potential Effect(s)": effect, "Potential Cause(s)": cause, "Current Controls": controls}])
-                st.session_state.fmea_data = pd.concat([st.session_state.fmea_data, new_row], ignore_index=True)
-                st.success("Manual entry added.")
+        with st.container():
+            with st.form("manual_fmea_entry", clear_on_submit=True):
+                mode = st.text_input("Potential Failure Mode")
+                effect = st.text_input("Potential Effect(s)")
+                cause = st.text_input("Potential Cause(s)")
+                controls = st.text_input("Current Controls")
+                if st.form_submit_button("Add Entry", type="primary"):
+                    new_row = pd.DataFrame([{"Potential Failure Mode": mode, "Potential Effect(s)": effect, "Potential Cause(s)": cause, "Current Controls": controls}])
+                    st.session_state.fmea_data = pd.concat([st.session_state.fmea_data, new_row], ignore_index=True)
+                    st.success("Manual entry added.")
 
     with st.expander("🤖 Suggest Failure Modes with AI"):
-        issue_description = st.text_area("Describe an issue for AI to analyze:", height=100, key="fmea_issue_desc", help="Provide a general issue or use data from the dashboard for more specific suggestions.")
-        if st.button("Suggest Failure Modes"):
-            if issue_description:
-                with st.spinner("AI is analyzing potential failure modes..."):
-                    # Pass analysis_results if available, otherwise None.
-                    suggestions = fmea.suggest_failure_modes(issue_description, st.session_state.analysis_results)
-                st.session_state.fmea_data = pd.concat([st.session_state.fmea_data, pd.DataFrame(suggestions)], ignore_index=True)
-                st.success("AI suggestions added.")
-            else:
-                st.warning("Please describe the issue first.")
+        with st.container():
+            issue_description = st.text_area("Describe an issue for AI to analyze:", height=100, key="fmea_issue_desc", help="Provide a general issue or use data from the dashboard for more specific suggestions.")
+            if st.button("Suggest Failure Modes"):
+                if issue_description:
+                    with st.spinner("AI is analyzing potential failure modes..."):
+                        # Pass analysis_results if available, otherwise None.
+                        suggestions = fmea.suggest_failure_modes(issue_description, st.session_state.analysis_results)
+                    st.session_state.fmea_data = pd.concat([st.session_state.fmea_data, pd.DataFrame(suggestions)], ignore_index=True)
+                    st.success("AI suggestions added.")
+                else:
+                    st.warning("Please describe the issue first.")
 
     st.subheader("FMEA Table")
     if 'fmea_data' in st.session_state and st.session_state.fmea_data is not None:

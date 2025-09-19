@@ -65,7 +65,7 @@ def run_full_analysis(sales_df: pd.DataFrame, returns_df: pd.DataFrame,
     insights = _generate_insights(primary_sku_data, quality_metrics, report_period_days, unit_price)
 
     return {
-        'return_summary': return_summary,
+        'overall_summary': return_summary, # Changed from 'return_summary' for clarity
         'quality_metrics': quality_metrics,
         'insights': insights,
     }
@@ -98,3 +98,58 @@ def _generate_insights(summary_data: pd.Series, quality_metrics: Dict,
         insights.append(f"💰 **Financial Impact**: Based on a unit price of ${unit_price:,.2f}, the cost of returns for this period is approximately **${return_cost:,.2f}**.")
     
     return "\n\n".join(insights)
+
+def calculate_cost_benefit(analysis_results: Dict, current_unit_cost: float, cost_change: float, expected_rr_reduction: float) -> Dict:
+    """
+    Calculates the cost-benefit of a proposed change.
+    """
+    summary_data = analysis_results['overall_summary'].iloc[0]
+    total_sold = summary_data['total_sold']
+    current_return_rate = summary_data['return_rate']
+
+    # Calculations
+    new_return_rate = current_return_rate - expected_rr_reduction
+    if new_return_rate < 0:
+        new_return_rate = 0
+    
+    returns_reduced = total_sold * (expected_rr_reduction / 100)
+    savings_from_returns = returns_reduced * current_unit_cost
+    
+    new_unit_cost = current_unit_cost + cost_change
+    total_additional_cost = total_sold * cost_change
+
+    net_savings = savings_from_returns - total_additional_cost
+    
+    # Scale to annual
+    annual_scaling_factor = 365 / 30 # Assuming analysis is for 30 days
+    annual_savings = net_savings * annual_scaling_factor
+
+    roi = (annual_savings / (total_additional_cost * annual_scaling_factor)) * 100 if total_additional_cost > 0 else float('inf')
+    
+    breakeven_units = total_additional_cost / (savings_from_returns / total_sold) if savings_from_returns > 0 else float('inf')
+
+    # Summary
+    summary = (
+        f"The proposed change is projected to result in annual savings of ${annual_savings:,.2f}. "
+        f"This represents a {roi:.2f}% return on investment. "
+        "This is a financially viable change." if annual_savings > 0 else "This change is not financially viable."
+    )
+
+    details = {
+        "Current Return Rate": f"{current_return_rate:.2f}%",
+        "Expected New Return Rate": f"{new_return_rate:.2f}%",
+        "Units Sold in Period": f"{int(total_sold):,}",
+        "Returns Reduced in Period": f"{int(returns_reduced):,}",
+        "Savings from Reduced Returns": f"${savings_from_returns:,.2f}",
+        "Additional Cost for Period": f"${total_additional_cost:,.2f}",
+        "Net Savings for Period": f"${net_savings:,.2f}",
+        "Projected Annual Savings": f"${annual_savings:,.2f}",
+    }
+
+    return {
+        "summary": summary,
+        "annual_savings": annual_savings,
+        "roi": roi,
+        "breakeven_units": breakeven_units,
+        "details": details,
+    }

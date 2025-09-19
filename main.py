@@ -627,7 +627,7 @@ def display_exports_tab():
         st.warning("No data available to export. Complete some analysis on other tabs first.")
         return
 
-    doc_types = st.multoselect(
+    doc_types = st.multiselect(
         "Select document sections to generate:",
         available_docs,
         default=available_docs

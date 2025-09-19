@@ -15,7 +15,7 @@ from src.data_processing import DataProcessor
 from src.analysis import run_full_analysis, calculate_cost_benefit
 from src.compliance import validate_capa_data
 from src.document_generator import CapaDocumentGenerator
-from src.ai_capa_helper import AICAPAHelper, AIEmailDrafter, MedicalDeviceClassifier
+from src.ai_capa_helper import AICAPAHelper, AIEmailDrafter, MedicalDeviceClassifier, RiskAssessmentGenerator
 from src.fmea import FMEA
 from src.pre_mortem import PreMortem
 from src.fba_returns_processor import ReturnsProcessor
@@ -89,6 +89,7 @@ def initialize_session_state():
         'chat_history': {},
         'capa_feasibility_analysis': None,
         'medical_device_classification': None,
+        'risk_assessment_report': None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -108,6 +109,7 @@ def initialize_components():
         st.session_state.data_processor = DataProcessor(api_key)
         st.session_state.ai_context_helper = AIContextHelper(api_key)
         st.session_state.medical_device_classifier = MedicalDeviceClassifier(api_key)
+        st.session_state.risk_assessment_generator = RiskAssessmentGenerator(api_key)
         st.session_state.components_initialized = True
 
 
@@ -126,11 +128,8 @@ def display_sidebar():
     with st.sidebar:
         st.header("💾 Session Management")
         
-        # Quick Save/Load
-        # Create a dictionary of serializable session state items
         serializable_state = {k: v for k, v in st.session_state.items() if isinstance(v, (list, dict, str, int, float, bool, type(None)))}
         
-        # Don't save dataframes directly, maybe their JSON representation
         if 'fmea_data' in st.session_state and st.session_state.fmea_data is not None:
              serializable_state['fmea_data'] = st.session_state.fmea_data.to_json(orient='split')
 
@@ -207,14 +206,12 @@ def display_sidebar():
 def trigger_final_analysis():
     """Consolidates all data and runs the final analysis."""
     with st.spinner("Aggregating data and running final analysis..."):
-        # Consolidate all sales data into a single DataFrame
         all_sales_df = pd.DataFrame()
         if st.session_state.sales_data:
             all_sales_dfs = [df for df_list in st.session_state.sales_data.values() for df in df_list if df is not None and not df.empty]
             if all_sales_dfs:
                 all_sales_df = pd.concat(all_sales_dfs, ignore_index=True)
 
-        # Consolidate all returns data into a single DataFrame
         all_returns_df = pd.DataFrame()
         if st.session_state.returns_data:
             all_returns_dfs = [df for df_list in st.session_state.returns_data.values() for df in df_list if df is not None and not df.empty]
@@ -376,10 +373,6 @@ def display_fmea_tab():
         "3.  **Review RPN**: The Risk Priority Number (RPN) is calculated automatically (`S x O x D`). The highest RPNs represent the highest risks."
     )
 
-    if not st.session_state.analysis_results:
-        st.info('👆 Process data on the Dashboard tab first to enable FMEA analysis.')
-        return
-
     fmea = FMEA(st.session_state.anthropic_api_key)
 
     if 'fmea_data' not in st.session_state or st.session_state.fmea_data is None:
@@ -397,10 +390,11 @@ def display_fmea_tab():
                 st.success("Manual entry added.")
 
     with st.expander("🤖 Suggest Failure Modes with AI"):
-        issue_description = st.text_area("Describe an issue for AI to analyze:", height=100, key="fmea_issue_desc")
+        issue_description = st.text_area("Describe an issue for AI to analyze:", height=100, key="fmea_issue_desc", help="Provide a general issue or use data from the dashboard for more specific suggestions.")
         if st.button("Suggest Failure Modes"):
             if issue_description:
-                with st.spinner("AI is thinking..."):
+                with st.spinner("AI is analyzing potential failure modes..."):
+                    # Pass analysis_results if available, otherwise None.
                     suggestions = fmea.suggest_failure_modes(issue_description, st.session_state.analysis_results)
                 st.session_state.fmea_data = pd.concat([st.session_state.fmea_data, pd.DataFrame(suggestions)], ignore_index=True)
                 st.success("AI suggestions added.")
@@ -419,7 +413,6 @@ def display_fmea_tab():
             }
         )
         
-        # Ensure correct types for calculation
         for col in ['Severity', 'Occurrence', 'Detection']:
             edited_df[col] = pd.to_numeric(edited_df[col], errors='coerce')
         
@@ -431,6 +424,58 @@ def display_fmea_tab():
         st.metric("Highest Risk Priority Number (RPN)", int(edited_df['RPN'].max()) if not edited_df.empty else 0)
 
     display_ai_chat_interface("FMEA")
+
+
+def display_risk_assessment_tab():
+    st.header("🛡️ Risk Assessment (ISO 14971 / IEC 62366)")
+    st.info(
+        "**Instructions:** Generate a formal risk assessment for your Design History File (DHF).\n"
+        "1.  **Enter Product Details**: Provide a name and a detailed description of the product and its intended use.\n"
+        "2.  **Select Assessment Type**: Choose the standard to assess against (ISO 14971 for general device risk, IEC 62366 for use-related risk, or both).\n"
+        "3.  **Generate & Review**: The AI will generate a structured risk table. Review it for accuracy and completeness.\n"
+        "4.  **Export**: Copy the content or download the file for your records."
+    )
+
+    with st.form("risk_assessment_form"):
+        product_name = st.text_input("Product Name", placeholder="e.g., Smart Temperature Monitor")
+        product_description = st.text_area(
+            "Product Description (include intended use, user profile, and key features)",
+            height=150,
+            placeholder="e.g., A wireless, wearable patch that continuously monitors body temperature for infants. It connects via Bluetooth to a mobile app..."
+        )
+        assessment_type = st.radio(
+            "Select Assessment Type",
+            ["ISO 14971 (Standard Risk Assessment)", "IEC 62366 (Use-Related Risk Analysis)", "Both"],
+            horizontal=True
+        )
+        submitted = st.form_submit_button("🤖 Generate Risk Assessment", type="primary", use_container_width=True)
+
+        if submitted:
+            if not product_name or not product_description or not st.session_state.target_sku:
+                st.warning("Please enter a Target SKU (in the sidebar), Product Name, and Product Description.")
+            else:
+                with st.spinner("AI is conducting a comprehensive risk assessment..."):
+                    st.session_state.risk_assessment_report = st.session_state.risk_assessment_generator.generate_assessment(
+                        product_name,
+                        st.session_state.target_sku,
+                        product_description,
+                        assessment_type
+                    )
+
+    if st.session_state.risk_assessment_report:
+        st.markdown("---")
+        st.subheader("Generated Risk Assessment Report")
+        
+        report_text = st.session_state.risk_assessment_report
+        st.markdown(report_text, unsafe_allow_html=True) # Allow HTML for better table rendering if needed
+        
+        st.text_area("Copyable Report Text", report_text, height=200, key="risk_report_copy_text")
+        
+        doc_gen = CapaDocumentGenerator(st.session_state.anthropic_api_key)
+        docx_bytes = doc_gen.export_text_to_docx(report_text, "Risk Assessment Report")
+        st.download_button("Download as Word (.docx)", docx_bytes, f"Risk_Assessment_{st.session_state.target_sku}.docx")
+
+    display_ai_chat_interface("Risk Assessment")
 
 
 def display_pre_mortem_tab():
@@ -452,9 +497,12 @@ def display_pre_mortem_tab():
     )
 
     if st.button("🧠 Generate AI Questions"):
-        with st.spinner("Generating thought-provoking questions..."):
-            questions = pre_mortem.generate_questions(scenario)
-            st.session_state.pre_mortem_data = [{"question": q, "answer": ""} for q in questions]
+        if not scenario:
+            st.warning("Please define the failure scenario first.")
+        else:
+            with st.spinner("Generating thought-provoking questions..."):
+                questions = pre_mortem.generate_questions(scenario)
+                st.session_state.pre_mortem_data = [{"question": q, "answer": ""} for q in questions]
 
     if st.session_state.pre_mortem_data:
         st.subheader("Brainstorming Session")
@@ -479,12 +527,8 @@ def display_vendor_comm_tab():
         "**Instructions:** This tool drafts professional, collaborative emails to your vendors.\n"
         "1.  **Enter Details**: Provide the vendor and contact person's name.\n"
         "2.  **Set Context**: Describe the goal of the email and rate the recipient's English fluency.\n"
-        "3.  **Draft**: The AI will generate a culturally-aware email draft based on the data from the Dashboard."
+        "3.  **Draft**: The AI will generate an email draft. If you've processed data on the dashboard, it will be included for context."
     )
-
-    if not st.session_state.analysis_results:
-        st.info('👆 Process data on the Dashboard tab first to draft vendor communications.')
-        return
 
     drafter = AIEmailDrafter(st.session_state.anthropic_api_key)
     
@@ -505,8 +549,10 @@ def display_vendor_comm_tab():
     if st.button("✍️ Draft Collaborative Email", type="primary"):
         if goal and vendor_name and contact_name:
             with st.spinner("AI is drafting a professional email..."):
+                # Pass analysis_results if available, otherwise an empty dict
+                analysis_context = st.session_state.analysis_results or {}
                 st.session_state.vendor_email_draft = drafter.draft_vendor_email(
-                    goal, st.session_state.analysis_results, st.session_state.target_sku,
+                    goal, analysis_context, st.session_state.target_sku,
                     vendor_name, contact_name, english_ability
                 )
         else:
@@ -573,6 +619,7 @@ def display_exports_tab():
     available_docs = []
     if st.session_state.analysis_results: available_docs.append("Dashboard & CAPA Insights")
     if st.session_state.fmea_data is not None and not st.session_state.fmea_data.empty: available_docs.append("FMEA Data")
+    if st.session_state.risk_assessment_report: available_docs.append("Risk Assessment Report")
     if st.session_state.pre_mortem_summary: available_docs.append("Pre-Mortem Summary")
     if st.session_state.vendor_email_draft: available_docs.append("Vendor Email Draft")
     
@@ -580,7 +627,7 @@ def display_exports_tab():
         st.warning("No data available to export. Complete some analysis on other tabs first.")
         return
 
-    doc_types = st.multiselect(
+    doc_types = st.multoselect(
         "Select document sections to generate:",
         available_docs,
         default=available_docs
@@ -591,29 +638,33 @@ def display_exports_tab():
     if st.button(f"📄 Generate Documents", type="primary"):
         with st.spinner("Generating documents..."):
             if export_format == "Separate Files":
-                if "Dashboard & CAPA Insights" in doc_types:
+                if "Dashboard & CAPA Insights" in doc_types and st.session_state.analysis_results:
                     docx_bytes = doc_gen.export_text_to_docx(st.session_state.analysis_results['insights'], "CAPA Insights Report")
-                    st.download_button("Download CAPA Insights (.docx)", docx_bytes, f"CAPA_Insights_{st.session_state.target_sku}.docx")
-                if "FMEA Data" in doc_types:
+                    st.download_button("Download CAPA Insights (.docx)", docx_bytes, f"CAPA_Insights_{st.session_state.target_sku}.docx", key="dl_capa")
+                if "FMEA Data" in doc_types and st.session_state.fmea_data is not None:
                     excel_bytes = doc_gen.export_fmea_to_excel(st.session_state.fmea_data, st.session_state.target_sku)
-                    st.download_button("Download FMEA (.xlsx)", excel_bytes, f"FMEA_{st.session_state.target_sku}.xlsx")
-                if "Pre-Mortem Summary" in doc_types:
+                    st.download_button("Download FMEA (.xlsx)", excel_bytes, f"FMEA_{st.session_state.target_sku}.xlsx", key="dl_fmea")
+                if "Risk Assessment Report" in doc_types and st.session_state.risk_assessment_report:
+                    docx_bytes = doc_gen.export_text_to_docx(st.session_state.risk_assessment_report, "Risk Assessment Report")
+                    st.download_button("Download Risk Assessment (.docx)", docx_bytes, f"Risk_Assessment_{st.session_state.target_sku}.docx", key="dl_risk")
+                if "Pre-Mortem Summary" in doc_types and st.session_state.pre_mortem_summary:
                     docx_bytes = doc_gen.export_text_to_docx(st.session_state.pre_mortem_summary, "Pre-Mortem Summary")
-                    st.download_button("Download Pre-Mortem (.docx)", docx_bytes, f"PreMortem_{st.session_state.target_sku}.docx")
-                if "Vendor Email Draft" in doc_types:
+                    st.download_button("Download Pre-Mortem (.docx)", docx_bytes, f"PreMortem_{st.session_state.target_sku}.docx", key="dl_pm")
+                if "Vendor Email Draft" in doc_types and st.session_state.vendor_email_draft:
                     docx_bytes = doc_gen.export_text_to_docx(st.session_state.vendor_email_draft, "Vendor Email Draft")
-                    st.download_button("Download Vendor Email (.docx)", docx_bytes, f"VendorEmail_{st.session_state.target_sku}.docx")
+                    st.download_button("Download Vendor Email (.docx)", docx_bytes, f"VendorEmail_{st.session_state.target_sku}.docx", key="dl_email")
             
             else: # All in One Document
                 all_content = {
                     "sku": st.session_state.target_sku,
                     "dashboard": st.session_state.analysis_results if "Dashboard & CAPA Insights" in doc_types else None,
                     "fmea": st.session_state.fmea_data if "FMEA Data" in doc_types else None,
+                    "risk_assessment": st.session_state.risk_assessment_report if "Risk Assessment Report" in doc_types else None,
                     "pre_mortem": st.session_state.pre_mortem_summary if "Pre-Mortem Summary" in doc_types else None,
                     "vendor_email": st.session_state.vendor_email_draft if "Vendor Email Draft" in doc_types else None,
                 }
                 docx_bytes = doc_gen.export_all_to_docx(all_content)
-                st.download_button("Download Combined Report (.docx)", docx_bytes, f"Combined_Report_{st.session_state.target_sku}.docx")
+                st.download_button("Download Combined Report (.docx)", docx_bytes, f"Combined_Report_{st.session_state.target_sku}.docx", key="dl_combined")
         st.success("Your documents are ready to download below!")
 
 
@@ -624,14 +675,15 @@ def main():
     initialize_components()
     display_sidebar()
 
-    tabs = st.tabs(["📊 Dashboard", "🔬 FMEA", "🔮 Pre-Mortem", "✉️ Vendor Comms", "⚖️ Compliance", "📄 Exports"])
+    tabs = st.tabs(["📊 Dashboard", "🔬 FMEA", "🛡️ Risk Assessment", "🔮 Pre-Mortem", "✉️ Vendor Comms", "⚖️ Compliance", "📄 Exports"])
 
     with tabs[0]: display_dashboard()
     with tabs[1]: display_fmea_tab()
-    with tabs[2]: display_pre_mortem_tab()
-    with tabs[3]: display_vendor_comm_tab()
-    with tabs[4]: display_compliance_tab()
-    with tabs[5]: display_exports_tab()
+    with tabs[2]: display_risk_assessment_tab()
+    with tabs[3]: display_pre_mortem_tab()
+    with tabs[4]: display_vendor_comm_tab()
+    with tabs[5]: display_compliance_tab()
+    with tabs[6]: display_exports_tab()
 
 if __name__ == "__main__":
     main()

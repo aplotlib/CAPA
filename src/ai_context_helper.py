@@ -3,6 +3,7 @@
 import streamlit as st
 from typing import Optional, Dict
 import anthropic
+import pandas as pd
 
 class AIContextHelper:
     """
@@ -23,44 +24,53 @@ class AIContextHelper:
         
         context_parts.append("You are an AI assistant integrated into a Product Lifecycle & Quality Management application.")
         context_parts.append("Your goal is to provide cohesive, context-aware answers by synthesizing information from different parts of the tool.")
-        context_parts.append(f"The product currently under analysis has the SKU: {st.session_state.get('target_sku', 'Not specified')}.")
+        
+        target_sku = st.session_state.get('target_sku', 'Not specified')
+        if target_sku:
+            context_parts.append(f"The product currently under analysis has the SKU: {target_sku}.")
         
         # Dashboard Context
         if st.session_state.get('analysis_results'):
             results = st.session_state.analysis_results
-            summary = results.get('overall_summary')
-            if summary is not None and not summary.empty:
-                summary_data = summary.iloc[0]
+            summary_df = results.get('return_summary')
+            if summary_df is not None and not summary_df.empty:
+                summary_data = summary_df[summary_df['sku'] == target_sku].iloc[0]
                 context_parts.append("\n--- DASHBOARD SUMMARY ---")
                 context_parts.append(f"Overall Return Rate: {summary_data.get('return_rate', 'N/A'):.2f}%")
                 context_parts.append(f"Total Sold: {int(summary_data.get('total_sold', 0))}, Total Returned: {int(summary_data.get('total_returned', 0))}")
                 context_parts.append(f"AI Insights: {results.get('insights', 'N/A')}")
 
-        # CAPA Feasibility Context
-        if st.session_state.get('capa_feasibility_analysis'):
-            context_parts.append("\n--- CAPA FEASIBILITY ANALYSIS ---")
-            context_parts.append(st.session_state.capa_feasibility_analysis['summary'])
-        
         # FMEA Context
-        if st.session_state.get('fmea_data') is not None and not st.session_state.fmea_data.empty:
-            context_parts.append("\n--- FMEA DATA ---")
+        if st.session_state.get('fmea_data') is not None:
             fmea_df = st.session_state.fmea_data
-            context_parts.append("The following failure modes have been identified:")
-            context_parts.append(fmea_df[['Potential Failure Mode', 'Potential Cause(s)', 'RPN']].to_string(index=False))
-            if not fmea_df.empty:
-                highest_risk = fmea_df.loc[fmea_df['RPN'].idxmax()]
-                context_parts.append(f"The highest priority risk is '{highest_risk['Potential Failure Mode']}' with an RPN of {highest_risk['RPN']}.")
+            if isinstance(fmea_df, pd.DataFrame) and not fmea_df.empty:
+                context_parts.append("\n--- FMEA DATA ---")
+                context_parts.append("The following failure modes have been identified:")
+                # Select key columns for brevity
+                fmea_context_df = fmea_df[['Potential Failure Mode', 'Potential Cause(s)', 'RPN']]
+                context_parts.append(fmea_context_df.to_string(index=False))
+                if 'RPN' in fmea_df.columns and not fmea_df.empty:
+                    highest_risk = fmea_df.loc[fmea_df['RPN'].idxmax()]
+                    context_parts.append(f"The highest priority risk is '{highest_risk['Potential Failure Mode']}' with an RPN of {highest_risk['RPN']}.")
 
         # Pre-Mortem Context
         if st.session_state.get('pre_mortem_summary'):
             context_parts.append("\n--- PRE-MORTEM SUMMARY ---")
             context_parts.append(st.session_state.pre_mortem_summary)
+            
+        # Medical Device Classification
+        if st.session_state.get('medical_device_classification'):
+            context_parts.append("\n--- MEDICAL DEVICE CLASSIFICATION ---")
+            classification = st.session_state.medical_device_classification
+            context_parts.append(f"Device was classified as: {classification.get('classification')}")
+            context_parts.append(f"Rationale: {classification.get('rationale')}")
 
         # Vendor Communication Context
         if st.session_state.get('vendor_email_draft'):
             context_parts.append("\n--- VENDOR COMMUNICATION DRAFT ---")
-            context_parts.append("An email has been drafted to the vendor with the following content:")
-            context_parts.append(st.session_state.vendor_email_draft)
+            context_parts.append("An email has been drafted to the vendor with the following content summary:")
+            # Provide a snippet instead of the full email
+            context_parts.append(st.session_state.vendor_email_draft[:300] + "...")
             
         return "\n".join(context_parts)
 
@@ -71,7 +81,7 @@ class AIContextHelper:
 
         full_context = self.get_full_context()
         
-        system_prompt = "You are a helpful AI assistant embedded in a quality management application. Use the provided context from the application's different tabs to answer the user's question. Be concise and helpful."
+        system_prompt = "You are a helpful AI assistant embedded in a quality management application. Use the provided context from the application's different tabs to answer the user's question. Be concise, helpful, and synthesize information where possible. If the user asks for something outside the context (like medical device classification), use your general knowledge."
 
         messages = [
             {
@@ -81,13 +91,12 @@ class AIContextHelper:
         ]
 
         try:
-            with st.spinner("AI is thinking..."):
-                response = self.client.messages.create(
-                    model=self.model,
-                    max_tokens=2048,
-                    system=system_prompt,
-                    messages=messages
-                ).content[0].text
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=2048,
+                system=system_prompt,
+                messages=messages
+            ).content[0].text
             return response
         except Exception as e:
             st.error(f"Error generating AI response: {e}")

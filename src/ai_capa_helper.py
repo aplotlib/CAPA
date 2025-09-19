@@ -75,29 +75,37 @@ class AIEmailDrafter:
         - Total Units Returned (period): {int(summary.get('total_returned', 0))}
         - AI Insights: {analysis_results.get('insights', 'N/A')}
         """
+        
+        # Tailor the instructions based on English ability
+        if english_ability <= 2:
+            language_instruction = "IMPORTANT: The recipient has limited English proficiency. Use very simple words, short sentences, and basic grammar. Avoid jargon, idioms, and complex phrasing. The goal is clarity for easy translation."
+        elif english_ability == 3:
+            language_instruction = "Use clear and professional language, but avoid overly complex terminology."
+        else:
+            language_instruction = "Use standard professional business English."
+
 
         prompt = f"""
         You are a quality assurance manager writing an email to a valued manufacturing partner, {vendor_name}.
         Your tone must be super reasonable, conservative, and collaborative, NOT demanding or accusatory.
-        The goal is to start a productive conversation.
+        The goal is to start a productive, data-driven conversation to solve a problem together.
 
         **Email Goal:** {goal}
 
         **Data Context:**
         {context}
 
-        **Recipient's English Ability:** {english_ability}/5
+        **Recipient's English Ability:** {english_ability}/5. {language_instruction}
 
-        Based on the goal, data, and the recipient's English ability, draft a professional email to {contact_name}.
-        - Start with a polite opening.
+        Based on all the above, draft a professional email to {contact_name}.
+        - Start with a polite and friendly opening.
         - Present the key data points clearly and concisely.
-        - Frame the issue as a mutual challenge to overcome.
-        - Ask for their perspective and suggestions for a joint investigation.
-        - Do not suggest stopping production or assign blame.
-        - End with a collaborative closing statement.
-        - If the English ability is low, use simpler language and shorter sentences.
+        - Frame the issue as a mutual challenge to overcome for mutual benefit.
+        - Explicitly ask for their perspective and suggestions for a joint investigation.
+        - Do not suggest stopping production, assigning blame, or demanding specific actions.
+        - End with a collaborative closing statement that reinforces the partnership.
 
-        Return only the full email text.
+        Return only the full email text, ready to be sent.
         """
         try:
             response = self.client.messages.create(
@@ -111,7 +119,7 @@ class AIEmailDrafter:
             return f"An error occurred while drafting the email: {e}"
 
 class MedicalDeviceClassifier:
-    """Classifies medical devices based on FDA regulations."""
+    """Classifies medical devices based on FDA regulations using an AI model."""
 
     def __init__(self, api_key: Optional[str] = None):
         self.client = None
@@ -123,30 +131,42 @@ class MedicalDeviceClassifier:
                 print(f"Failed to initialize Medical Device Classifier: {e}")
 
     def classify_device(self, device_description: str) -> Dict[str, str]:
-        """Classifies a medical device based on a description."""
+        """
+        Classifies a medical device based on its description, providing rationale,
+        risks, and regulatory requirements.
+        """
         if not self.client:
-            return {"error": "AI client not initialized."}
+            return {"error": "AI client is not initialized. Please check API key configuration."}
 
         prompt = f"""
-        You are an expert in FDA medical device classification.
-        Based on the following device description, classify the device and provide a rationale.
+        You are an expert consultant specializing in U.S. FDA medical device classification.
+        Your task is to analyze the provided device description and determine its classification
+        with a high degree of accuracy, referencing 21 CFR parts 862-892.
 
         **Device Description:**
         {device_description}
 
-        Return a JSON object with the following keys:
-        - "classification": The FDA class (Class I, Class II, or Class III).
-        - "rationale": A detailed explanation for the classification.
-        - "risks": The primary risks associated with the device.
-        - "regulatory_requirements": The regulatory requirements for this class of device.
+        Based on the description, provide a detailed analysis. Return a single, valid JSON object with the following exact keys:
+        - "classification": The most likely FDA class (e.g., "Class I", "Class II", "Class III"). State if it is exempt from 510(k) if applicable.
+        - "rationale": A detailed, step-by-step explanation for the classification. Reference the relevant regulation number (e.g., 21 CFR 880.2910 for a thermometer) and explain why the device fits this classification based on its intended use and level of risk.
+        - "risks": A bulleted list of the primary risks to the patient or user associated with this type of device.
+        - "regulatory_requirements": A bulleted list of the general regulatory controls required for this device class (e.g., General Controls, Special Controls, Premarket Approval (PMA)).
+
+        Example of a good rationale: "The device is classified as Class II under 21 CFR 880.2910 (Clinical electronic thermometer). This is because it is intended for measuring body temperature, and its accuracy is crucial for medical diagnosis, posing a moderate risk. It requires adherence to special controls, such as performance standards, to ensure accuracy and safety."
+
+        Return ONLY the valid JSON object.
         """
         try:
             response = self.client.messages.create(
                 model=self.model,
-                max_tokens=2000,
+                max_tokens=2500,
+                temperature=0.2, # Lower temperature for higher accuracy and consistency
                 messages=[{"role": "user", "content": prompt}]
             ).content[0].text
-            return json.loads(response)
+            
+            # Find the JSON block in the response
+            json_match = response[response.find('{'):response.rfind('}')+1]
+            return json.loads(json_match)
         except Exception as e:
             print(f"Error classifying device: {e}")
-            return {"error": "Failed to classify the device."}
+            return {"error": f"Failed to classify the device due to an AI model error: {e}"}

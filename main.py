@@ -11,7 +11,7 @@ from typing import Dict, Optional, Any
 # Import custom modules
 from src.parsers import AIFileParser
 from src.data_processing import DataProcessor
-from src.analysis import run_full_analysis
+from src.analysis import run_full_analysis, calculate_cost_benefit
 from src.compliance import validate_capa_data
 from src.document_generator import CapaDocumentGenerator
 from src.ai_capa_helper import AICAPAHelper, AIEmailDrafter
@@ -83,7 +83,8 @@ def initialize_session_state():
         'ai_suggestions': {}, 'fmea_data': None,
         'pre_mortem_data': None, 'pre_mortem_summary': None,
         'vendor_email_draft': None, 'pending_image_confirmations': [],
-        'chat_history': []
+        'chat_history': [],
+        'capa_feasibility_analysis': None, # New
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -417,6 +418,67 @@ def display_vendor_comm_tab():
     display_ai_chat_interface("Vendor Communications")
 
 
+def display_capa_feasibility_tab():
+    st.header("💰 CAPA Feasibility & Cost-Benefit Analysis")
+
+    if not st.session_state.analysis_results:
+        st.info("👆 Process data on the Dashboard tab first to enable this analysis.")
+        return
+
+    st.subheader("Enter Proposed Change Details")
+    
+    analysis_type = st.radio("Analysis Type", ("Actual", "AI Estimate"), key="analysis_type", horizontal=True)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        current_unit_cost = st.number_input("Current Unit Cost ($)", min_value=0.0, format="%.2f", key="current_unit_cost")
+    with col2:
+        cost_change = st.number_input("Additional Cost/Saving per Unit ($)", format="%.2f", key="cost_change", help="Enter a negative value for savings.")
+
+    expected_rr_reduction = st.number_input("Expected Return Rate Reduction (Absolute %)", min_value=0.0, max_value=100.0, format="%.2f", key="expected_rr_reduction")
+
+    if st.button("📈 Analyze Cost-Benefit", type="primary"):
+        if analysis_type == "Actual":
+            if not current_unit_cost or not expected_rr_reduction:
+                st.warning("Please enter all required fields for 'Actual' analysis.")
+                return
+
+            st.session_state.capa_feasibility_analysis = calculate_cost_benefit(
+                st.session_state.analysis_results,
+                current_unit_cost,
+                cost_change,
+                expected_rr_reduction
+            )
+        else: # AI Estimate
+            # This would be where you would call an AI function to estimate the values
+            st.info("AI Estimation feature is under development.")
+            # For now, we'll just use the calculate_cost_benefit with placeholder values
+            # In a real scenario, you'd have a function in ai_capa_helper.py to get these
+            st.session_state.capa_feasibility_analysis = calculate_cost_benefit(
+                st.session_state.analysis_results,
+                current_unit_cost if current_unit_cost > 0 else 50.0, # AI estimated
+                cost_change if cost_change != 0 else 2.0, # AI estimated
+                expected_rr_reduction if expected_rr_reduction > 0 else 5.0 # AI estimated
+            )
+
+
+    if st.session_state.capa_feasibility_analysis:
+        st.subheader("Analysis Results")
+        results = st.session_state.capa_feasibility_analysis
+        
+        st.markdown(f"**Summary:** {results['summary']}")
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Estimated Annual Savings", f"${results['annual_savings']:,.2f}")
+        col2.metric("ROI (1 Year)", f"{results['roi']:.2f}%")
+        col3.metric("Breakeven Point (Units)", f"{int(results['breakeven_units']):,}")
+
+        with st.expander("Show Detailed Breakdown"):
+            st.write(results['details'])
+
+    display_ai_chat_interface("CAPA Feasibility")
+
+
 def display_exports_tab():
     st.header("📄 Documents & Exports")
     st.markdown("Generate formal documents or export data for logging and further analysis.")
@@ -453,14 +515,14 @@ def main():
     initialize_components()
     display_sidebar()
 
-    tabs = st.tabs(["📊 Dashboard", "🔬 FMEA", "🔮 Pre-Mortem", "✉️ Vendor Comms", "📄 Exports"])
+    tabs = st.tabs(["📊 Dashboard", "🔬 FMEA", "🔮 Pre-Mortem", "💰 CAPA Feasibility", "✉️ Vendor Comms", "📄 Exports"])
 
     with tabs[0]: display_dashboard()
     with tabs[1]: display_fmea_tab()
     with tabs[2]: display_pre_mortem_tab()
-    with tabs[3]: display_vendor_comm_tab()
-    with tabs[4]: display_exports_tab()
+    with tabs[3]: display_capa_feasibility_tab()
+    with tabs[4]: display_vendor_comm_tab()
+    with tabs[5]: display_exports_tab()
 
 if __name__ == "__main__":
     main()
-

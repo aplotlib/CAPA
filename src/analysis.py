@@ -103,7 +103,7 @@ def _generate_insights(summary_data: pd.Series, quality_metrics: Dict,
 
     return "\n\n".join(insights)
 
-def calculate_cost_benefit(analysis_results: Dict, current_unit_cost: float, cost_change: float, expected_rr_reduction: float) -> Dict:
+def calculate_cost_benefit(analysis_results: Dict, current_unit_cost: float, cost_change: float, expected_rr_reduction: float, report_period_days: int) -> Dict:
     """
     Calculates the cost-benefit of a proposed change.
     """
@@ -125,7 +125,7 @@ def calculate_cost_benefit(analysis_results: Dict, current_unit_cost: float, cos
     net_savings = savings_from_returns - total_additional_cost
 
     # Scale to annual
-    annual_scaling_factor = 365 / 30 # Assuming analysis is for 30 days
+    annual_scaling_factor = 365 / report_period_days if report_period_days > 0 else 0
     annual_savings = net_savings * annual_scaling_factor
 
     roi = (annual_savings / (total_additional_cost * annual_scaling_factor)) * 100 if total_additional_cost > 0 else float('inf')
@@ -157,3 +157,4 @@ def calculate_cost_benefit(analysis_results: Dict, current_unit_cost: float, cos
         "breakeven_units": breakeven_units,
         "details": details,
     }
+

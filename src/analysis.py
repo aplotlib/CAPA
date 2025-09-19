@@ -49,7 +49,7 @@ class MetricsCalculator:
         }
 
 def run_full_analysis(sales_df: pd.DataFrame, returns_df: pd.DataFrame,
-                     report_period_days: int = 30, unit_price: Optional[float] = None) -> Dict:
+                     report_period_days: int = 30, unit_cost: Optional[float] = None, sales_price: Optional[float] = None) -> Dict:
     if sales_df is None or sales_df.empty:
         return {"error": "Sales data is missing or invalid."}
 
@@ -62,7 +62,7 @@ def run_full_analysis(sales_df: pd.DataFrame, returns_df: pd.DataFrame,
     primary_sku_data = return_summary.iloc[0]
     quality_metrics = calculator.calculate_quality_metrics(primary_sku_data['return_rate'])
 
-    insights = _generate_insights(primary_sku_data, quality_metrics, report_period_days, unit_price)
+    insights = _generate_insights(primary_sku_data, quality_metrics, report_period_days, unit_cost, sales_price)
 
     return {
         'return_summary': return_summary,
@@ -71,7 +71,7 @@ def run_full_analysis(sales_df: pd.DataFrame, returns_df: pd.DataFrame,
     }
 
 def _generate_insights(summary_data: pd.Series, quality_metrics: Dict,
-                      period_days: int, unit_price: Optional[float] = None) -> str:
+                      period_days: int, unit_cost: Optional[float] = None, sales_price: Optional[float] = None) -> str:
     insights = []
     return_rate = summary_data['return_rate']
 
@@ -93,9 +93,13 @@ def _generate_insights(summary_data: pd.Series, quality_metrics: Dict,
             "✅ **Acceptable Performance**: The return rate is within or below the industry standard. Continue to monitor for any upward trends."
         )
 
-    if unit_price and unit_price > 0:
-        return_cost = summary_data['total_returned'] * unit_price
-        insights.append(f"💰 **Financial Impact**: Based on a unit price of ${unit_price:,.2f}, the cost of returns for this period is approximately **${return_cost:,.2f}**.")
+    if sales_price and sales_price > 0:
+        lost_revenue = summary_data['total_returned'] * sales_price
+        insights.append(f"💰 **Financial Impact**: Based on a sales price of ${sales_price:,.2f}, the estimated lost revenue from returns for this period is **${lost_revenue:,.2f}**.")
+    elif unit_cost and unit_cost > 0:
+        return_cost = summary_data['total_returned'] * unit_cost
+        insights.append(f"💰 **Financial Impact**: Based on a unit cost of ${unit_cost:,.2f}, the cost of returned goods for this period is approximately **${return_cost:,.2f}**.")
+
 
     return "\n\n".join(insights)
 

@@ -170,3 +170,58 @@ class MedicalDeviceClassifier:
         except Exception as e:
             print(f"Error classifying device: {e}")
             return {"error": f"Failed to classify the device due to an AI model error: {e}"}
+
+class RiskAssessmentGenerator:
+    """Generates risk assessments based on ISO 14971 and IEC 62366 standards."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.client = None
+        if api_key:
+            try:
+                self.client = anthropic.Anthropic(api_key=api_key)
+                self.model = "claude-3-5-sonnet-20240620"
+            except Exception as e:
+                print(f"Failed to initialize Risk Assessment Generator: {e}")
+
+    def generate_assessment(self, product_name: str, sku: str, product_description: str, assessment_type: str) -> str:
+        """Generates a risk assessment report using an AI model."""
+        if not self.client:
+            return "Error: AI client for Risk Assessment is not initialized. Please check API key."
+
+        prompt = f"""
+        You are a certified risk management expert specializing in medical devices, compliant with ISO 14971 and IEC 62366.
+        Your task is to generate a formal risk assessment report based on the provided product information.
+
+        **Product Information:**
+        - **Product Name:** {product_name}
+        - **SKU:** {sku}
+        - **Product Description & Intended Use:** {product_description}
+        - **Assessment Standard(s):** {assessment_type}
+
+        **Instructions:**
+        1.  Generate a comprehensive risk assessment structured as a Markdown table.
+        2.  The table columns should be: `Hazard`, `Foreseeable Sequence of Events`, `Hazardous Situation`, `Potential Harm`, `Severity (S)`, `Probability (P)`, `Risk Level`, and `Proposed Mitigation`.
+        3.  Identify at least 5-7 relevant risks based on the product description.
+        4.  For `Severity` and `Probability`, use a 1-5 scale (1=Low, 5=High).
+        5.  Determine `Risk Level` (Low, Medium, High) based on S and P.
+        6.  Propose a concrete `Proposed Mitigation` for each identified risk.
+        7.  Start the report with a brief summary header.
+
+        **Example Row:**
+        | Hazard | Foreseeable Sequence of Events | Hazardous Situation | Potential Harm | Severity (S) | Probability (P) | Risk Level | Proposed Mitigation |
+        |---|---|---|---|---|---|---|---|
+        | Inaccurate Temperature Reading | Device provides a lower-than-actual temperature reading for a febrile infant. | Parent fails to seek medical attention due to false normal reading. | Delayed diagnosis of a serious illness (e.g., sepsis). | 5 | 2 | Medium | Implement redundant sensors and self-calibration checks upon device startup. |
+
+        Generate the full report now.
+        """
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=3000,
+                temperature=0.3,
+                messages=[{"role": "user", "content": prompt}]
+            ).content[0].text
+            return response
+        except Exception as e:
+            print(f"Error generating risk assessment: {e}")
+            return f"An error occurred while generating the risk assessment: {e}"

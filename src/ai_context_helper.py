@@ -35,6 +35,11 @@ class AIContextHelper:
                 context_parts.append(f"Overall Return Rate: {summary_data.get('return_rate', 'N/A'):.2f}%")
                 context_parts.append(f"Total Sold: {int(summary_data.get('total_sold', 0))}, Total Returned: {int(summary_data.get('total_returned', 0))}")
                 context_parts.append(f"AI Insights: {results.get('insights', 'N/A')}")
+
+        # CAPA Feasibility Context
+        if st.session_state.get('capa_feasibility_analysis'):
+            context_parts.append("\n--- CAPA FEASIBILITY ANALYSIS ---")
+            context_parts.append(st.session_state.capa_feasibility_analysis['summary'])
         
         # FMEA Context
         if st.session_state.get('fmea_data') is not None and not st.session_state.fmea_data.empty:
@@ -87,4 +92,3 @@ class AIContextHelper:
         except Exception as e:
             st.error(f"Error generating AI response: {e}")
             return "Sorry, I encountered an error while generating a response."
-

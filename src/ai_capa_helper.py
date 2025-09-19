@@ -61,7 +61,8 @@ class AIEmailDrafter:
             except Exception as e:
                 print(f"Failed to initialize AI Email Drafter: {e}")
 
-    def draft_vendor_email(self, goal: str, analysis_results: Dict, sku: str) -> str:
+    def draft_vendor_email(self, goal: str, analysis_results: Dict, sku: str,
+                           vendor_name: str, contact_name: str, english_ability: int) -> str:
         """Drafts a conservative and collaborative email to a vendor."""
         if not self.client:
             return "AI client not initialized. Please configure the API key."
@@ -76,7 +77,7 @@ class AIEmailDrafter:
         """
 
         prompt = f"""
-        You are a quality assurance manager writing an email to a valued manufacturing partner.
+        You are a quality assurance manager writing an email to a valued manufacturing partner, {vendor_name}.
         Your tone must be super reasonable, conservative, and collaborative, NOT demanding or accusatory.
         The goal is to start a productive conversation.
 
@@ -85,13 +86,16 @@ class AIEmailDrafter:
         **Data Context:**
         {context}
 
-        Based on the goal and data, draft a professional email.
+        **Recipient's English Ability:** {english_ability}/5
+
+        Based on the goal, data, and the recipient's English ability, draft a professional email to {contact_name}.
         - Start with a polite opening.
         - Present the key data points clearly and concisely.
         - Frame the issue as a mutual challenge to overcome.
         - Ask for their perspective and suggestions for a joint investigation.
         - Do not suggest stopping production or assign blame.
         - End with a collaborative closing statement.
+        - If the English ability is low, use simpler language and shorter sentences.
 
         Return only the full email text.
         """
@@ -105,3 +109,44 @@ class AIEmailDrafter:
         except Exception as e:
             print(f"Error drafting vendor email: {e}")
             return f"An error occurred while drafting the email: {e}"
+
+class MedicalDeviceClassifier:
+    """Classifies medical devices based on FDA regulations."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.client = None
+        if api_key:
+            try:
+                self.client = anthropic.Anthropic(api_key=api_key)
+                self.model = "claude-3-5-sonnet-20240620"
+            except Exception as e:
+                print(f"Failed to initialize Medical Device Classifier: {e}")
+
+    def classify_device(self, device_description: str) -> Dict[str, str]:
+        """Classifies a medical device based on a description."""
+        if not self.client:
+            return {"error": "AI client not initialized."}
+
+        prompt = f"""
+        You are an expert in FDA medical device classification.
+        Based on the following device description, classify the device and provide a rationale.
+
+        **Device Description:**
+        {device_description}
+
+        Return a JSON object with the following keys:
+        - "classification": The FDA class (Class I, Class II, or Class III).
+        - "rationale": A detailed explanation for the classification.
+        - "risks": The primary risks associated with the device.
+        - "regulatory_requirements": The regulatory requirements for this class of device.
+        """
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=2000,
+                messages=[{"role": "user", "content": prompt}]
+            ).content[0].text
+            return json.loads(response)
+        except Exception as e:
+            print(f"Error classifying device: {e}")
+            return {"error": "Failed to classify the device."}

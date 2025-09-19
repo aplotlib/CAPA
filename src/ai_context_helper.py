@@ -34,11 +34,14 @@ class AIContextHelper:
             results = st.session_state.analysis_results
             summary_df = results.get('return_summary')
             if summary_df is not None and not summary_df.empty:
-                summary_data = summary_df[summary_df['sku'] == target_sku].iloc[0]
-                context_parts.append("\n--- DASHBOARD SUMMARY ---")
-                context_parts.append(f"Overall Return Rate: {summary_data.get('return_rate', 'N/A'):.2f}%")
-                context_parts.append(f"Total Sold: {int(summary_data.get('total_sold', 0))}, Total Returned: {int(summary_data.get('total_returned', 0))}")
-                context_parts.append(f"AI Insights: {results.get('insights', 'N/A')}")
+                # Filter for the target SKU and check if results exist before accessing
+                sku_specific_summary = summary_df[summary_df['sku'] == target_sku]
+                if not sku_specific_summary.empty:
+                    summary_data = sku_specific_summary.iloc[0]
+                    context_parts.append("\n--- DASHBOARD SUMMARY ---")
+                    context_parts.append(f"Overall Return Rate: {summary_data.get('return_rate', 'N/A'):.2f}%")
+                    context_parts.append(f"Total Sold: {int(summary_data.get('total_sold', 0))}, Total Returned: {int(summary_data.get('total_returned', 0))}")
+                    context_parts.append(f"AI Insights: {results.get('insights', 'N/A')}")
 
         # FMEA Context
         if st.session_state.get('fmea_data') is not None:
@@ -46,10 +49,9 @@ class AIContextHelper:
             if isinstance(fmea_df, pd.DataFrame) and not fmea_df.empty:
                 context_parts.append("\n--- FMEA DATA ---")
                 context_parts.append("The following failure modes have been identified:")
-                # Select key columns for brevity
                 fmea_context_df = fmea_df[['Potential Failure Mode', 'Potential Cause(s)', 'RPN']]
                 context_parts.append(fmea_context_df.to_string(index=False))
-                if 'RPN' in fmea_df.columns and not fmea_df.empty:
+                if 'RPN' in fmea_df.columns and fmea_df['RPN'].notna().any():
                     highest_risk = fmea_df.loc[fmea_df['RPN'].idxmax()]
                     context_parts.append(f"The highest priority risk is '{highest_risk['Potential Failure Mode']}' with an RPN of {highest_risk['RPN']}.")
 
@@ -69,7 +71,6 @@ class AIContextHelper:
         if st.session_state.get('vendor_email_draft'):
             context_parts.append("\n--- VENDOR COMMUNICATION DRAFT ---")
             context_parts.append("An email has been drafted to the vendor with the following content summary:")
-            # Provide a snippet instead of the full email
             context_parts.append(st.session_state.vendor_email_draft[:300] + "...")
             
         return "\n".join(context_parts)
@@ -81,7 +82,7 @@ class AIContextHelper:
 
         full_context = self.get_full_context()
         
-        system_prompt = "You are a helpful AI assistant embedded in a quality management application. Use the provided context from the application's different tabs to answer the user's question. Be concise, helpful, and synthesize information where possible. If the user asks for something outside the context (like medical device classification), use your general knowledge."
+        system_prompt = "You are a helpful AI assistant embedded in a quality management application. Use the provided context from the application's different tabs to answer the user's question. Be concise, helpful, and synthesize information where possible. If the user asks for something outside the context, use your general knowledge but specify that it is not from the application's data."
 
         messages = [
             {

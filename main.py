@@ -172,6 +172,32 @@ def display_sidebar():
             else:
                 process_all_files(uploaded_files, st.session_state.target_sku, st.session_state.report_period_days)
 
+        st.markdown("---")
+        with st.expander("✍️ Or Enter Data Manually"):
+            st.info("Use this section if you don't have data files and want to run a quick analysis.")
+            manual_sales = st.number_input("Total Units Sold", min_value=0, step=1, key="manual_sales")
+            manual_returns = st.number_input("Total Units Returned", min_value=0, step=1, key="manual_returns")
+            manual_feedback = st.text_area(
+                "Customer Feedback / Return Reasons (Optional)", 
+                height=100, 
+                key="manual_feedback",
+                placeholder="e.g., 'Device screen cracked easily', 'Unit DOA', 'Battery life poor'"
+            )
+
+            if st.button("📈 Process Manual Data", use_container_width=True, key="process_manual"):
+                if not st.session_state.target_sku:
+                    st.warning("⚠️ Please enter a target SKU first.")
+                elif manual_sales <= 0:
+                    st.warning("⚠️ 'Total Units Sold' must be greater than zero.")
+                else:
+                    process_manual_data(
+                        st.session_state.target_sku,
+                        manual_sales,
+                        manual_returns,
+                        manual_feedback,
+                        st.session_state.report_period_days
+                    )
+
 def process_all_files(files, target_sku, report_period_days):
     """Process all uploaded files, categorize by channel, and run analysis."""
     progress_bar = st.progress(0, text="Initializing...")
@@ -236,6 +262,47 @@ def process_all_files(files, target_sku, report_period_days):
         st.error("Could not find both sales and returns data. Please check your files.")
     
     progress_bar.empty()
+
+def process_manual_data(target_sku, total_sold, total_returned, feedback, report_period_days):
+    """Processes manually entered data and runs analysis."""
+    # Reset data
+    st.session_state.sales_data = {}
+    st.session_state.returns_data = {}
+    st.session_state.misc_data = []
+
+    # Create sales DataFrame
+    sales_df = pd.DataFrame([{'sku': target_sku, 'quantity': total_sold}])
+    st.session_state.sales_data['manual'] = sales_df
+
+    # Create returns DataFrame
+    if total_returned > 0:
+        returns_df = pd.DataFrame([{'sku': target_sku, 'quantity': total_returned}])
+        st.session_state.returns_data['manual'] = returns_df
+    else:
+        # Pass an empty dataframe if no returns, so analysis function doesn't fail
+        st.session_state.returns_data['manual'] = pd.DataFrame(columns=['sku', 'quantity'])
+
+    # Handle feedback
+    if feedback:
+        st.session_state.misc_data.append({
+            'filename': 'Manual Entry',
+            'content_type': 'voice_of_customer',
+            'summary': 'Manually entered customer feedback.',
+            'key_data': {'feedback': feedback}
+        })
+
+    # Run analysis
+    if st.session_state.sales_data:
+        st.session_state.analysis_results = run_full_analysis(
+            st.session_state.sales_data,
+            st.session_state.returns_data,
+            report_period_days,
+            st.session_state.unit_price
+        )
+        st.success(f"Successfully analyzed manual data for SKU: {target_sku}")
+        st.balloons()
+    else:
+        st.error("Could not process manual data. Please check your inputs.")
 
 
 def display_dashboard():
@@ -539,3 +606,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

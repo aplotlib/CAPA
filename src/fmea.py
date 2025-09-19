@@ -17,17 +17,21 @@ class FMEA:
             except Exception as e:
                 print(f"Failed to initialize FMEA AI client: {e}")
 
-    def suggest_failure_modes(self, issue_description: str, analysis_results: Dict) -> List[Dict]:
+    def suggest_failure_modes(self, issue_description: str, analysis_results: Optional[Dict]) -> List[Dict]:
         """Suggests potential failure modes based on an issue description using AI."""
         if not self.client:
             return [{"Potential Failure Mode": "AI client not initialized.", "Potential Effect(s)": "", "Potential Cause(s)": ""}]
 
-        summary = analysis_results.get('return_summary', {}).iloc[0] if not analysis_results.get('return_summary', {}).empty else {}
-        context = f"""
-        Product SKU: {summary.get('sku', 'N/A')}
-        Return Rate: {summary.get('return_rate', 0):.2f}%
-        Issue Description: {issue_description}
-        """
+        context_parts = [f"Issue Description: {issue_description}"]
+        
+        if analysis_results:
+            summary = analysis_results.get('return_summary')
+            if summary is not None and not summary.empty:
+                summary_data = summary.iloc[0]
+                context_parts.append(f"Product SKU: {summary_data.get('sku', 'N/A')}")
+                context_parts.append(f"Return Rate: {summary_data.get('return_rate', 0):.2f}%")
+        
+        context = "\n".join(context_parts)
 
         prompt = f"""
         You are a quality engineer conducting a Failure Mode and Effects Analysis (FMEA).

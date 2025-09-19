@@ -225,3 +225,60 @@ class RiskAssessmentGenerator:
         except Exception as e:
             print(f"Error generating risk assessment: {e}")
             return f"An error occurred while generating the risk assessment: {e}"
+
+class UseRelatedRiskAnalyzer:
+    """Generates a Use-Related Risk Analysis (URRA) based on IEC 62366."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.client = None
+        if api_key:
+            try:
+                self.client = anthropic.Anthropic(api_key=api_key)
+                self.model = "claude-3-5-sonnet-20240620"
+            except Exception as e:
+                print(f"Failed to initialize Use-Related Risk Analyzer: {e}")
+
+    def generate_urra(self, product_name: str, product_description: str, intended_user: str, use_environment: str) -> str:
+        """Generates a URRA report using an AI model."""
+        if not self.client:
+            return "Error: AI client for Use-Related Risk Analysis is not initialized. Please check API key."
+
+        prompt = f"""
+        You are a human factors engineering expert specializing in medical device usability under IEC 62366.
+        Generate a formal Use-Related Risk Analysis (URRA) based on the provided product details.
+
+        **Product Information:**
+        - **Product Name:** {product_name}
+        - **Product Description & Intended Use:** {product_description}
+        - **Intended User Profile:** {intended_user}
+        - **Intended Use Environment:** {use_environment}
+
+        **Instructions:**
+        1.  Create a URRA in a Markdown table format.
+        2.  The table columns should be: `Use Task`, `Potential Use Error`, `Foreseeable Consequences`, `Potential Harm`, `Severity (S)`, `Probability (P)`, `Risk Level`, and `Proposed Mitigation/Design Recommendation`.
+        3.  Identify 5-7 critical or frequent use tasks associated with the device.
+        4.  For each task, brainstorm potential use errors.
+        5.  Analyze the consequences and potential harm of each error.
+        6.  Assign `Severity` and `Probability` on a 1-5 scale.
+        7.  Determine the `Risk Level`.
+        8.  Provide actionable design recommendations or mitigations to prevent the use error.
+        9.  Begin with a summary header for the report.
+
+        **Example Row:**
+        | Use Task | Potential Use Error | Foreseeable Consequences | Potential Harm | Severity (S) | Probability (P) | Risk Level | Proposed Mitigation/Design Recommendation |
+        |---|---|---|---|---|---|---|---|
+        | Turning on the device | User fails to press the power button long enough to activate the device. | User believes the device is broken or battery is dead, leading to non-use. | Failure to monitor temperature. | 4 | 3 | Medium | Provide clear visual (e.g., screen lights up) and haptic (e.g., vibration) feedback upon successful power-on. |
+
+        Generate the full URRA report now.
+        """
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=3000,
+                temperature=0.4,
+                messages=[{"role": "user", "content": prompt}]
+            ).content[0].text
+            return response
+        except Exception as e:
+            print(f"Error generating URRA: {e}")
+            return f"An error occurred while generating the URRA report: {e}"

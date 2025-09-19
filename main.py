@@ -18,6 +18,7 @@ from src.ai_capa_helper import AICAPAHelper, AIEmailDrafter
 from src.fmea import FMEA
 from src.pre_mortem import PreMortem
 from src.fba_returns_processor import ReturnsProcessor
+from src.ai_context_helper import AIContextHelper
 
 # --- Page Configuration and Styling ---
 st.set_page_config(page_title="Product Lifecycle Manager", page_icon="📈", layout="wide")
@@ -62,6 +63,11 @@ st.markdown("""
         margin: 1rem 0;
         border-radius: 5px;
     }
+    .chat-container {
+        margin-top: 2rem;
+        border-top: 2px solid #F0F2F6;
+        padding-top: 1rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -69,21 +75,15 @@ st.markdown("""
 def initialize_session_state():
     """Initializes all required session state variables."""
     defaults = {
-        'analysis_results': None,
-        'capa_data': {},
-        'misc_data': [],
-        'file_parser': None,
-        'data_processor': None,
-        'sales_data': {}, # Now a dict to hold data by channel
-        'returns_data': {}, # Now a dict
-        'ai_analysis': None,
-        'unit_price': None,
-        'generated_doc': None,
-        'doc_filename': None,
-        'ai_suggestions': {},
-        'fmea_data': None,
-        'pre_mortem_data': None,
-        'vendor_email_draft': None
+        'analysis_results': None, 'capa_data': {}, 'misc_data': [],
+        'file_parser': None, 'data_processor': None,
+        'sales_data': {}, 'returns_data': {},
+        'ai_analysis': None, 'unit_price': None,
+        'generated_doc': None, 'doc_filename': None,
+        'ai_suggestions': {}, 'fmea_data': None,
+        'pre_mortem_data': None, 'pre_mortem_summary': None,
+        'vendor_email_draft': None, 'pending_image_confirmations': [],
+        'chat_history': []
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -92,25 +92,16 @@ def initialize_session_state():
 # --- AI and Component Initialization ---
 def initialize_components():
     """Initialize all AI-powered components and helpers."""
-    if 'anthropic_api_key' not in st.session_state:
-        st.session_state.anthropic_api_key = st.secrets.get("ANTHROPIC_API_KEY")
+    api_key = st.secrets.get("ANTHROPIC_API_KEY")
+    st.session_state.anthropic_api_key = api_key
 
-    api_key = st.session_state.anthropic_api_key
     if not api_key:
         st.info("Anthropic API key not configured. AI features will be limited.")
-        st.session_state.file_parser = AIFileParser(None)
-        st.session_state.data_processor = DataProcessor(None)
-        return
+    
+    st.session_state.file_parser = AIFileParser(api_key)
+    st.session_state.data_processor = DataProcessor(api_key)
+    st.session_state.ai_context_helper = AIContextHelper(api_key)
 
-    try:
-        if st.session_state.file_parser is None:
-            st.session_state.file_parser = AIFileParser(api_key)
-        if st.session_state.data_processor is None:
-            st.session_state.data_processor = DataProcessor(api_key)
-    except Exception as e:
-        st.warning(f"AI features unavailable: {str(e)}. Using standard parsing.")
-        st.session_state.file_parser = AIFileParser(None)
-        st.session_state.data_processor = DataProcessor(None)
 
 # --- UI Sections ---
 
@@ -144,24 +135,16 @@ def display_sidebar():
         )
 
         st.session_state.report_period_days = st.number_input(
-            "Report Period (Days)",
-            min_value=1,
-            value=30,
-            help="Time period for the analysis.",
-            key='sidebar_period'
+            "Report Period (Days)", min_value=1, value=30,
+            help="Time period for the analysis.", key='sidebar_period'
         )
 
         st.markdown("---")
         st.header("📁 File Upload")
-        st.markdown(
-            "Upload all relevant files for the target SKU. The AI will identify and process them."
-        )
-
         uploaded_files = st.file_uploader(
             "Sales, Returns, Inspection Sheets, VOC Screenshots, etc.",
             accept_multiple_files=True,
-            type=['csv', 'xlsx', 'xls', 'txt', 'pdf', 'png', 'jpg', 'jpeg'],
-            help="Upload all relevant files. The system will categorize them automatically."
+            type=['csv', 'xlsx', 'xls', 'txt', 'pdf', 'png', 'jpg', 'jpeg']
         )
 
         if st.button("🚀 Process All Files", type="primary", use_container_width=True):
@@ -170,206 +153,169 @@ def display_sidebar():
             elif not uploaded_files:
                 st.warning("⚠️ Please upload at least one file.")
             else:
-                process_all_files(uploaded_files, st.session_state.target_sku, st.session_state.report_period_days)
+                process_all_files(uploaded_files, st.session_state.target_sku)
 
         st.markdown("---")
         with st.expander("✍️ Or Enter Data Manually"):
-            st.info("Use this section if you don't have data files and want to run a quick analysis.")
             manual_sales = st.number_input("Total Units Sold", min_value=0, step=1, key="manual_sales")
             manual_returns = st.number_input("Total Units Returned", min_value=0, step=1, key="manual_returns")
-            manual_feedback = st.text_area(
-                "Customer Feedback / Return Reasons (Optional)", 
-                height=100, 
-                key="manual_feedback",
-                placeholder="e.g., 'Device screen cracked easily', 'Unit DOA', 'Battery life poor'"
-            )
-
+            
             if st.button("📈 Process Manual Data", use_container_width=True, key="process_manual"):
                 if not st.session_state.target_sku:
                     st.warning("⚠️ Please enter a target SKU first.")
                 elif manual_sales <= 0:
                     st.warning("⚠️ 'Total Units Sold' must be greater than zero.")
                 else:
-                    process_manual_data(
-                        st.session_state.target_sku,
-                        manual_sales,
-                        manual_returns,
-                        manual_feedback,
-                        st.session_state.report_period_days
-                    )
+                    process_manual_data(st.session_state.target_sku, manual_sales, manual_returns)
 
-def process_all_files(files, target_sku, report_period_days):
-    """Process all uploaded files, categorize by channel, and run analysis."""
-    progress_bar = st.progress(0, text="Initializing...")
-    file_parser = st.session_state.file_parser
 
-    # Reset data
-    st.session_state.sales_data = {}
-    st.session_state.returns_data = {}
-    st.session_state.misc_data = []
+def trigger_final_analysis():
+    """Consolidates all data and runs the final analysis."""
+    with st.spinner("Aggregating data and running final analysis..."):
+        # Consolidate data for each channel
+        for channel, df_list in st.session_state.sales_data.items():
+            if df_list:
+                st.session_state.sales_data[channel] = pd.concat(df_list, ignore_index=True)
+        for channel, df_list in st.session_state.returns_data.items():
+            if df_list:
+                st.session_state.returns_data[channel] = pd.concat(df_list, ignore_index=True)
+        
+        st.session_state.analysis_results = None 
+        if st.session_state.sales_data:
+            st.session_state.analysis_results = run_full_analysis(
+                st.session_state.sales_data,
+                st.session_state.returns_data,
+                st.session_state.report_period_days,
+                st.session_state.unit_price
+            )
+            st.success(f"Successfully analyzed all data for SKU: {st.session_state.target_sku}")
+            st.balloons()
+        else:
+            st.error("Could not find sufficient sales data to run an analysis.")
 
-    for i, file in enumerate(files):
-        progress_bar.progress((i + 1) / len(files), text=f"Analyzing {file.name}...")
-        try:
-            analysis = file_parser.analyze_file_structure(file, target_sku)
-            content_type = analysis.get('content_type', 'other')
-            channel = analysis.get('channel', 'general') # e.g., fba, fbm, b2b
 
-            data_df = file_parser.extract_data(file, analysis, target_sku)
-
-            if data_df is not None:
-                if 'sales' in content_type:
-                    if channel not in st.session_state.sales_data:
-                        st.session_state.sales_data[channel] = []
-                    st.session_state.sales_data[channel].append(data_df)
-                    st.success(f"Processed {channel.upper()} Sales Data: {file.name}")
-                elif 'returns' in content_type:
-                    if channel not in st.session_state.returns_data:
-                        st.session_state.returns_data[channel] = []
-                    st.session_state.returns_data[channel].append(data_df)
-                    st.success(f"Processed {channel.upper()} Returns Data: {file.name}")
-                else:
-                    st.session_state.misc_data.append(analysis)
-                    st.info(f"Processed supplementary file: {file.name}")
-            else:
-                 st.session_state.misc_data.append(analysis)
-                 st.info(f"Processed supplementary file: {file.name} (Type: {analysis.get('content_type', 'Unknown')})")
-
-        except Exception as e:
-            st.error(f"Could not process {file.name}: {str(e)}")
-
-    progress_bar.progress(1.0, text="Aggregating data...")
-
-    # Consolidate data for each channel
-    for channel, df_list in st.session_state.sales_data.items():
-        st.session_state.sales_data[channel] = pd.concat(df_list, ignore_index=True)
-    for channel, df_list in st.session_state.returns_data.items():
-        st.session_state.returns_data[channel] = pd.concat(df_list, ignore_index=True)
-
-    progress_bar.progress(1.0, text="Running final analysis...")
-    if st.session_state.sales_data and st.session_state.returns_data:
-        st.session_state.analysis_results = run_full_analysis(
-            st.session_state.sales_data,
-            st.session_state.returns_data,
-            report_period_days,
-            st.session_state.unit_price
-        )
-        st.markdown(
-            f'<div class="success-box">✅ Successfully analyzed data for SKU: <strong>{target_sku}</strong></div>',
-            unsafe_allow_html=True
-        )
-    else:
-        st.error("Could not find both sales and returns data. Please check your files.")
+def process_all_files(files, target_sku):
+    """Process all uploaded files, queuing images for user confirmation."""
+    st.session_state.sales_data, st.session_state.returns_data, st.session_state.misc_data = {}, {}, []
+    st.session_state.pending_image_confirmations, st.session_state.analysis_results = [], None
     
-    progress_bar.empty()
+    file_parser = st.session_state.file_parser
+    image_files = [f for f in files if f.type.startswith('image/')]
+    other_files = [f for f in files if not f.type.startswith('image/')]
 
-def process_manual_data(target_sku, total_sold, total_returned, feedback, report_period_days):
+    with st.spinner("Processing files..."):
+        for file in other_files:
+            try:
+                analysis = file_parser.analyze_file_structure(file, target_sku)
+                data_df = file_parser.extract_data(file, analysis, target_sku)
+                if data_df is not None:
+                    if 'sales' in analysis.get('content_type', ''):
+                        st.session_state.sales_data.setdefault('general', []).append(data_df)
+                    elif 'returns' in analysis.get('content_type', ''):
+                        st.session_state.returns_data.setdefault('general', []).append(data_df)
+                else: st.session_state.misc_data.append(analysis)
+            except Exception as e: st.error(f"Error processing {file.name}: {e}")
+
+        for file in image_files:
+            try:
+                analysis = file_parser.analyze_file_structure(file, target_sku)
+                if analysis.get('content_type') in ['sales', 'returns']:
+                    analysis['file_id'], file.seek(0)
+                    analysis['file_bytes'], analysis['filename'] = f"{file.name}-{os.urandom(4).hex()}", file.read(), file.name
+                    st.session_state.pending_image_confirmations.append(analysis)
+                else: st.session_state.misc_data.append(analysis)
+            except Exception as e: st.error(f"Error analyzing image {file.name}: {e}")
+
+    if not st.session_state.pending_image_confirmations and (st.session_state.sales_data or st.session_state.returns_data):
+        trigger_final_analysis()
+    elif st.session_state.pending_image_confirmations:
+        st.info("Action required: Please review extracted image data on the Dashboard.")
+
+
+def process_manual_data(target_sku, total_sold, total_returned):
     """Processes manually entered data and runs analysis."""
-    # Reset data
-    st.session_state.sales_data = {}
-    st.session_state.returns_data = {}
-    st.session_state.misc_data = []
+    st.session_state.sales_data, st.session_state.returns_data, st.session_state.misc_data = {}, {}, []
+    st.session_state.pending_image_confirmations, st.session_state.analysis_results = [], None
 
-    # Create sales DataFrame
-    sales_df = pd.DataFrame([{'sku': target_sku, 'quantity': total_sold}])
-    st.session_state.sales_data['manual'] = sales_df
+    st.session_state.sales_data['manual'] = [pd.DataFrame([{'sku': target_sku, 'quantity': total_sold}])]
+    st.session_state.returns_data['manual'] = [pd.DataFrame([{'sku': target_sku, 'quantity': total_returned}])] if total_returned > 0 else []
+    
+    trigger_final_analysis()
 
-    # Create returns DataFrame
-    if total_returned > 0:
-        returns_df = pd.DataFrame([{'sku': target_sku, 'quantity': total_returned}])
-        st.session_state.returns_data['manual'] = returns_df
-    else:
-        # Pass an empty dataframe if no returns, so analysis function doesn't fail
-        st.session_state.returns_data['manual'] = pd.DataFrame(columns=['sku', 'quantity'])
+def display_ai_chat_interface(tab_name: str):
+    """Displays the contextual AI chat interface."""
+    st.markdown("<div class='chat-container'>", unsafe_allow_html=True)
+    st.subheader("🤖 AI Assistant")
+    st.markdown("Ask a question about the data across any of the tabs.")
 
-    # Handle feedback
-    if feedback:
-        st.session_state.misc_data.append({
-            'filename': 'Manual Entry',
-            'content_type': 'voice_of_customer',
-            'summary': 'Manually entered customer feedback.',
-            'key_data': {'feedback': feedback}
-        })
-
-    # Run analysis
-    if st.session_state.sales_data:
-        st.session_state.analysis_results = run_full_analysis(
-            st.session_state.sales_data,
-            st.session_state.returns_data,
-            report_period_days,
-            st.session_state.unit_price
-        )
-        st.success(f"Successfully analyzed manual data for SKU: {target_sku}")
-        st.balloons()
-    else:
-        st.error("Could not process manual data. Please check your inputs.")
+    for author, message in st.session_state.chat_history:
+        with st.chat_message(author):
+            st.markdown(message)
+    
+    prompt = st.chat_input(f"Ask AI about {tab_name}...")
+    if prompt:
+        st.session_state.chat_history.append(("user", prompt))
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        
+        response = st.session_state.ai_context_helper.generate_response(prompt)
+        st.session_state.chat_history.append(("assistant", response))
+        with st.chat_message("assistant"):
+            st.markdown(response)
+    
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def display_dashboard():
+    if st.session_state.get('pending_image_confirmations'):
+        st.header("🖼️ Image Data Confirmation")
+        st.info("Our AI has extracted data from your images. Please review, correct if needed, and confirm.")
+        
+        for analysis in st.session_state.pending_image_confirmations[:]:
+            with st.form(key=f"image_confirm_{analysis['file_id']}"):
+                st.image(analysis['file_bytes'], width=300, caption=analysis['filename'])
+                key_data = analysis.get('key_data', {})
+                
+                content_type = st.selectbox("Detected Content Type", ['sales', 'returns', 'other'], index=['sales', 'returns', 'other'].index(analysis.get('content_type', 'other')), key=f"type_{analysis['file_id']}")
+                quantity = st.number_input("Detected Quantity", min_value=0, value=int(key_data.get('total_quantity', 0)), step=1, key=f"qty_{analysis['file_id']}")
+                
+                if st.form_submit_button("✅ Confirm and Add Data"):
+                    if content_type in ['sales', 'returns']:
+                        df = pd.DataFrame([{'sku': st.session_state.target_sku, 'quantity': quantity}])
+                        (st.session_state.sales_data if content_type == 'sales' else st.session_state.returns_data).setdefault('image_uploads', []).append(df)
+                    st.session_state.pending_image_confirmations.remove(analysis)
+                    st.rerun()
+        st.markdown("---")
+
+    if not st.session_state.pending_image_confirmations and (st.session_state.sales_data or st.session_state.returns_data) and not st.session_state.analysis_results:
+         if st.button("🚀 Run Final Analysis on All Data", type="primary", use_container_width=True):
+             trigger_final_analysis()
+
     st.header("📊 Quality Dashboard")
     if not st.session_state.analysis_results:
-        st.markdown(
-            '<div class="info-box">👆 Upload and process files using the sidebar to view the dashboard.</div>',
-            unsafe_allow_html=True
-        )
+        st.info('👆 Upload files or enter data manually to view the dashboard.')
         return
 
     results = st.session_state.analysis_results
     summary = results.get('overall_summary')
-
     if summary is None or summary.empty:
         st.warning("Analysis did not produce a valid summary.")
         return
 
     summary_data = summary.iloc[0]
     st.markdown(f"### Overall Analysis for SKU: **{summary_data['sku']}**")
-
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Overall Return Rate", f"{summary_data['return_rate']:.2f}%")
-    col2.metric("Total Units Sold", f"{int(summary_data['total_sold']):,}")
-    col3.metric("Total Units Returned", f"{int(summary_data['total_returned']):,}")
+    cols = st.columns(4)
+    cols[0].metric("Return Rate", f"{summary_data['return_rate']:.2f}%")
+    cols[1].metric("Total Sold", f"{int(summary_data['total_sold']):,}")
+    cols[2].metric("Total Returned", f"{int(summary_data['total_returned']):,}")
+    cols[3].metric("Quality Score", f"{results['quality_metrics'].get('quality_score', 'N/A')}/100", delta=results['quality_metrics'].get('risk_level', ''))
     
-    quality_metrics = results.get('quality_metrics', {})
-    col4.metric("Quality Score", f"{quality_metrics.get('quality_score', 'N/A')}/100", delta=quality_metrics.get('risk_level', ''))
-    
-    # Per-channel breakdown
-    st.markdown("---")
-    st.subheader("📈 Channel Performance Breakdown")
-    channel_summary = results.get('channel_summary')
-    if channel_summary:
-        num_channels = len(channel_summary)
-        cols = st.columns(num_channels)
-        for i, (channel, data) in enumerate(channel_summary.items()):
-            with cols[i]:
-                st.markdown(f"#### {channel.upper()}")
-                st.metric("Return Rate", f"{data.get('return_rate', 0):.2f}%")
-                st.metric("Units Sold", f"{int(data.get('total_sold', 0)):,}")
-                st.metric("Units Returned", f"{int(data.get('total_returned', 0)):,}")
-    
-    st.markdown("---")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("🔍 AI-Generated Insights")
-        st.markdown(results.get('insights', 'No insights generated.'))
-
-    with col2:
-        st.subheader("📄 Supplementary Data")
-        if st.session_state.misc_data:
-            for item in st.session_state.misc_data:
-                with st.expander(f"{item.get('filename', 'Unknown File')} - (Type: {item.get('content_type', 'Misc')})"):
-                    st.json(item)
-        else:
-            st.info("No supplementary files were processed.")
-
+    display_ai_chat_interface("the Dashboard")
 
 def display_fmea_tab():
     st.header("🔬 Failure Mode and Effects Analysis (FMEA)")
     if not st.session_state.analysis_results:
-        st.markdown(
-            '<div class="info-box">👆 Process data first to enable FMEA analysis.</div>',
-            unsafe_allow_html=True
-        )
+        st.info('👆 Process data first to enable FMEA analysis.')
         return
         
     fmea = FMEA(st.session_state.anthropic_api_key)
@@ -377,52 +323,45 @@ def display_fmea_tab():
     if 'fmea_data' not in st.session_state or st.session_state.fmea_data is None:
         st.session_state.fmea_data = pd.DataFrame(columns=["Potential Failure Mode", "Potential Effect(s)", "Severity", "Potential Cause(s)", "Occurrence", "Current Controls", "Detection", "RPN"])
 
-    issue_description = st.text_area("Describe the issue or potential failure to analyze:", height=100, key="fmea_issue_desc")
+    with st.expander("✍️ Manually Add Failure Mode"):
+        with st.form("manual_fmea_entry", clear_on_submit=True):
+            mode = st.text_input("Potential Failure Mode")
+            effect = st.text_input("Potential Effect(s)")
+            cause = st.text_input("Potential Cause(s)")
+            if st.form_submit_button("Add Entry"):
+                new_row = pd.DataFrame([{"Potential Failure Mode": mode, "Potential Effect(s)": effect, "Potential Cause(s)": cause}])
+                st.session_state.fmea_data = pd.concat([st.session_state.fmea_data, new_row], ignore_index=True)
+                st.success("Manual entry added.")
 
+    issue_description = st.text_area("Or, describe an issue for AI to analyze:", height=100, key="fmea_issue_desc")
     if st.button("🤖 Suggest Failure Modes with AI"):
         if issue_description:
-            with st.spinner("AI is thinking..."):
-                suggestions = fmea.suggest_failure_modes(issue_description, st.session_state.analysis_results)
-                new_rows = pd.DataFrame(suggestions)
-                # Ensure all columns exist before concatenating
-                for col in st.session_state.fmea_data.columns:
-                    if col not in new_rows.columns:
-                        new_rows[col] = '' # or some default value
-                st.session_state.fmea_data = pd.concat([st.session_state.fmea_data, new_rows], ignore_index=True)
-                st.success("AI suggestions added to the table below.")
-        else:
-            st.warning("Please describe the issue first.")
+            suggestions = fmea.suggest_failure_modes(issue_description, st.session_state.analysis_results)
+            st.session_state.fmea_data = pd.concat([st.session_state.fmea_data, pd.DataFrame(suggestions)], ignore_index=True)
+            st.success("AI suggestions added.")
+        else: st.warning("Please describe the issue first.")
             
     st.subheader("FMEA Table")
     edited_df = st.data_editor(
-        st.session_state.fmea_data,
-        num_rows="dynamic",
+        st.session_state.fmea_data, num_rows="dynamic", key="fmea_editor",
         column_config={
             "Severity": st.column_config.NumberColumn(min_value=1, max_value=10, step=1),
             "Occurrence": st.column_config.NumberColumn(min_value=1, max_value=10, step=1),
             "Detection": st.column_config.NumberColumn(min_value=1, max_value=10, step=1),
             "RPN": st.column_config.NumberColumn(disabled=True)
-        },
-        key="fmea_editor"
+        }
     )
     
-    # Calculate RPN
-    edited_df['RPN'] = pd.to_numeric(edited_df['Severity'], errors='coerce').fillna(1) * \
-                      pd.to_numeric(edited_df['Occurrence'], errors='coerce').fillna(1) * \
-                      pd.to_numeric(edited_df['Detection'], errors='coerce').fillna(1)
-
+    edited_df['RPN'] = pd.to_numeric(edited_df['Severity'], 'coerce').fillna(1) * pd.to_numeric(edited_df['Occurrence'], 'coerce').fillna(1) * pd.to_numeric(edited_df['Detection'], 'coerce').fillna(1)
     st.session_state.fmea_data = edited_df
     
-    st.metric("Highest Risk Priority Number (RPN)", edited_df['RPN'].max())
-    st.dataframe(edited_df.sort_values(by="RPN", ascending=False))
+    st.metric("Highest Risk Priority Number (RPN)", edited_df['RPN'].max() if not edited_df.empty else 0)
+    
+    display_ai_chat_interface("FMEA")
 
 
 def display_pre_mortem_tab():
     st.header("🔮 Proactive Pre-Mortem Analysis")
-    st.markdown(
-        "Identify potential problems *before* they occur. Imagine the product has failed and work backward to figure out why."
-    )
-    
     pre_mortem = PreMortem(st.session_state.anthropic_api_key)
     
     if 'pre_mortem_data' not in st.session_state:
@@ -435,143 +374,76 @@ def display_pre_mortem_tab():
     )
 
     if st.button("🧠 Generate AI Questions"):
-        with st.spinner("Generating guiding questions..."):
-            questions = pre_mortem.generate_questions(scenario)
-            for q in questions:
-                st.session_state.pre_mortem_data.append({"question": q, "answer": ""})
-            st.success("Questions generated below. Please provide your team's answers.")
+        questions = pre_mortem.generate_questions(scenario)
+        st.session_state.pre_mortem_data = [{"question": q, "answer": ""} for q in questions]
 
     if st.session_state.pre_mortem_data:
         for i, item in enumerate(st.session_state.pre_mortem_data):
             st.markdown(f"**{i+1}. {item['question']}**")
-            st.session_state.pre_mortem_data[i]['answer'] = st.text_area("Your Answer:", key=f"pm_answer_{i}", value=item['answer'], height=100)
+            item['answer'] = st.text_area("Your Answer:", key=f"pm_answer_{i}", value=item['answer'], height=100)
     
-    if st.session_state.pre_mortem_data and st.button("✅ Finalize Pre-Mortem Analysis"):
-        with st.spinner("AI is summarizing the results..."):
-            summary = pre_mortem.summarize_answers(st.session_state.pre_mortem_data)
-            st.subheader("Pre-Mortem Summary")
-            st.markdown(summary)
-            st.session_state.pre_mortem_summary = summary
+    if st.session_state.pre_mortem_data and st.button("✅ Summarize Pre-Mortem Analysis"):
+        st.session_state.pre_mortem_summary = pre_mortem.summarize_answers(st.session_state.pre_mortem_data)
+        st.subheader("Pre-Mortem Summary")
+        st.markdown(st.session_state.pre_mortem_summary)
+
+    display_ai_chat_interface("Pre-Mortem Analysis")
 
 
 def display_vendor_comm_tab():
     st.header("✉️ AI Vendor Communication")
     if not st.session_state.analysis_results:
-        st.markdown(
-            '<div class="info-box">👆 Process data first to draft vendor communications.</div>',
-            unsafe_allow_html=True
-        )
+        st.info('👆 Process data first to draft vendor communications.')
         return
     
     drafter = AIEmailDrafter(st.session_state.anthropic_api_key)
-
     goal = st.text_area(
         "What is the primary goal of this email?",
         "e.g., Inform the vendor of the high return rate and ask for their initial thoughts on potential causes from the manufacturing side.",
-        height=100,
-        key="email_goal"
+        height=100, key="email_goal"
     )
     
     if st.button("✍️ Draft Conservative Email", type="primary"):
         if goal:
-            with st.spinner("Drafting email..."):
-                st.session_state.vendor_email_draft = drafter.draft_vendor_email(
-                    goal,
-                    st.session_state.analysis_results,
-                    st.session_state.target_sku
-                )
-        else:
-            st.warning("Please specify the goal of the email.")
+            st.session_state.vendor_email_draft = drafter.draft_vendor_email(
+                goal, st.session_state.analysis_results, st.session_state.target_sku
+            )
+        else: st.warning("Please specify the goal of the email.")
 
     if st.session_state.vendor_email_draft:
         st.subheader("Draft Email to Vendor")
-        st.markdown(st.session_state.vendor_email_draft)
         st.code(st.session_state.vendor_email_draft, language=None)
-        st.info("You can now copy the text above and edit it before sending.")
+    
+    display_ai_chat_interface("Vendor Communications")
 
 
 def display_exports_tab():
     st.header("📄 Documents & Exports")
     st.markdown("Generate formal documents or export data for logging and further analysis.")
     
-    if not st.session_state.analysis_results:
-        st.markdown('<div class="info-box">👆 Process data first to enable exports.</div>', unsafe_allow_html=True)
-        return
-
     doc_gen = CapaDocumentGenerator(st.session_state.anthropic_api_key)
-
-    st.subheader("Export for Manual Logging")
-    st.markdown(
-        "Click the button below to download a single-row Excel file with the key metrics from this analysis. "
-        "You can then copy and paste this row into your master tracking spreadsheet to maintain data continuity."
-    )
-    
-    if st.button("📦 Export Analysis Row for Logging"):
-        summary_df = st.session_state.analysis_results['overall_summary']
-        if not summary_df.empty:
-            log_data = summary_df.iloc[[0]].copy() # Select first row as a DataFrame
-            log_data['analysis_date'] = datetime.now().strftime('%Y-%m-%d')
-            
-            # Reorder columns for clarity
-            log_data = log_data[['analysis_date', 'sku', 'total_sold', 'total_returned', 'return_rate', 'quality_status']]
-
-            buffer = BytesIO()
-            log_data.to_excel(buffer, index=False, engine='openpyxl')
-            buffer.seek(0)
-            
-            st.download_button(
-                label="📥 Download Log Row (.xlsx)",
-                data=buffer,
-                file_name=f"LogRow_{st.session_state.target_sku}_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
-    st.markdown("---")
-    st.subheader("Generate Formal Documents")
     
     doc_type = st.selectbox("Select document type to generate:", ["CAPA Report", "FMEA Report", "Pre-Mortem Summary"])
 
     if st.button(f"📄 Generate {doc_type}", type="primary"):
-        buffer = None
-        filename = ""
+        buffer, filename = None, ""
         with st.spinner(f"Generating {doc_type}..."):
-            if doc_type == "CAPA Report":
-                # A simplified CAPA data dict for this example
-                capa_data = {
-                    'capa_number': f"CAPA-{datetime.now().strftime('%Y%m%d')}-001",
-                    'product': st.session_state.target_sku,
-                    'sku': st.session_state.target_sku,
-                    'prepared_by': "Quality Team",
-                    'date': datetime.now().strftime('%Y-%m-%d'),
-                    'severity': st.session_state.analysis_results['quality_metrics'].get('risk_level', 'Medium')
-                }
+            if doc_type == "CAPA Report" and st.session_state.analysis_results:
+                capa_data = {'capa_number': f"CAPA-{datetime.now().strftime('%Y%m%d')}-001", 'product': st.session_state.target_sku}
                 content = doc_gen.generate_ai_structured_content(capa_data, st.session_state.analysis_results)
                 buffer = doc_gen.export_to_docx(capa_data, content)
                 filename = f"CAPA_{st.session_state.target_sku}.docx"
-
-            elif doc_type == "FMEA Report":
-                if st.session_state.fmea_data is not None and not st.session_state.fmea_data.empty:
-                    buffer = doc_gen.export_fmea_to_excel(st.session_state.fmea_data, st.session_state.target_sku)
-                    filename = f"FMEA_{st.session_state.target_sku}.xlsx"
-                else:
-                    st.warning("No FMEA data available to export.")
-
-            elif doc_type == "Pre-Mortem Summary":
-                if 'pre_mortem_summary' in st.session_state:
-                    summary = st.session_state.pre_mortem_summary
-                    buffer = doc_gen.export_text_to_docx(summary, f"Pre-Mortem Summary for {st.session_state.target_sku}")
-                    filename = f"PreMortem_{st.session_state.target_sku}.docx"
-                else:
-                    st.warning("No Pre-Mortem summary available to export.")
+            elif doc_type == "FMEA Report" and st.session_state.fmea_data is not None:
+                buffer = doc_gen.export_fmea_to_excel(st.session_state.fmea_data, st.session_state.target_sku)
+                filename = f"FMEA_{st.session_state.target_sku}.xlsx"
+            elif doc_type == "Pre-Mortem Summary" and st.session_state.pre_mortem_summary:
+                buffer = doc_gen.export_text_to_docx(st.session_state.pre_mortem_summary, f"Pre-Mortem Summary for {st.session_state.target_sku}")
+                filename = f"PreMortem_{st.session_state.target_sku}.docx"
+            else: st.warning(f"No data available to generate {doc_type}.")
 
         if buffer:
-            mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if filename.endswith('.xlsx') else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            st.download_button(
-                label=f"📥 Download {doc_type}",
-                data=buffer,
-                file_name=filename,
-                mime=mime_type
-            )
+            mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if filename.endswith('.xlsx') else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            st.download_button(label=f"📥 Download {doc_type}", data=buffer, file_name=filename, mime=mime)
 
 
 # --- Main Application Flow ---
@@ -581,28 +453,13 @@ def main():
     initialize_components()
     display_sidebar()
 
-    tabs = st.tabs([
-        "📊 Dashboard",
-        "🔬 FMEA",
-        "🔮 Pre-Mortem",
-        "✉️ Vendor Comms",
-        "📄 Exports"
-    ])
+    tabs = st.tabs(["📊 Dashboard", "🔬 FMEA", "🔮 Pre-Mortem", "✉️ Vendor Comms", "📄 Exports"])
 
-    with tabs[0]:
-        display_dashboard()
-
-    with tabs[1]:
-        display_fmea_tab()
-
-    with tabs[2]:
-        display_pre_mortem_tab()
-
-    with tabs[3]:
-        display_vendor_comm_tab()
-
-    with tabs[4]:
-        display_exports_tab()
+    with tabs[0]: display_dashboard()
+    with tabs[1]: display_fmea_tab()
+    with tabs[2]: display_pre_mortem_tab()
+    with tabs[3]: display_vendor_comm_tab()
+    with tabs[4]: display_exports_tab()
 
 if __name__ == "__main__":
     main()

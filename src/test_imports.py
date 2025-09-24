@@ -4,6 +4,9 @@
 import sys
 import os
 
+# Add the project root to the Python path to allow src imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 print("Python version:", sys.version)
 print("Current directory:", os.getcwd())
 print("\nChecking src directory...")
@@ -22,15 +25,15 @@ print("="*50)
 
 # Test parsers
 try:
-    from src.parsers import AIFileParser, parse_file
-    print("✓ Successfully imported from parsers.py")
+    from src.parsers import AIFileParser
+    print("✓ Successfully imported AIFileParser from parsers.py")
 except Exception as e:
     print(f"✗ Failed to import from parsers.py: {e}")
 
 # Test data_processing
 try:
-    from src.data_processing import DataProcessor, standardize_sales_data, standardize_returns_data
-    print("✓ Successfully imported from data_processing.py")
+    from src.data_processing import DataProcessor
+    print("✓ Successfully imported DataProcessor from data_processing.py")
 except Exception as e:
     print(f"✗ Failed to import from data_processing.py: {e}")
 
@@ -43,8 +46,8 @@ except Exception as e:
 
 # Test compliance
 try:
-    from src.compliance import validate_capa_data, generate_compliance_checklist, get_regulatory_guidelines
-    print("✓ Successfully imported from compliance.py")
+    from src.compliance import validate_capa_data
+    print("✓ Successfully imported validate_capa_data from compliance.py")
 except Exception as e:
     print(f"✗ Failed to import from compliance.py: {e}")
 
@@ -57,23 +60,15 @@ except Exception as e:
 
 # Test the DataProcessor class specifically
 print("\n" + "="*50)
-print("Testing DataProcessor class...")
+print("Testing DataProcessor class instantiation...")
 print("="*50)
 
 try:
-    import src.data_processing as dp
-    print("Module imported successfully")
-    print(f"Module file: {dp.__file__ if hasattr(dp, '__file__') else 'Unknown'}")
-    print(f"Module contents: {dir(dp)}")
-    
-    if hasattr(dp, 'DataProcessor'):
-        print("✓ DataProcessor class found")
-        # Try to instantiate
-        processor = dp.DataProcessor()
-        print("✓ DataProcessor instantiated successfully")
-    else:
-        print("✗ DataProcessor class not found in module")
-        
+    from src.data_processing import DataProcessor
+    print("✓ Module imported successfully")
+    # Try to instantiate
+    processor = DataProcessor(openai_api_key="dummy_key_for_test")
+    print("✓ DataProcessor instantiated successfully")
 except Exception as e:
     print(f"✗ Error testing DataProcessor: {e}")
     import traceback

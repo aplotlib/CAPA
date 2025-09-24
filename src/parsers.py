@@ -91,7 +91,7 @@ class AIFileParser:
                     {"role": "user", "content": user_prompt}
                 ],
                 max_tokens=1500,
-                response_format={"type": "json_object"} # Enforce JSON output
+                response_format={"type": "json_object"}
             )
             return json.loads(response.choices[0].message.content)
         except Exception as e:

@@ -19,7 +19,6 @@ class ReturnsProcessor:
         try:
             # Attempt to parse as a tab-separated file first
             df = pd.read_csv(StringIO(file_content), delimiter='\t', dtype=str, on_bad_lines='warn')
-            # If parsing results in a single column, it's likely not tab-separated
             if len(df.columns) <= 1:
                 raise ValueError("File is not tab-separated, trying comma-separated.")
             return df
@@ -40,7 +39,6 @@ class ReturnsProcessor:
         if df.empty:
             return {"message": "Input DataFrame is empty."}
 
-        # --- Find SKU column (case-insensitive) ---
         sku_col = next((col for col in df.columns if 'sku' in str(col).lower()), None)
         if target_sku and sku_col:
             df = df[df[sku_col].astype(str).str.strip() == str(target_sku).strip()].copy()
@@ -48,12 +46,10 @@ class ReturnsProcessor:
         if df.empty:
             return {"message": f"No returns found for the target SKU '{target_sku}' in this file."}
         
-        # --- Find Reason column (case-insensitive) ---
         reason_col = next((col for col in df.columns if 'reason' in str(col).lower()), None)
         if not reason_col:
              return {"message": "Could not find a 'reason' column in the returns file."}
             
-        # Drop rows where the reason is missing
         df.dropna(subset=[reason_col], inplace=True)
         
         if df.empty:

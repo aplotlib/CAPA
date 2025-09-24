@@ -112,7 +112,7 @@ def initialize_session_state():
         'analysis_results': None, 'capa_feasibility_analysis': None, 'capa_data': {},
         'fmea_data': None, 'pre_mortem_summary': None, 'medical_device_classification': None,
         'vendor_email_draft': None, 'risk_assessment': None, 'urra': None,
-        'chat_history': {}, 'pre_mortem_questions': []
+        'chat_history': {}, 'pre_mortem_questions': [], 'pre_mortem_data': []
     }
     for key, value in STATE_DEFAULTS.items():
         if key not in st.session_state:
@@ -125,30 +125,23 @@ def get_serializable_state() -> str:
         'analysis_results', 'capa_feasibility_analysis', 'capa_data',
         'fmea_data', 'pre_mortem_summary', 'medical_device_classification',
         'vendor_email_draft', 'risk_assessment', 'urra', 'chat_history',
-        'pre_mortem_questions', 'sales_data', 'returns_data'
+        'pre_mortem_questions', 'pre_mortem_data', 'sales_data', 'returns_data'
     ]
     
     state_to_save = {key: st.session_state.get(key) for key in serializable_keys}
     
-    # Custom serialization for complex objects
     def serialize_value(v):
-        if isinstance(v, pd.DataFrame):
-            return v.to_json(orient='split')
-        if isinstance(v, (datetime, date)):
-            return v.isoformat()
-        if isinstance(v, (dict, list)):
-            return json.loads(json.dumps(v, default=str)) # A trick to serialize nested structures
+        if isinstance(v, pd.DataFrame): return v.to_json(orient='split')
+        if isinstance(v, (datetime, date)): return v.isoformat()
         return v
 
     state_copy = copy.deepcopy(state_to_save)
     for k, v in state_copy.items():
         state_copy[k] = serialize_value(v)
-        # Special handling for nested dataframes
         if k == 'analysis_results' and isinstance(v, dict) and 'return_summary' in v:
             state_copy[k]['return_summary'] = serialize_value(v['return_summary'])
             
     return json.dumps(state_copy, indent=2, default=str)
-
 
 def load_state_from_json(uploaded_file):
     """Loads session state from an uploaded JSON file."""
@@ -157,15 +150,10 @@ def load_state_from_json(uploaded_file):
         for key, value in loaded_state.items():
             if key in st.session_state:
                 if isinstance(value, str):
-                     try:
-                        # Attempt to parse as DataFrame
-                        st.session_state[key] = pd.read_json(StringIO(value), orient='split')
+                     try: st.session_state[key] = pd.read_json(StringIO(value), orient='split')
                      except (ValueError, TypeError):
-                        # Attempt to parse as date
-                        try:
-                            st.session_state[key] = date.fromisoformat(value)
-                        except (ValueError, TypeError):
-                            st.session_state[key] = value # Assign as string
+                        try: st.session_state[key] = date.fromisoformat(value)
+                        except (ValueError, TypeError): st.session_state[key] = value
                 elif key == 'analysis_results' and isinstance(value, dict) and 'return_summary' in value:
                     value['return_summary'] = pd.read_json(StringIO(value['return_summary']), orient='split')
                     st.session_state[key] = value
@@ -174,7 +162,6 @@ def load_state_from_json(uploaded_file):
         st.success("Session loaded successfully!")
     except Exception as e:
         st.error(f"Failed to load session: {e}")
-
 
 # --- Component Initialization ---
 def initialize_components():
@@ -307,34 +294,46 @@ def display_dashboard():
             with st.expander("Show calculation"): st.table(pd.DataFrame.from_dict(res['details'], orient='index', columns=["Value"]))
 
 def display_risk_safety_tab():
-    st.header("🛡️ Risk & Safety Analysis")
+    st.header("🛡️ Risk & Safety Analysis Hub")
     if st.session_state.api_key_missing: st.error("AI features disabled."); return
 
-    with st.container(border=True):
+    with st.expander("🔬 Failure Mode and Effects Analysis (FMEA)", expanded=True):
         st.subheader("Failure Mode and Effects Analysis (FMEA)")
-        if st.button("🤖 Suggest FMEA Failure Modes with AI"):
-            if st.session_state.analysis_results:
-                with st.spinner("AI is suggesting failure modes..."):
-                    suggestions = st.session_state.fmea_generator.suggest_failure_modes(
-                        st.session_state.analysis_results.get('insights', ''), st.session_state.analysis_results
-                    )
-                    st.session_state.fmea_data = pd.DataFrame(suggestions)
-            else: st.warning("Run an analysis on the dashboard first.")
+        with st.expander("📖 How to Score FMEA"):
+            st.markdown("""
+            - **Severity (S):** How severe is the effect of the failure? (1 = Not severe, 10 = Catastrophic)
+            - **Occurrence (O):** How likely is the cause to occur? (1 = Extremely unlikely, 10 = Inevitable)
+            - **Detection (D):** How likely are you to detect the failure before it reaches the customer? (1 = Certain detection, 10 = Cannot be detected)
+            - **RPN (Risk Priority Number) = S × O × D**. Higher numbers indicate higher risk.
+            """)
         
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("🤖 Suggest Failure Modes with AI", use_container_width=True):
+                if st.session_state.analysis_results:
+                    with st.spinner("AI is suggesting failure modes..."):
+                        insights = st.session_state.analysis_results.get('insights', 'High return rate observed.')
+                        suggestions = st.session_state.fmea_generator.suggest_failure_modes(insights, st.session_state.analysis_results)
+                        for item in suggestions: item.update({'Severity': 1, 'Occurrence': 1, 'Detection': 1, 'RPN': 1})
+                        st.session_state.fmea_data = pd.concat([st.session_state.fmea_data, pd.DataFrame(suggestions)], ignore_index=True)
+                else: st.warning("Run an analysis on the dashboard first.")
+        with c2:
+            if st.button("➕ Add Manual FMEA Row", use_container_width=True):
+                 new_row = {"Potential Failure Mode": "", "Potential Effect(s)": "", "Severity": 1, "Potential Cause(s)": "", "Occurrence": 1, "Current Controls": "", "Detection": 1, "RPN": 1}
+                 st.session_state.fmea_data = pd.concat([st.session_state.fmea_data, pd.DataFrame([new_row])], ignore_index=True)
+
         if 'fmea_data' not in st.session_state or st.session_state.fmea_data is None:
              st.session_state.fmea_data = pd.DataFrame(columns=["Potential Failure Mode", "Potential Effect(s)", "Severity", "Potential Cause(s)", "Occurrence", "Current Controls", "Detection", "RPN"])
 
         edited_df = st.data_editor(st.session_state.fmea_data, num_rows="dynamic", key="fmea_editor", column_config={
-            "Severity": st.column_config.NumberColumn(min_value=1, max_value=10, required=True),
-            "Occurrence": st.column_config.NumberColumn(min_value=1, max_value=10, required=True),
-            "Detection": st.column_config.NumberColumn(min_value=1, max_value=10, required=True),
-            "RPN": st.column_config.NumberColumn(disabled=True, help="S x O x D")
-        })
+            "Severity": st.column_config.NumberColumn(min_value=1, max_value=10, required=True), "Occurrence": st.column_config.NumberColumn(min_value=1, max_value=10, required=True),
+            "Detection": st.column_config.NumberColumn(min_value=1, max_value=10, required=True), "RPN": st.column_config.NumberColumn(disabled=True, help="S x O x D")
+        }, use_container_width=True)
         for col in ['Severity', 'Occurrence', 'Detection']: edited_df[col] = pd.to_numeric(edited_df[col], errors='coerce').fillna(1)
         edited_df['RPN'] = edited_df['Severity'] * edited_df['Occurrence'] * edited_df['Detection']
         st.session_state.fmea_data = edited_df
 
-    with st.container(border=True):
+    with st.expander("📜 ISO 14971 Risk Assessment"):
         st.subheader("ISO 14971 Risk Assessment")
         with st.form("risk_assessment_form"):
             prod_desc = st.text_area("Product Description & Intended Use")
@@ -344,6 +343,19 @@ def display_risk_safety_tab():
                         st.session_state.target_sku, st.session_state.target_sku, prod_desc, "ISO 14971"
                     )
         if st.session_state.risk_assessment: st.markdown(st.session_state.risk_assessment)
+
+    with st.expander("🧑‍💻 Use-Related Risk Analysis (URRA - IEC 62366)"):
+        st.subheader("Use-Related Risk Analysis (URRA)")
+        with st.form("urra_form"):
+            user_profile = st.text_input("Intended User Profile", "e.g., Trained medical professional")
+            use_env = st.text_input("Intended Use Environment", "e.g., Hospital, home-use")
+            submitted = st.form_submit_button("Generate URRA Report", type="primary")
+            if submitted:
+                with st.spinner("AI is generating URRA report..."):
+                    st.session_state.urra = st.session_state.urra_generator.generate_urra(
+                        st.session_state.target_sku, "See description above.", user_profile, use_env
+                    )
+        if st.session_state.urra: st.markdown(st.session_state.urra)
 
 def display_vendor_comm_tab():
     st.header("✉️ Vendor Communications")
@@ -387,12 +399,15 @@ def display_compliance_tab():
         scenario = st.text_input("Define failure scenario:", "Our new product launch failed.")
         if st.button("Generate Pre-Mortem Questions"):
             with st.spinner("AI is generating questions..."):
-                st.session_state.pre_mortem_questions = st.session_state.pre_mortem_generator.generate_questions(scenario)
-        if st.session_state.pre_mortem_questions:
-            answers = [{"question": q, "answer": st.text_area(f"**Q:** {q}", key=f"pm_q_{i}")} for i, q in enumerate(st.session_state.pre_mortem_questions)]
+                questions = st.session_state.pre_mortem_generator.generate_questions(scenario)
+                st.session_state.pre_mortem_data = [{"question": q, "answer": ""} for q in questions]
+
+        if st.session_state.pre_mortem_data:
+            for i, item in enumerate(st.session_state.pre_mortem_data):
+                 item['answer'] = st.text_area(f"**Q:** {item['question']}", key=f"pm_q_{i}")
             if st.button("Summarize Session"):
                 with st.spinner("AI is summarizing..."):
-                    st.session_state.pre_mortem_summary = st.session_state.pre_mortem_generator.summarize_answers(answers)
+                    st.session_state.pre_mortem_summary = st.session_state.pre_mortem_generator.summarize_answers(st.session_state.pre_mortem_data)
         if st.session_state.pre_mortem_summary: st.markdown(st.session_state.pre_mortem_summary)
 
 def display_exports_tab():
@@ -400,17 +415,12 @@ def display_exports_tab():
     st.info("Compile all session data into a single Word document.")
     if st.button("Generate Combined Word Report", type="primary"):
         with st.spinner("Generating document..."):
-            # Create a dictionary of only the data we want to export
             export_content = {
-                'sku': st.session_state.target_sku,
-                'analysis_results': st.session_state.analysis_results,
-                'capa_data': st.session_state.capa_data,
-                'fmea_data': st.session_state.fmea_data,
-                'medical_device_classification': st.session_state.medical_device_classification,
-                'risk_assessment': st.session_state.risk_assessment,
-                'urra': st.session_state.urra,
-                'pre_mortem_summary': st.session_state.pre_mortem_summary,
-                'vendor_email_draft': st.session_state.vendor_email_draft
+                'sku': st.session_state.target_sku, 'dashboard': st.session_state.analysis_results,
+                'capa': st.session_state.capa_data, 'device_classification': st.session_state.medical_device_classification,
+                'fmea': st.session_state.fmea_data, 'risk_assessment': st.session_state.risk_assessment,
+                'urra': st.session_state.urra, 'pre_mortem': st.session_state.pre_mortem_summary,
+                'vendor_email': st.session_state.vendor_email_draft
             }
             doc_buffer = st.session_state.doc_generator.export_all_to_docx(export_content)
             st.download_button("📥 Download Report", doc_buffer, f"Quality_Report_{st.session_state.target_sku}.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")

@@ -64,7 +64,7 @@ def load_css():
             font-size: 1.1rem;
         }
         
-        /* Metric cards */
+        /* Metric cards - applied via st.metric, but we can style the container */
         .stMetric {
             background-color: #FFFFFF;
             border-radius: 10px;
@@ -100,14 +100,6 @@ def load_css():
         [data-testid="stSidebar"] {
             background-color: #FFFFFF;
             border-right: 1px solid #E0E0E0;
-        }
-        
-        /* Container styling */
-        [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] > [data-testid="stVerticalBlock"] {
-            border: 1px solid #E0E0E0;
-            border-radius: 10px;
-            padding: 1.2rem;
-            background-color: #FFFFFF;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -168,18 +160,16 @@ def parse_manual_input(input_str: str, target_sku: str) -> pd.DataFrame:
     
     # Case 2: Input is likely a full CSV
     try:
+        # Prepend header if it seems to be missing
+        if 'sku' not in input_str.lower() or 'quantity' not in input_str.lower():
+             input_str = f"sku,quantity\n{input_str}"
+        
         df = pd.read_csv(StringIO(input_str))
-        # Basic validation for expected columns
         if 'sku' in df.columns and 'quantity' in df.columns:
             return df
         else:
-            # Handle case where headers are missing but data is there
-            if len(df.columns) == 2:
-                df.columns = ['sku', 'quantity']
-                return df
-            else:
-                st.error("Manual data must have 'sku' and 'quantity' columns.")
-                return pd.DataFrame()
+            st.error("Manual data must have 'sku' and 'quantity' columns.")
+            return pd.DataFrame()
     except Exception as e:
         st.error(f"Could not parse data. Please use 'sku,quantity' format or just a single quantity number. Error: {e}")
         return pd.DataFrame()
@@ -292,42 +282,43 @@ def display_dashboard():
         return
         
     summary_data = sku_specific_summary.iloc[0]
-
-    st.markdown(f"### Overall Analysis for SKU: **{summary_data['sku']}**")
     
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Return Rate", f"{summary_data['return_rate']:.2f}%", help="Percentage of units sold that were returned.")
-    col2.metric("Total Returned", f"{int(summary_data['total_returned']):,}")
-    col3.metric("Total Sold", f"{int(summary_data['total_sold']):,}")
-    col4.metric("Quality Score", f"{results['quality_metrics'].get('quality_score', 'N/A')}/100", delta=results['quality_metrics'].get('risk_level', ''), delta_color="inverse")
+    with st.container(border=True):
+        st.markdown(f"### Overall Analysis for SKU: **{summary_data['sku']}**")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Return Rate", f"{summary_data['return_rate']:.2f}%", help="Percentage of units sold that were returned.")
+        col2.metric("Total Returned", f"{int(summary_data['total_returned']):,}")
+        col3.metric("Total Sold", f"{int(summary_data['total_sold']):,}")
+        col4.metric("Quality Score", f"{results['quality_metrics'].get('quality_score', 'N/A')}/100", delta=results['quality_metrics'].get('risk_level', ''), delta_color="inverse")
 
-    st.markdown(f"**🧠 AI Insights**: {results.get('insights', 'No insights generated.')}")
+        st.markdown(f"**🧠 AI Insights**: {results.get('insights', 'No insights generated.')}")
 
-    st.markdown("---")
-    st.subheader("💡 Cost-Benefit Analysis for Potential Fix")
-    if st.session_state.unit_cost <= 0:
-        st.warning("Please set a 'Unit Cost' greater than zero in the sidebar to run this analysis.")
-    else:
-        with st.form("cost_benefit_form"):
-            col1, col2 = st.columns(2)
-            cost_change = col1.number_input("Cost increase per unit ($)", min_value=0.0, step=0.01, format="%.2f")
-            expected_rr_reduction = col2.number_input("Expected return rate reduction (%)", min_value=0.0, max_value=100.0, step=0.1, format="%.1f")
-            submitted = st.form_submit_button("Calculate Financial Impact", use_container_width=True, type="primary")
+    with st.container(border=True):
+        st.subheader("💡 Cost-Benefit Analysis for Potential Fix")
+        if st.session_state.unit_cost <= 0:
+            st.warning("Please set a 'Unit Cost' greater than zero in the sidebar to run this analysis.")
+        else:
+            with st.form("cost_benefit_form"):
+                col1, col2 = st.columns(2)
+                cost_change = col1.number_input("Cost increase per unit ($)", min_value=0.0, step=0.01, format="%.2f")
+                expected_rr_reduction = col2.number_input("Expected return rate reduction (%)", min_value=0.0, max_value=100.0, step=0.1, format="%.1f")
+                submitted = st.form_submit_button("Calculate Financial Impact", use_container_width=True, type="primary")
 
-            if submitted:
-                report_period_days = (st.session_state.end_date - st.session_state.start_date).days
-                with st.spinner("Calculating..."):
-                    st.session_state.capa_feasibility_analysis = calculate_cost_benefit(
-                        analysis_results=results, current_unit_cost=st.session_state.unit_cost,
-                        cost_change=cost_change, expected_rr_reduction=expected_rr_reduction,
-                        report_period_days=report_period_days, target_sku=st.session_state.target_sku
-                    )
+                if submitted:
+                    report_period_days = (st.session_state.end_date - st.session_state.start_date).days
+                    with st.spinner("Calculating..."):
+                        st.session_state.capa_feasibility_analysis = calculate_cost_benefit(
+                            analysis_results=results, current_unit_cost=st.session_state.unit_cost,
+                            cost_change=cost_change, expected_rr_reduction=expected_rr_reduction,
+                            report_period_days=report_period_days, target_sku=st.session_state.target_sku
+                        )
 
-    if st.session_state.capa_feasibility_analysis:
-        cb_results = st.session_state.capa_feasibility_analysis
-        st.success(f"**Summary:** {cb_results['summary']}")
-        with st.expander("Show detailed calculation"):
-            st.table(pd.DataFrame.from_dict(cb_results['details'], orient='index', columns=["Value"]))
+        if st.session_state.capa_feasibility_analysis:
+            cb_results = st.session_state.capa_feasibility_analysis
+            st.success(f"**Summary:** {cb_results['summary']}")
+            with st.expander("Show detailed calculation"):
+                st.table(pd.DataFrame.from_dict(cb_results['details'], orient='index', columns=["Value"]))
 
 def reset_analysis_state():
     """Clears previous analysis results to prevent data mixing."""
@@ -340,7 +331,7 @@ def reset_analysis_state():
 
 def run_ai_file_analysis():
     """Runs the AI analysis on uploaded files and stores the results."""
-    reset_analysis_state() # Reset state before starting new analysis
+    reset_analysis_state()
     st.session_state.manual_sales_input = ""
     st.session_state.manual_returns_input = ""
     
@@ -354,17 +345,15 @@ def run_ai_file_analysis():
 
 def process_manual_data():
     """Processes manually entered data and runs the full analysis."""
-    reset_analysis_state() # Reset state before starting new analysis
+    reset_analysis_state()
     
     with st.spinner("Processing manual data..."):
         sales_str = st.session_state.manual_sales_input
         returns_str = st.session_state.manual_returns_input
         
-        # Use the new intelligent parser
         sales_df = parse_manual_input(sales_str, st.session_state.target_sku)
         returns_df = parse_manual_input(returns_str, st.session_state.target_sku)
             
-        # --- Re-use the existing analysis pipeline ---
         st.session_state.sales_data = st.session_state.data_processor.process_sales_data(sales_df)
         st.session_state.returns_data = st.session_state.data_processor.process_returns_data(returns_df)
 
@@ -382,17 +371,14 @@ def process_manual_data():
 def process_and_run_full_analysis():
     """Processes the user-selected files and runs the main analysis."""
     with st.spinner("Extracting data and running full analysis..."):
-        sales_dfs = []
-        returns_dfs = []
-
+        sales_dfs, returns_dfs = [], []
         for i, analysis in enumerate(st.session_state.ai_file_analyses):
             if st.session_state.user_file_selections.get(i, False):
                 file_obj = st.session_state.uploaded_files_list[i]
-                content_type = analysis.get('content_type')
                 df = st.session_state.file_parser.extract_data(file_obj, analysis, st.session_state.target_sku)
                 if df is not None and not df.empty:
-                    if content_type == 'sales': sales_dfs.append(df)
-                    elif content_type == 'returns': returns_dfs.append(df)
+                    if analysis.get('content_type') == 'sales': sales_dfs.append(df)
+                    elif analysis.get('content_type') == 'returns': returns_dfs.append(df)
         
         final_sales_df = pd.concat(sales_dfs, ignore_index=True) if sales_dfs else pd.DataFrame()
         final_returns_df = pd.concat(returns_dfs, ignore_index=True) if returns_dfs else pd.DataFrame()
@@ -414,19 +400,20 @@ def process_and_run_full_analysis():
 
 def display_ai_chat_interface(tab_name: str):
     """A contextual AI chat interface that provides real answers."""
-    st.subheader(f"🤖 AI Assistant for {tab_name}")
-    user_query = st.text_input("Ask the AI a question about the current context...", key=f"ai_chat_{tab_name}")
-    
-    if user_query:
-        if st.session_state.get('api_key_missing', True):
-            st.error("Cannot generate response. OpenAI API key is not configured.")
-        else:
-            with st.spinner("AI is thinking..."):
-                try:
-                    response = st.session_state.ai_context_helper.generate_response(user_query)
-                    st.markdown(response)
-                except Exception as e:
-                    st.error(f"An error occurred while contacting the AI: {e}")
+    with st.container(border=True):
+        st.subheader(f"🤖 AI Assistant for {tab_name}")
+        user_query = st.text_input("Ask the AI a question about the current context...", key=f"ai_chat_{tab_name}")
+        
+        if user_query:
+            if st.session_state.get('api_key_missing', True):
+                st.error("Cannot generate response. OpenAI API key is not configured.")
+            else:
+                with st.spinner("AI is thinking..."):
+                    try:
+                        response = st.session_state.ai_context_helper.generate_response(user_query)
+                        st.markdown(response)
+                    except Exception as e:
+                        st.error(f"An error occurred while contacting the AI: {e}")
 
 # --- Placeholder Tabs ---
 def display_risk_safety_tab():

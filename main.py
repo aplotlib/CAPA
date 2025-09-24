@@ -241,7 +241,7 @@ def display_dashboard():
                     results, st.session_state.unit_cost, cost_change, expected_rr_reduction,
                     (st.session_state.end_date - st.session_state.start_date).days, st.session_state.target_sku
                 )
-        if st.session_state.capa_feasibility_analysis:
+        if 'capa_feasibility_analysis' in st.session_state and st.session_state.capa_feasibility_analysis:
             res = st.session_state.capa_feasibility_analysis
             st.success(f"**Summary:** {res['summary']}")
             with st.expander("Show calculation"): st.table(pd.DataFrame.from_dict(res['details'], orient='index', columns=["Value"]))
@@ -376,9 +376,12 @@ def display_ai_chat_interface(tab_name: str):
 
 # --- Process Functions ---
 def reset_analysis_state():
-    st.session_state.analysis_results, st.session_state.capa_feasibility_analysis = None, None
-    st.session_state.ai_file_analyses, st.session_state.user_file_selections = [], {}
-    st.session_state.sales_data, st.session_state.returns_data = pd.DataFrame(), pd.DataFrame()
+    st.session_state.analysis_results = None
+    st.session_state.capa_feasibility_analysis = None
+    st.session_state.ai_file_analyses = []
+    st.session_state.user_file_selections = {}
+    st.session_state.sales_data = pd.DataFrame()
+    st.session_state.returns_data = pd.DataFrame()
 
 def run_ai_file_analysis(files):
     reset_analysis_state()

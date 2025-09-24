@@ -78,18 +78,35 @@ def initialize_session_state():
 
 def get_serializable_state() -> str:
     """Creates a JSON-serializable representation of the session state."""
-    serializable_keys = [k for k, v in st.session_state.items() if not callable(v) and not k.startswith(('components_', 'ai_', 'doc_', 'file_'))]
-    state_to_save = {key: st.session_state.get(key) for key in serializable_keys}
+    # FIX: Exclude non-serializable AI client objects to prevent 'cannot pickle' error.
+    unserializable_keys = [
+        'file_parser', 'data_processor', 'ai_context_helper', 'ai_capa_helper',
+        'ai_email_drafter', 'medical_device_classifier', 'risk_assessment_generator',
+        'urra_generator', 'fmea_generator', 'pre_mortem_generator', 'doc_generator'
+    ]
+    
+    state_to_save = {
+        key: value for key, value in st.session_state.items()
+        if key not in unserializable_keys and not callable(value)
+    }
+
     def serialize_value(v):
         if isinstance(v, pd.DataFrame): return v.to_json(orient='split')
         if isinstance(v, (datetime, date)): return v.isoformat()
         return v
+
+    # Use a deepcopy to handle nested structures safely
     state_copy = copy.deepcopy(state_to_save)
+    
     for k, v in state_copy.items():
         state_copy[k] = serialize_value(v)
+        # Handle nested DataFrame specifically
         if k == 'analysis_results' and isinstance(v, dict) and 'return_summary' in v:
-            state_copy[k]['return_summary'] = serialize_value(v['return_summary'])
+            if isinstance(v['return_summary'], pd.DataFrame):
+                state_copy[k]['return_summary'] = serialize_value(v['return_summary'])
+
     return json.dumps(state_copy, indent=2, default=str)
+
 
 def load_state_from_json(uploaded_file):
     """Loads session state from an uploaded JSON file."""
@@ -98,11 +115,18 @@ def load_state_from_json(uploaded_file):
         for key, value in loaded_state.items():
             if key in st.session_state:
                 if isinstance(value, str):
-                     try: st.session_state[key] = pd.read_json(StringIO(value), orient='split')
+                     try:
+                         # Attempt to deserialize DataFrame
+                         st.session_state[key] = pd.read_json(StringIO(value), orient='split')
                      except (ValueError, TypeError):
-                        try: st.session_state[key] = date.fromisoformat(value)
-                        except (ValueError, TypeError): st.session_state[key] = value
-                else: st.session_state[key] = value
+                        try:
+                            # Attempt to deserialize date
+                            st.session_state[key] = date.fromisoformat(value)
+                        except (ValueError, TypeError):
+                            # Otherwise, assign as string
+                            st.session_state[key] = value
+                else:
+                    st.session_state[key] = value
         st.success("Session loaded successfully!")
     except Exception as e: st.error(f"Failed to load session: {e}")
 
@@ -137,6 +161,7 @@ def parse_manual_input(input_str: str, target_sku: str) -> pd.DataFrame:
     if input_str.isnumeric():
         return pd.DataFrame([{'sku': target_sku, 'quantity': int(input_str)}])
     try:
+        # Heuristic to check if it's missing headers
         if 'sku' not in input_str.lower() or 'quantity' not in input_str.lower():
              input_str = f"sku,quantity\n{input_str}"
         return pd.read_csv(StringIO(input_str))
@@ -175,9 +200,11 @@ def display_sidebar():
         with st.expander("📁 Or Upload Files"):
             uploaded_files = st.file_uploader("Upload Files", accept_multiple_files=True, type=['csv', 'xlsx', 'png', 'jpg'], key="file_uploader_widget")
             if uploaded_files:
+                # Store uploaded files in session state to handle re-runs
+                st.session_state.uploaded_files_list = uploaded_files
                 if st.button("🤖 Process Uploaded Files", use_container_width=True):
                     if st.session_state.api_key_missing: st.error("Cannot process files. OpenAI API key is missing.")
-                    else: run_ai_file_analysis(uploaded_files)
+                    else: run_ai_file_analysis(st.session_state.uploaded_files_list)
 
 def display_dashboard():
     st.header("📊 Quality Dashboard")
@@ -392,10 +419,15 @@ def process_and_run_full_analysis():
         sales_dfs, returns_dfs = [], []
         for i, analysis in enumerate(st.session_state.ai_file_analyses):
             if st.session_state.user_file_selections.get(i, False):
-                df = st.session_state.file_parser.extract_data(st.session_state.uploaded_files_list[i], analysis, st.session_state.target_sku)
-                if df is not None:
-                    if analysis.get('content_type') == 'sales': sales_dfs.append(df)
-                    elif analysis.get('content_type') == 'returns': returns_dfs.append(df)
+                # Ensure the uploaded files list is still valid
+                if i < len(st.session_state.uploaded_files_list):
+                    df = st.session_state.file_parser.extract_data(st.session_state.uploaded_files_list[i], analysis, st.session_state.target_sku)
+                    if df is not None:
+                        if analysis.get('content_type') == 'sales': sales_dfs.append(df)
+                        elif analysis.get('content_type') == 'returns': returns_dfs.append(df)
+                else:
+                    st.warning(f"Could not find the uploaded file corresponding to analysis for '{analysis.get('filename')}'. It might have been cleared.")
+
         st.session_state.sales_data = st.session_state.data_processor.process_sales_data(pd.concat(sales_dfs, ignore_index=True) if sales_dfs else pd.DataFrame())
         st.session_state.returns_data = st.session_state.data_processor.process_returns_data(pd.concat(returns_dfs, ignore_index=True) if returns_dfs else pd.DataFrame())
         st.session_state.analysis_results = run_full_analysis(st.session_state.sales_data, st.session_state.returns_data, (st.session_state.end_date - st.session_state.start_date).days, st.session_state.unit_cost, st.session_state.sales_price)

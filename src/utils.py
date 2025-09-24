@@ -33,6 +33,7 @@ def retry_with_backoff(retries=5, initial_delay=1, backoff_factor=2, jitter=0.1)
                         # For other API errors (like authentication), don't retry
                         raise e
                 except Exception as e:
+                    # Re-raise other exceptions immediately
                     raise e
         return wrapper
     return decorator

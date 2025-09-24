@@ -8,7 +8,7 @@ from .utils import retry_with_backoff
 class AICAPAHelper:
     """AI assistant for generating CAPA form suggestions using OpenAI."""
 
-    def __init__(self, api_key: Optional[str] = None): #<-- FIX: api_key parameter was missing
+    def __init__(self, api_key: Optional[str] = None):
         """Initialize with OpenAI API key."""
         self.client = None
         if api_key:
@@ -49,6 +49,9 @@ class AICAPAHelper:
                 response_format={"type": "json_object"}
             )
             return json.loads(response.choices[0].message.content)
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON from AI response: {e}")
+            return {"error": "Failed to parse AI response."}
         except Exception as e:
             print(f"Error generating CAPA suggestions: {e}")
             return {}
@@ -160,6 +163,9 @@ class MedicalDeviceClassifier:
                 response_format={"type": "json_object"}
             )
             return json.loads(response.choices[0].message.content)
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON from AI response: {e}")
+            return {"error": "Failed to parse AI response."}
         except Exception as e:
             print(f"Error classifying device: {e}")
             return {"error": f"Failed to classify the device due to an AI model error: {e}"}

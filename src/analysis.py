@@ -20,7 +20,7 @@ class MetricsCalculator:
             returns_summary = returns_df.groupby('sku')['quantity'].sum().reset_index()
             returns_summary.rename(columns={'quantity': 'total_returned'}, inplace=True)
             summary_df = pd.merge(sales_summary, returns_summary, on='sku', how='left')
-            summary_df['total_returned'] = summary_df['total_returned'].fillna(0)
+            summary_df['total_returned'] = summary_df['total_returned'].fillna(0).astype(int)
 
         summary_df['return_rate'] = summary_df.apply(
             lambda row: (row['total_returned'] / row['total_sold'] * 100) if row['total_sold'] > 0 else 0,
@@ -58,7 +58,9 @@ def run_full_analysis(sales_df: pd.DataFrame, returns_df: pd.DataFrame,
 
     if return_summary.empty:
         return {"error": "Could not calculate return summary."}
-
+    
+    # Generate insights for the primary SKU for display purposes
+    # A more advanced version could allow selecting which SKU to focus on
     primary_sku_data = return_summary.iloc[0]
     quality_metrics = calculator.calculate_quality_metrics(primary_sku_data['return_rate'])
 
@@ -74,9 +76,10 @@ def _generate_insights(summary_data: pd.Series, quality_metrics: Dict,
                       period_days: int, unit_cost: Optional[float] = None, sales_price: Optional[float] = None) -> str:
     insights = []
     return_rate = summary_data['return_rate']
+    sku = summary_data['sku']
 
     insights.append(
-        f"**Return Rate Analysis**: The product's return rate is **{return_rate:.2f}%** over the last {period_days} days. "
+        f"**Return Rate Analysis for SKU {sku}**: The product's return rate is **{return_rate:.2f}%** over the last {period_days} days. "
         f"This is evaluated against the medical device industry standard of 5-10%."
     )
 
@@ -100,22 +103,30 @@ def _generate_insights(summary_data: pd.Series, quality_metrics: Dict,
         return_cost = summary_data['total_returned'] * unit_cost
         insights.append(f"💰 **Financial Impact**: Based on a unit cost of ${unit_cost:,.2f}, the cost of returned goods for this period is approximately **${return_cost:,.2f}**.")
 
-
     return "\n\n".join(insights)
 
-def calculate_cost_benefit(analysis_results: Dict, current_unit_cost: float, cost_change: float, expected_rr_reduction: float, report_period_days: int) -> Dict:
+def calculate_cost_benefit(analysis_results: Dict, current_unit_cost: float, cost_change: float,
+                           expected_rr_reduction: float, report_period_days: int, target_sku: str) -> Dict:
     """
-    Calculates the cost-benefit of a proposed change.
+    Calculates the cost-benefit of a proposed change for a specific SKU.
     """
-    summary_data = analysis_results['return_summary'].iloc[0]
+    return_summary_df = analysis_results.get('return_summary')
+    if return_summary_df is None or return_summary_df.empty:
+        return {"summary": "Error: Return summary data not available."}
+
+    # Filter for the specific SKU
+    summary_data = return_summary_df[return_summary_df['sku'] == target_sku]
+    if summary_data.empty:
+        return {"summary": f"Error: No data found for SKU {target_sku}."}
+    
+    summary_data = summary_data.iloc[0]
+
     total_sold = summary_data['total_sold']
     current_return_rate = summary_data['return_rate']
 
     # Calculations
-    new_return_rate = current_return_rate - expected_rr_reduction
-    if new_return_rate < 0:
-        new_return_rate = 0
-
+    new_return_rate = max(0, current_return_rate - expected_rr_reduction)
+    
     returns_reduced = total_sold * (expected_rr_reduction / 100)
     savings_from_returns = returns_reduced * current_unit_cost
 
@@ -128,7 +139,12 @@ def calculate_cost_benefit(analysis_results: Dict, current_unit_cost: float, cos
     annual_scaling_factor = 365 / report_period_days if report_period_days > 0 else 0
     annual_savings = net_savings * annual_scaling_factor
 
-    roi = (annual_savings / (total_additional_cost * annual_scaling_factor)) * 100 if total_additional_cost > 0 else float('inf')
+    # Handle division by zero for ROI
+    total_annual_add_cost = total_additional_cost * annual_scaling_factor
+    if total_annual_add_cost > 0:
+        roi = (annual_savings / total_annual_add_cost) * 100
+    else:
+        roi = float('inf') if annual_savings > 0 else 0
 
     breakeven_units = total_additional_cost / (savings_from_returns / total_sold) if savings_from_returns > 0 else float('inf')
 
@@ -140,6 +156,7 @@ def calculate_cost_benefit(analysis_results: Dict, current_unit_cost: float, cos
     )
 
     details = {
+        "Target SKU": target_sku,
         "Current Return Rate": f"{current_return_rate:.2f}%",
         "Expected New Return Rate": f"{new_return_rate:.2f}%",
         "Units Sold in Period": f"{int(total_sold):,}",
@@ -157,4 +174,3 @@ def calculate_cost_benefit(analysis_results: Dict, current_unit_cost: float, cos
         "breakeven_units": breakeven_units,
         "details": details,
     }
-

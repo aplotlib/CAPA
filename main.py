@@ -21,10 +21,12 @@ from src.fmea import FMEA
 from src.pre_mortem import PreMortem
 from src.fba_returns_processor import ReturnsProcessor
 from src.ai_context_helper import AIContextHelper
+from src.capa_form import display_capa_form # Import the new CAPA form
 
 # --- Page Configuration and Styling ---
 st.set_page_config(page_title="Product Lifecycle Manager", page_icon="📈", layout="wide")
 
+# (Your existing CSS styling remains here)
 st.markdown("""
 <style>
     body {
@@ -143,7 +145,7 @@ def get_serializable_state() -> str:
         'start_date', 'end_date', 'manual_sales', 'manual_returns',
         'fmea_data', 'pre_mortem_data', 'pre_mortem_summary',
         'vendor_email_draft', 'chat_history',
-        'capa_feasibility_analysis', 'medical_device_classification', 
+        'capa_feasibility_analysis', 'medical_device_classification',
         'risk_assessment_report', 'urra_report'
     ]
     
@@ -163,7 +165,14 @@ def get_serializable_state() -> str:
         elif isinstance(v, (datetime, date)):
             state_copy[k] = v.isoformat()
             
+    # Special handling for capa_data date objects
+    if 'capa_data' in state_copy and isinstance(state_copy['capa_data'], dict):
+        for key, value in state_copy['capa_data'].items():
+            if isinstance(value, date):
+                state_copy['capa_data'][key] = value.isoformat()
+
     return json.dumps(state_copy, indent=2)
+
 
 def load_state_from_json(uploaded_file):
     """Loads session state from an uploaded JSON file."""
@@ -184,8 +193,17 @@ def load_state_from_json(uploaded_file):
                 }
             elif key in ['start_date', 'end_date'] and isinstance(value, str):
                  st.session_state[key] = date.fromisoformat(value)
+            elif key == 'capa_data' and isinstance(value, dict):
+                 for k, v_iso in value.items():
+                     if isinstance(v_iso, str) and ('date' in k):
+                         try:
+                            value[k] = date.fromisoformat(v_iso)
+                         except ValueError:
+                             pass
+                 st.session_state[key] = value
             else:
                 st.session_state[key] = value
+
         st.success("Session loaded successfully!")
         time.sleep(1)
         st.rerun()
@@ -630,6 +648,7 @@ def display_exports_tab():
 
     available_docs = []
     if st.session_state.analysis_results: available_docs.append("Dashboard & CAPA Insights")
+    if st.session_state.capa_data: available_docs.append("CAPA Form") # Add CAPA form to exports
     if st.session_state.fmea_data is not None and not st.session_state.fmea_data.empty: available_docs.append("FMEA Data")
     if st.session_state.medical_device_classification: available_docs.append("Medical Device Classification")
     if st.session_state.risk_assessment_report: available_docs.append("ISO 14971 Risk Assessment")
@@ -648,6 +667,7 @@ def display_exports_tab():
             all_content = {
                 "sku": st.session_state.target_sku,
                 "dashboard": st.session_state.analysis_results if "Dashboard & CAPA Insights" in doc_types else None,
+                "capa": st.session_state.capa_data if "CAPA Form" in doc_types else None,
                 "fmea": st.session_state.fmea_data if "FMEA Data" in doc_types else None,
                 "device_classification": st.session_state.medical_device_classification if "Medical Device Classification" in doc_types else None,
                 "risk_assessment": st.session_state.risk_assessment_report if "ISO 14971 Risk Assessment" in doc_types else None,
@@ -672,13 +692,20 @@ def main():
     initialize_components()
     display_sidebar()
 
-    tabs = st.tabs(["📊 Dashboard", "🛡️ Risk & Safety", "✉️ Vendor Comms", "⚖️ Compliance", "📄 Exports"])
+    tabs = st.tabs(["📊 Dashboard", "📝 CAPA", "🛡️ Risk & Safety", "✉️ Vendor Comms", "⚖️ Compliance", "📄 Exports"])
 
-    with tabs[0]: display_dashboard()
-    with tabs[1]: display_risk_safety_tab()
-    with tabs[2]: display_vendor_comm_tab()
-    with tabs[3]: display_compliance_tab()
-    with tabs[4]: display_exports_tab()
+    with tabs[0]: 
+        display_dashboard()
+    with tabs[1]: 
+        display_capa_form()
+    with tabs[2]: 
+        display_risk_safety_tab()
+    with tabs[3]: 
+        display_vendor_comm_tab()
+    with tabs[4]: 
+        display_compliance_tab()
+    with tabs[5]: 
+        display_exports_tab()
 
 if __name__ == "__main__":
     main()

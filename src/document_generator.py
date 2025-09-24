@@ -1,52 +1,62 @@
 # src/document_generator.py
 
-import json
 from typing import Dict, Optional, Any, List
 from io import BytesIO
 from datetime import datetime, date
 from docx import Document
-from docx.shared import Inches, Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Inches
 import pandas as pd
-import re
 
 class CapaDocumentGenerator:
-    """Generates formal, detailed reports from structured data."""
+    """Generates formal, detailed Word document reports from structured data."""
 
-    def __init__(self, anthropic_api_key: Optional[str] = None):
-        # API key might be used for future summarization features
+    def __init__(self):
+        """Initializes the document generator."""
         pass
 
-    def _parse_markdown_table(self, markdown_text: str) -> List[List[str]]:
-        """Parses a Markdown table into a list of lists."""
-        if not markdown_text or not isinstance(markdown_text, str):
+    def _parse_markdown_table(self, markdown_text: str) -> (List[str], List[List[str]]):
+        """
+        Parses a Markdown table into a header and a list of rows.
+        Handles potential formatting errors gracefully.
+        """
+        if not isinstance(markdown_text, str) or not markdown_text.strip():
             return [], []
 
-        lines = markdown_text.strip().split('\n')
+        lines = [line.strip() for line in markdown_text.strip().split('\n')]
         
-        # Find header line
-        header_line_index = -1
+        # Filter out empty lines
+        lines = [line for line in lines if line]
+
+        if len(lines) < 2:
+            return [], []
+
+        # Find header and separator lines
+        header_line = None
+        separator_line = None
+        data_lines = []
+
         for i, line in enumerate(lines):
             if '|' in line and '---' in lines[i+1 if i+1 < len(lines) else i]:
-                header_line_index = i
+                header_line = lines[i]
+                separator_line = lines[i+1]
+                data_lines = lines[i+2:]
                 break
         
-        if header_line_index == -1:
+        if not header_line or not separator_line:
             return [], []
 
         # Extract header
-        header = [h.strip() for h in lines[header_line_index].split('|') if h.strip()]
+        header = [h.strip() for h in header_line.split('|') if h.strip()]
         
-        # Extract rows
+        # Extract data rows
         table_data = []
-        for line in lines[header_line_index + 2:]:
-            if '|' not in line:
-                continue
-            row = [cell.strip() for cell in line.split('|')]
-            # Markdown tables often have an empty string at the start and end of each row split
-            cleaned_row = row[1:-1] if len(row) > 1 else row
-            if len(cleaned_row) == len(header):
-                 table_data.append(cleaned_row)
+        for line in data_lines:
+            if '|' in line:
+                row = [cell.strip() for cell in line.split('|')]
+                # Clean up empty strings from start/end splits
+                cleaned_row = row[1:-1] if len(row) > 2 and not row[0] and not row[-1] else row
+                if len(cleaned_row) == len(header):
+                    table_data.append(cleaned_row)
 
         return header, table_data
 
@@ -58,7 +68,7 @@ class CapaDocumentGenerator:
         table = doc.add_table(rows=1, cols=len(df.columns))
         table.style = 'Table Grid'
         
-        # Add header
+        # Add header row
         hdr_cells = table.rows[0].cells
         for i, col_name in enumerate(df.columns):
             hdr_cells[i].text = str(col_name)
@@ -73,14 +83,14 @@ class CapaDocumentGenerator:
         """Parses a Markdown table and adds it to the Word document."""
         header, data = self._parse_markdown_table(markdown_text)
         if not header or not data:
-            # Fallback for plain text
+            # If parsing fails, add the text as a paragraph
             doc.add_paragraph(markdown_text)
             return
 
         table = doc.add_table(rows=1, cols=len(header))
         table.style = 'Table Grid'
 
-        # Add header
+        # Add header row
         hdr_cells = table.rows[0].cells
         for i, col_name in enumerate(header):
             hdr_cells[i].text = col_name
@@ -92,38 +102,35 @@ class CapaDocumentGenerator:
                 row_cells[i].text = cell_value
     
     def _add_capa_to_doc(self, doc: Document, capa_data: Dict[str, Any]):
-        """Adds the CAPA form data to the Word document."""
+        """Adds the CAPA form data to the Word document in a structured table."""
         doc.add_heading("Corrective and Preventive Action (CAPA) Report", level=2)
         
-        # Create a table for a structured look
         table = doc.add_table(rows=0, cols=2)
         table.style = 'Table Grid'
         
-        def add_row(field_name, value):
+        def add_row(field_name: str, value: Any):
             row_cells = table.add_row().cells
             row_cells[0].text = field_name
-            # Format date objects for display
+            # Format dates and other types for clean output
             if isinstance(value, date):
                 value = value.strftime('%Y-%m-%d')
-            row_cells[1].text = str(value)
+            row_cells[1].text = str(value if value is not None else '')
 
-        # Map keys to user-friendly names
+        # A clear mapping of internal keys to human-readable report fields
         field_map = {
             'capa_number': "CAPA Number",
-            'initiation_date': "Initiation Date",
+            'date': "Initiation Date",
             'product_name': "Product Name/Model",
+            'prepared_by': "Prepared By",
             'source_of_issue': "Source of Issue",
             'issue_description': "Detailed Description of Non-conformity",
             'immediate_containment_actions': "Immediate Actions/Containment",
             'risk_severity': "Risk Severity (1-5)",
             'risk_probability': "Risk Probability (1-5)",
-            'root_cause_analysis': "Root Cause Analysis Findings",
+            'root_cause': "Root Cause Analysis Findings",
             'corrective_action': "Corrective Action(s)",
-            'corrective_action_implementation': "Corrective Action Implementation Plan",
             'preventive_action': "Preventive Action(s)",
-            'preventive_action_implementation': "Preventive Action Implementation Plan",
             'effectiveness_verification_plan': "Effectiveness Verification Plan",
-            'effectiveness_verification_results': "Effectiveness Verification Results",
             'closed_by': "Closed By",
             'closure_date': "Closure Date"
         }
@@ -133,9 +140,8 @@ class CapaDocumentGenerator:
             
         doc.add_page_break()
 
-
     def export_all_to_docx(self, content: Dict[str, Any]) -> BytesIO:
-        """Exports a combined, detailed report of all analyses to a Word document."""
+        """Exports a combined report of all analyses to a Word document."""
         doc = Document()
         doc.add_heading(f"Combined Quality Report for SKU: {content.get('sku', 'N/A')}", level=1)
         p = doc.add_paragraph()
@@ -147,7 +153,7 @@ class CapaDocumentGenerator:
             results = content['dashboard']
             summary_df = results.get('return_summary')
             if summary_df is not None and not summary_df.empty:
-                doc.add_paragraph("The following table summarizes the key performance metrics for the target SKU during the analysis period.")
+                doc.add_paragraph("The following table summarizes key performance metrics for the analysis period.")
                 self._add_df_to_doc(doc, summary_df)
             
             doc.add_heading("AI-Generated Insights", level=3)
@@ -177,28 +183,28 @@ class CapaDocumentGenerator:
         # --- FMEA Section ---
         if content.get('fmea') is not None and not content.get('fmea').empty:
             doc.add_heading("Failure Mode and Effects Analysis (FMEA)", level=2)
-            doc.add_paragraph("This FMEA identifies potential failure modes, their effects, and causes, and ranks them by Risk Priority Number (RPN).")
+            doc.add_paragraph("This FMEA identifies potential failure modes, their effects, and causes, ranking them by Risk Priority Number (RPN).")
             self._add_df_to_doc(doc, content['fmea'])
             doc.add_page_break()
 
         # --- ISO 14971 Risk Assessment ---
         if content.get('risk_assessment'):
             doc.add_heading("ISO 14971 Risk Assessment", level=2)
-            doc.add_paragraph("The following table outlines risks based on the ISO 14971 standard, analyzing hazards, harms, and mitigations.")
+            doc.add_paragraph("This table outlines risks based on the ISO 14971 standard, analyzing hazards, harms, and mitigations.")
             self._add_markdown_table_to_doc(doc, content['risk_assessment'])
             doc.add_page_break()
 
         # --- Use-Related Risk Analysis (URRA) ---
         if content.get('urra'):
             doc.add_heading("Use-Related Risk Analysis (URRA - IEC 62366)", level=2)
-            doc.add_paragraph("This analysis identifies risks associated with the usability and user interface of the device, based on IEC 62366.")
+            doc.add_paragraph("This analysis identifies risks associated with device usability and the user interface, based on IEC 62366.")
             self._add_markdown_table_to_doc(doc, content['urra'])
             doc.add_page_break()
 
         # --- Pre-Mortem Section ---
         if content.get('pre_mortem'):
             doc.add_heading("Pre-Mortem Analysis Summary", level=2)
-            doc.add_paragraph("This section summarizes the findings from the pre-mortem exercise, which proactively identifies potential reasons for project failure.")
+            doc.add_paragraph("This section summarizes findings from the pre-mortem exercise, which proactively identifies potential reasons for project failure.")
             doc.add_paragraph(content['pre_mortem'])
             doc.add_page_break()
 
@@ -208,7 +214,7 @@ class CapaDocumentGenerator:
             doc.add_paragraph("The following email was drafted to communicate quality findings to the manufacturing partner.")
             doc.add_paragraph(content['vendor_email'])
 
-        # --- Save document to buffer ---
+        # --- Save document to a buffer ---
         buffer = BytesIO()
         doc.save(buffer)
         buffer.seek(0)

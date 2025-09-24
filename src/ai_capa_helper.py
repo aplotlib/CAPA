@@ -35,8 +35,8 @@ class AICAPAHelper:
         You are a medical device quality expert helping to complete a CAPA form based on the following context:
         {context}
 
-        Generate content for each CAPA field following ISO 13485 standards.
-        Return ONLY a valid JSON object with keys: "issue_description", "root_cause", "corrective_action", "preventive_action".
+        Generate content for each CAPA field following ISO 13485, FDA 21 CFR 820.100, and EU MDR standards.
+        Return ONLY a valid JSON object with keys for the most critical fields: "issue_description", "root_cause_analysis", "corrective_action", "preventive_action", and "effectiveness_verification_plan".
         """
         try:
             response = self.client.messages.create(
@@ -49,6 +49,7 @@ class AICAPAHelper:
             print(f"Error generating CAPA suggestions: {e}")
             return {}
 
+# (The rest of the file: AIEmailDrafter, MedicalDeviceClassifier, etc., remains unchanged)
 class AIEmailDrafter:
     """AI assistant for drafting vendor communications."""
 

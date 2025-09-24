@@ -2,23 +2,23 @@
 
 import pandas as pd
 from typing import Optional, Dict, Any, IO
-from io import BytesIO
 import json
 import pytesseract
 from PIL import Image
-import anthropic
+import openai
+from .utils import retry_with_backoff
 
 class AIFileParser:
-    """Enhanced AI-powered file parser for various formats."""
+    """Enhanced AI-powered file parser for various formats using OpenAI."""
     
     def __init__(self, api_key: Optional[str] = None):
         self.client = None
         if api_key:
             try:
-                self.client = anthropic.Anthropic(api_key=api_key)
-                self.model = "claude-3-5-sonnet-20240620"
+                self.client = openai.OpenAI(api_key=api_key)
+                self.model = "gpt-4o"
             except Exception as e:
-                print(f"Failed to initialize Anthropic client: {e}")
+                print(f"Failed to initialize OpenAI client: {e}")
 
     def _get_file_preview(self, file: IO[bytes]) -> str:
         """Creates a text preview of a file."""
@@ -42,6 +42,7 @@ class AIFileParser:
         except Exception as e:
             return f"OCR Error: {e}"
 
+    @retry_with_backoff()
     def analyze_file_structure(self, file: IO[bytes], target_sku: str) -> Dict[str, Any]:
         """Uses AI to analyze a file's structure and categorize its content."""
         if not self.client:
@@ -57,10 +58,13 @@ class AIFileParser:
         else:
             preview = self._get_file_preview(file)
 
-        prompt = f"""
+        system_prompt = """
         You are a data analysis expert for a quality management system.
-        Analyze the following file preview and determine its content type and key data.
-        The analysis is for the product with SKU: "{target_sku}".
+        Analyze the provided file preview to determine its content type and extract key data.
+        Return ONLY a valid JSON object.
+        """
+        user_prompt = f"""
+        Analyze the following file preview for the product with SKU: "{target_sku}".
 
         File Preview:
         {preview}
@@ -73,21 +77,23 @@ class AIFileParser:
         - For 'inspection', summarize the pass/fail results.
         - For 'voice_of_customer', extract the NCX rate or key customer complaints.
 
-        Return a JSON object with:
+        Return a JSON object with these exact keys:
         "filename": "{file.name}"
         "content_type": "...",
         "key_data": {{...}},
         "summary": "A brief one-sentence summary of the file's content."
-        
-        Return ONLY the valid JSON object.
         """
         try:
-            response = self.client.messages.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
                 max_tokens=1500,
-                messages=[{"role": "user", "content": prompt}]
-            ).content[0].text
-            return json.loads(response)
+                response_format={"type": "json_object"} # Enforce JSON output
+            )
+            return json.loads(response.choices[0].message.content)
         except Exception as e:
             return {"error": f"AI analysis failed: {e}", "filename": file.name}
 
@@ -102,14 +108,11 @@ class AIFileParser:
 
         if quantity is not None:
             try:
-                # Handle cases where quantity might be a string with commas
                 quantity = int(float(str(quantity).replace(',', '')))
                 return pd.DataFrame([{'sku': target_sku, 'quantity': quantity}])
             except (ValueError, TypeError):
-                # If direct extraction fails, fall back to reading the file
                 pass
         
-        # Fallback for complex files: read and let data_processing handle it
         file.seek(0)
         try:
             if file.name.endswith('.csv'):
@@ -117,7 +120,6 @@ class AIFileParser:
             else:
                 df = pd.read_excel(file)
             
-            # Simple search for SKU and quantity columns
             sku_col = next((col for col in df.columns if 'sku' in str(col).lower()), None)
             qty_col = next((col for col in df.columns if any(q in str(col).lower() for q in ['quantity', 'sales', 'units', 'returned'])), None)
 

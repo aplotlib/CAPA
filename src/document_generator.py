@@ -42,6 +42,7 @@ class CapaDocumentGenerator:
         for line in data_lines:
             if '|' in line:
                 row = [cell.strip() for cell in line.split('|')]
+                # Clean up empty cells from leading/trailing pipes
                 cleaned_row = row[1:-1] if len(row) > 2 and not row[0] and not row[-1] else row
                 if len(cleaned_row) == len(header):
                     table_data.append(cleaned_row)
@@ -49,7 +50,7 @@ class CapaDocumentGenerator:
 
     def _add_df_to_doc(self, doc: Document, df: pd.DataFrame):
         """Adds a Pandas DataFrame as a table to the Word document."""
-        if df.empty:
+        if df is None or df.empty:
             return
         
         table = doc.add_table(rows=1, cols=len(df.columns))
@@ -66,6 +67,8 @@ class CapaDocumentGenerator:
 
     def _add_markdown_table_to_doc(self, doc: Document, markdown_text: str):
         """Parses a Markdown table and adds it to the Word document."""
+        if not markdown_text:
+            return
         header, data = self._parse_markdown_table(markdown_text)
         if not header or not data:
             doc.add_paragraph(markdown_text)
@@ -85,6 +88,8 @@ class CapaDocumentGenerator:
     
     def _add_capa_to_doc(self, doc: Document, capa_data: Dict[str, Any]):
         """Adds the CAPA form data to the Word document in a structured table."""
+        if not capa_data:
+            return
         doc.add_heading("Corrective and Preventive Action (CAPA) Report", level=2)
         table = doc.add_table(rows=0, cols=2)
         table.style = 'Table Grid'
@@ -128,7 +133,7 @@ class CapaDocumentGenerator:
         if content.get('capa'):
             self._add_capa_to_doc(doc, content['capa'])
 
-        if content.get('fmea') is not None and not content.get('fmea').empty:
+        if content.get('fmea') is not None:
             doc.add_heading("Failure Mode and Effects Analysis (FMEA)", level=2)
             self._add_df_to_doc(doc, content['fmea'])
             doc.add_page_break()

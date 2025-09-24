@@ -4,6 +4,7 @@ import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
 import os
+from io import StringIO
 
 # --- Import custom modules ---
 from src.parsers import AIFileParser
@@ -30,7 +31,7 @@ st.set_page_config(
 
 # --- Enhanced UI/UX Styling ---
 def load_css():
-    """Loads custom CSS for styling the application."""
+    """Loads custom CSS for a modern, professional theme."""
     st.markdown("""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -38,25 +39,76 @@ def load_css():
         html, body, [class*="st-"] {
             font-family: 'Inter', sans-serif;
         }
-        .main { background-color: #F0F2F6; }
+        
+        /* Main app background */
+        .main { background-color: #F5F5F9; }
+
+        /* Custom header */
         .main-header {
-            background: linear-gradient(135deg, #0061ff 0%, #60efff 100%);
-            color: white; padding: 2rem; border-radius: 10px; text-align: center;
-            margin-bottom: 2rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            background-color: #FFFFFF;
+            padding: 2rem;
+            border-radius: 10px;
+            text-align: center;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            border: 1px solid #E0E0E0;
         }
-        .main-header h1 { font-weight: 700; font-size: 2.5rem; }
+        .main-header h1 {
+            font-weight: 700;
+            font-size: 2.5rem;
+            color: #1a1a2e;
+            margin-bottom: 0.5rem;
+        }
+        .main-header p {
+            color: #555;
+            font-size: 1.1rem;
+        }
+        
+        /* Metric cards */
         .stMetric {
-            background-color: #FFFFFF; border-radius: 10px; padding: 1.5rem;
-            border: 1px solid #E0E0E0; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            background-color: #FFFFFF;
+            border-radius: 10px;
+            padding: 1.5rem;
+            border: 1px solid #E0E0E0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
             text-align: center;
         }
-        .stTabs [data-baseweb="tab-list"] { gap: 24px; }
-        .stTabs [data-baseweb="tab"] {
-            height: 50px; white-space: pre-wrap; background-color: #F0F2F6;
-            border-radius: 4px 4px 0px 0px; gap: 1px; padding-top: 10px; padding-bottom: 10px;
+        
+        /* Tab styling */
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 8px;
+            border-bottom: 2px solid #E0E0E0;
         }
-        .stTabs [aria-selected="true"] { background-color: #FFFFFF; }
-        [data-testid="stSidebar"] { background-color: #FFFFFF; }
+        .stTabs [data-baseweb="tab"] {
+            height: 50px;
+            white-space: pre-wrap;
+            background-color: transparent;
+            border-radius: 8px 8px 0 0;
+            border: none;
+            padding: 10px 16px;
+            font-weight: 600;
+            color: #555;
+            transition: all 0.2s ease-in-out;
+        }
+        .stTabs [aria-selected="true"] {
+            background-color: #FFFFFF;
+            color: #0068C9;
+            border-bottom: 2px solid #0068C9;
+        }
+
+        /* Sidebar styling */
+        [data-testid="stSidebar"] {
+            background-color: #FFFFFF;
+            border-right: 1px solid #E0E0E0;
+        }
+        
+        /* Container styling */
+        [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] > [data-testid="stVerticalBlock"] {
+            border: 1px solid #E0E0E0;
+            border-radius: 10px;
+            padding: 1.2rem;
+            background-color: #FFFFFF;
+        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -87,7 +139,6 @@ def initialize_components():
         else:
             st.session_state.openai_api_key = api_key
             st.session_state.api_key_missing = False
-            # --- Initialize all components only if the API key exists ---
             st.session_state.file_parser = AIFileParser(api_key)
             st.session_state.data_processor = DataProcessor(api_key)
             st.session_state.ai_context_helper = AIContextHelper(api_key)
@@ -97,8 +148,7 @@ def initialize_components():
             st.session_state.urra_generator = UseRelatedRiskAnalyzer(api_key)
             st.session_state.fmea_generator = FMEA(api_key)
             st.session_state.pre_mortem_generator = PreMortem(api_key)
-            st.session_state.doc_generator = CapaDocumentGenerator() # No API key needed for this one
-
+            st.session_state.doc_generator = CapaDocumentGenerator()
         st.session_state.components_initialized = True
 
 # --- UI Sections ---
@@ -115,38 +165,49 @@ def display_header():
 def display_sidebar():
     """Displays the sidebar for data input and configuration."""
     with st.sidebar:
+        st.image("https://www.vivehealth.com/cdn/shop/files/vive-logo-1_2_250x.png?v=1613713028", width=150)
         st.header("⚙️ Configuration")
-        st.session_state.target_sku = st.text_input("Target Product SKU", value=st.session_state.target_sku)
-        st.session_state.unit_cost = st.number_input("Unit Cost ($)", min_value=0.0, value=st.session_state.unit_cost, format="%.2f")
-        st.session_state.sales_price = st.number_input("Sales Price ($)", min_value=0.0, value=st.session_state.sales_price, format="%.2f")
-        st.session_state.start_date = st.date_input("Start Date", value=st.session_state.start_date)
-        st.session_state.end_date = st.date_input("End Date", value=st.session_state.end_date)
+        st.session_state.target_sku = st.text_input("🎯 Target Product SKU", value=st.session_state.target_sku)
+        st.session_state.unit_cost = st.number_input("💰 Unit Cost ($)", min_value=0.0, value=st.session_state.unit_cost, format="%.2f")
+        st.session_state.sales_price = st.number_input("💵 Sales Price ($)", min_value=0.0, value=st.session_state.sales_price, format="%.2f")
+        st.session_state.start_date = st.date_input("🗓️ Start Date", value=st.session_state.start_date)
+        st.session_state.end_date = st.date_input("🗓️ End Date", value=st.session_state.end_date)
 
         st.header("➕ Add Data")
-        # Use a consistent key for the file uploader
-        uploaded_files = st.file_uploader(
-            "Upload Sales/Returns Files",
-            accept_multiple_files=True,
-            type=['csv', 'xlsx', 'png', 'jpg', 'jpeg'],
-            key="file_uploader_widget"
-        )
-        if uploaded_files:
-            # Store the raw file objects in session state for later processing
-            st.session_state.uploaded_files_list = uploaded_files
+        
+        # --- File Uploader ---
+        with st.expander("📁 Upload Files", expanded=True):
+            uploaded_files = st.file_uploader(
+                "Upload Sales/Returns Files",
+                accept_multiple_files=True,
+                type=['csv', 'xlsx', 'png', 'jpg', 'jpeg'],
+                key="file_uploader_widget"
+            )
+            if uploaded_files:
+                st.session_state.uploaded_files_list = uploaded_files
 
-        if st.button("Process Uploaded Files", type="primary", use_container_width=True):
-            if not st.session_state.uploaded_files_list:
-                st.warning("Please upload files first.")
-            elif st.session_state.api_key_missing:
-                st.error("Cannot process files. OpenAI API key is missing.")
-            else:
-                with st.spinner("AI is analyzing file contents..."):
-                    analyses = []
-                    for file in st.session_state.uploaded_files_list:
-                        analysis = st.session_state.file_parser.analyze_file_structure(file, st.session_state.target_sku)
-                        analyses.append(analysis)
-                    st.session_state.ai_file_analyses = analyses
-                st.success("AI file analysis complete. Please review below the dashboard.")
+            if st.button("🤖 Process Uploaded Files", type="primary", use_container_width=True):
+                if not st.session_state.uploaded_files_list:
+                    st.warning("Please upload files first.")
+                elif st.session_state.api_key_missing:
+                    st.error("Cannot process files. OpenAI API key is missing.")
+                else:
+                    run_ai_file_analysis()
+        
+        # --- Manual Data Entry ---
+        with st.expander("✍️ Manual Data Entry"):
+            st.caption("Paste comma-separated data below (e.g., SKU-123,50).")
+            sales_placeholder = "sku,quantity\nSKU-12345,100\nSKU-ABCDE,50"
+            returns_placeholder = "sku,quantity\nSKU-12345,10"
+            
+            manual_sales = st.text_area("Sales Data", height=150, placeholder=sales_placeholder, key="manual_sales_input")
+            manual_returns = st.text_area("Returns Data", height=150, placeholder=returns_placeholder, key="manual_returns_input")
+
+            if st.button("Process Manual Data", use_container_width=True):
+                if not manual_sales:
+                    st.warning("Please provide sales data.")
+                else:
+                    process_manual_data()
 
 def display_dashboard():
     """Displays the main dashboard with metrics and analyses."""
@@ -154,8 +215,9 @@ def display_dashboard():
     
     # --- Step 1: AI File Review ---
     if st.session_state.ai_file_analyses:
-        with st.expander("Step 1: Review AI File Analysis", expanded=True):
-            st.info("Our AI has analyzed your uploaded files. Please review the findings and confirm which files to include in the final analysis.")
+        with st.container(border=True):
+            st.subheader("Step 1: Review AI File Analysis")
+            st.info("Our AI has analyzed your files. Please confirm which to include in the analysis.")
             
             selections = {}
             for i, analysis in enumerate(st.session_state.ai_file_analyses):
@@ -163,13 +225,14 @@ def display_dashboard():
                 content_type = analysis.get("content_type", "unknown").upper()
                 summary = analysis.get("summary", "No summary available.")
                 
-                with st.container(border=True):
-                    st.markdown(f"**File:** `{file_name}` | **AI-Detected Type:** `{content_type}`")
-                    st.caption(f"**Summary:** {summary}")
-                    # Default to True, but don't include if AI failed or content is 'other'
+                col1, col2 = st.columns([0.8, 0.2])
+                with col1:
+                    st.markdown(f"**📄 File:** `{file_name}`")
+                    st.markdown(f"**⚙️ AI Detected Type:** `{content_type}` | **Summary:** *{summary}*")
+                with col2:
                     default_choice = content_type not in ["OTHER", "UNKNOWN"] and "error" not in analysis
-                    selections[i] = st.checkbox("Use this file's data", value=default_choice, key=f"select_{i}")
-
+                    selections[i] = st.checkbox("✅ Use this file", value=default_choice, key=f"select_{i}", label_visibility="collapsed")
+            
             st.session_state.user_file_selections = selections
             
             if st.button("Confirm Selections & Run Full Analysis", type="primary"):
@@ -177,7 +240,7 @@ def display_dashboard():
 
     # --- Step 2: Display Analysis Results ---
     if not st.session_state.analysis_results:
-        st.info('**Welcome!** Configure your product in the sidebar, upload your data files, and click "Process Uploaded Files."')
+        st.info('**Welcome!** Configure your product, then upload files or enter data manually in the sidebar to begin.')
         return
 
     results = st.session_state.analysis_results
@@ -187,10 +250,9 @@ def display_dashboard():
 
     summary_df = results.get('return_summary')
     if summary_df is None or summary_df.empty:
-        st.warning("No data found for the target SKU in the selected files.")
+        st.warning("No data found for the target SKU in the provided data.")
         return
 
-    # Filter for the specific SKU to display
     sku_specific_summary = summary_df[summary_df['sku'] == st.session_state.target_sku]
     if sku_specific_summary.empty:
         st.warning(f"No summary data could be calculated for SKU: {st.session_state.target_sku}")
@@ -200,15 +262,13 @@ def display_dashboard():
 
     st.markdown(f"### Overall Analysis for SKU: **{summary_data['sku']}**")
     
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Return Rate", f"{summary_data['return_rate']:.2f}%", help="Percentage of units sold that were returned.")
-        st.metric("Total Returned", f"{int(summary_data['total_returned']):,}", help="Total units returned.")
-    with col2:
-        st.metric("Quality Score", f"{results['quality_metrics'].get('quality_score', 'N/A')}/100", delta=results['quality_metrics'].get('risk_level', ''), help="AI-calculated score based on return rate.")
-        st.metric("Total Sold", f"{int(summary_data['total_sold']):,}", help="Total units sold.")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Return Rate", f"{summary_data['return_rate']:.2f}%", help="Percentage of units sold that were returned.")
+    col2.metric("Total Returned", f"{int(summary_data['total_returned']):,}")
+    col3.metric("Total Sold", f"{int(summary_data['total_sold']):,}")
+    col4.metric("Quality Score", f"{results['quality_metrics'].get('quality_score', 'N/A')}/100", delta=results['quality_metrics'].get('risk_level', ''), delta_color="inverse")
 
-    st.markdown(f"**AI Insights**: {results.get('insights', 'No insights generated.')}")
+    st.markdown(f"**🧠 AI Insights**: {results.get('insights', 'No insights generated.')}")
 
     st.markdown("---")
     st.subheader("💡 Cost-Benefit Analysis for Potential Fix")
@@ -236,6 +296,42 @@ def display_dashboard():
         with st.expander("Show detailed calculation"):
             st.table(pd.DataFrame.from_dict(cb_results['details'], orient='index', columns=["Value"]))
 
+def run_ai_file_analysis():
+    """Runs the AI analysis on uploaded files and stores the results."""
+    with st.spinner("AI is analyzing file contents..."):
+        analyses = []
+        for file in st.session_state.uploaded_files_list:
+            analysis = st.session_state.file_parser.analyze_file_structure(file, st.session_state.target_sku)
+            analyses.append(analysis)
+        st.session_state.ai_file_analyses = analyses
+    st.success("AI file analysis complete. Please review below.")
+
+def process_manual_data():
+    """Processes manually entered data and runs the full analysis."""
+    with st.spinner("Processing manual data..."):
+        try:
+            sales_str = st.session_state.manual_sales_input
+            returns_str = st.session_state.manual_returns_input
+            
+            sales_df = pd.read_csv(StringIO(sales_str)) if sales_str.strip() else pd.DataFrame()
+            returns_df = pd.read_csv(StringIO(returns_str)) if returns_str.strip() else pd.DataFrame()
+            
+            # --- Re-use the existing analysis pipeline ---
+            st.session_state.sales_data = st.session_state.data_processor.process_sales_data(sales_df)
+            st.session_state.returns_data = st.session_state.data_processor.process_returns_data(returns_df)
+
+            report_period_days = (st.session_state.end_date - st.session_state.start_date).days
+            st.session_state.analysis_results = run_full_analysis(
+                sales_df=st.session_state.sales_data,
+                returns_df=st.session_state.returns_data,
+                report_period_days=report_period_days,
+                unit_cost=st.session_state.unit_cost,
+                sales_price=st.session_state.sales_price
+            )
+            st.success("Manual data processed successfully!")
+        except Exception as e:
+            st.error(f"Error parsing manual data: {e}. Please ensure it's in 'sku,quantity' format.")
+
 def process_and_run_full_analysis():
     """Processes the user-selected files and runs the main analysis."""
     with st.spinner("Extracting data and running full analysis..."):
@@ -243,28 +339,20 @@ def process_and_run_full_analysis():
         returns_dfs = []
 
         for i, analysis in enumerate(st.session_state.ai_file_analyses):
-            if st.session_state.user_file_selections.get(i, False): # Check if user selected this file
+            if st.session_state.user_file_selections.get(i, False):
                 file_obj = st.session_state.uploaded_files_list[i]
                 content_type = analysis.get('content_type')
-                
-                # Extract data using the parser
                 df = st.session_state.file_parser.extract_data(file_obj, analysis, st.session_state.target_sku)
-
                 if df is not None and not df.empty:
-                    if content_type == 'sales':
-                        sales_dfs.append(df)
-                    elif content_type == 'returns':
-                        returns_dfs.append(df)
+                    if content_type == 'sales': sales_dfs.append(df)
+                    elif content_type == 'returns': returns_dfs.append(df)
         
-        # Combine all dataframes of the same type
         final_sales_df = pd.concat(sales_dfs, ignore_index=True) if sales_dfs else pd.DataFrame()
         final_returns_df = pd.concat(returns_dfs, ignore_index=True) if returns_dfs else pd.DataFrame()
 
-        # Process the combined dataframes
         st.session_state.sales_data = st.session_state.data_processor.process_sales_data(final_sales_df)
         st.session_state.returns_data = st.session_state.data_processor.process_returns_data(final_returns_df)
 
-        # Run the final analysis
         report_period_days = (st.session_state.end_date - st.session_state.start_date).days
         st.session_state.analysis_results = run_full_analysis(
             sales_df=st.session_state.sales_data,
@@ -274,20 +362,17 @@ def process_and_run_full_analysis():
             sales_price=st.session_state.sales_price
         )
     st.success("Analysis complete!")
-    # Clear selections to avoid re-processing
     st.session_state.ai_file_analyses = [] 
     st.session_state.user_file_selections = {}
 
-
 def display_ai_chat_interface(tab_name: str):
     """A contextual AI chat interface that provides real answers."""
-    st.markdown("---")
     st.subheader(f"🤖 AI Assistant for {tab_name}")
     user_query = st.text_input("Ask the AI a question about the current context...", key=f"ai_chat_{tab_name}")
     
     if user_query:
         if st.session_state.get('api_key_missing', True):
-            st.error("Cannot generate response. OpenAI API key is not configured in your Streamlit secrets.")
+            st.error("Cannot generate response. OpenAI API key is not configured.")
         else:
             with st.spinner("AI is thinking..."):
                 try:

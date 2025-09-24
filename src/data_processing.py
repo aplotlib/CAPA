@@ -22,7 +22,6 @@ class DataProcessor:
         
         # Ensure required columns exist
         if 'sku' not in sales_df.columns or 'quantity' not in sales_df.columns:
-            # Handle error appropriately, maybe log it or raise an exception
             print("Error: Sales DataFrame must contain 'sku' and 'quantity' columns.")
             return pd.DataFrame()
 

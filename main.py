@@ -7,7 +7,6 @@ import os
 import copy
 
 # --- Import custom modules ---
-# Note: Ensure all these files exist in the 'src' directory.
 from src.parsers import AIFileParser
 from src.data_processing import DataProcessor
 from src.analysis import run_full_analysis, calculate_cost_benefit
@@ -20,18 +19,17 @@ from src.fmea import FMEA
 from src.pre_mortem import PreMortem
 from src.ai_context_helper import AIContextHelper
 from src.capa_form import display_capa_form
+from src.utils import retry_with_backoff
 
 # --- Page Configuration and Styling ---
-# This should be the very first Streamlit command.
 st.set_page_config(
     page_title="Product Lifecycle & Quality Manager",
-    page_icon="🛡️",  # Using an emoji for simplicity and robustness
+    page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # --- Enhanced UI/UX Styling ---
-# Moved CSS to a separate function for clarity.
 def load_css():
     """Loads custom CSS for styling the application."""
     st.markdown("""
@@ -41,67 +39,33 @@ def load_css():
         html, body, [class*="st-"] {
             font-family: 'Inter', sans-serif;
         }
-
-        /* Main App background */
-        .main {
-            background-color: #F0F2F6;
-        }
-
-        /* Header styling */
+        .main { background-color: #F0F2F6; }
         .main-header {
             background: linear-gradient(135deg, #0061ff 0%, #60efff 100%);
-            color: white;
-            padding: 2rem;
-            border-radius: 10px;
-            text-align: center;
-            margin-bottom: 2rem;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            color: white; padding: 2rem; border-radius: 10px; text-align: center;
+            margin-bottom: 2rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
         }
-        .main-header h1 {
-            font-weight: 700;
-            font-size: 2.5rem;
-        }
-
-        /* Metric cards */
+        .main-header h1 { font-weight: 700; font-size: 2.5rem; }
         .stMetric {
-            background-color: #FFFFFF;
-            border-radius: 10px;
-            padding: 1.5rem;
-            border: 1px solid #E0E0E0;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-            text-align: center; /* Center align metric content */
+            background-color: #FFFFFF; border-radius: 10px; padding: 1.5rem;
+            border: 1px solid #E0E0E0; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            text-align: center;
         }
-
-        /* Tab styling */
-        .stTabs [data-baseweb="tab-list"] {
-            gap: 24px;
-        }
+        .stTabs [data-baseweb="tab-list"] { gap: 24px; }
         .stTabs [data-baseweb="tab"] {
-            height: 50px;
-            white-space: pre-wrap;
-            background-color: #F0F2F6;
-            border-radius: 4px 4px 0px 0px;
-            gap: 1px;
-            padding-top: 10px;
-            padding-bottom: 10px;
+            height: 50px; white-space: pre-wrap; background-color: #F0F2F6;
+            border-radius: 4px 4px 0px 0px; gap: 1px; padding-top: 10px; padding-bottom: 10px;
         }
-        .stTabs [aria-selected="true"] {
-            background-color: #FFFFFF;
-        }
-
-        /* Sidebar styling */
-        [data-testid="stSidebar"] {
-            background-color: #FFFFFF;
-        }
+        .stTabs [aria-selected="true"] { background-color: #FFFFFF; }
+        [data-testid="stSidebar"] { background-color: #FFFFFF; }
     </style>
     """, unsafe_allow_html=True)
 
 # --- Session State and Component Initialization ---
-
 def initialize_session_state():
     """Initializes all necessary variables in Streamlit's session state."""
     STATE_DEFAULTS = {
-        'components_initialized': False, 'api_key_missing': True, 'anthropic_api_key': None,
+        'components_initialized': False, 'api_key_missing': True, 'openai_api_key': None,
         'target_sku': 'SKU-12345', 'unit_cost': 15.50, 'sales_price': 49.99,
         'start_date': date.today() - timedelta(days=30), 'end_date': date.today(),
         'sales_data': {}, 'returns_data': {}, 'pending_image_confirmations': [],
@@ -114,13 +78,14 @@ def initialize_session_state():
             st.session_state[key] = value
 
 def initialize_components():
-    """Initializes all AI-powered components and helpers."""
+    """Initializes all AI-powered components and helpers with OpenAI."""
     if not st.session_state.components_initialized:
-        api_key = st.secrets.get("ANTHROPIC_API_KEY")
+        api_key = st.secrets.get("OPENAI_API_KEY")
         if not api_key:
+            st.warning("OpenAI API key not found in Streamlit Secrets. AI features will be disabled.")
             st.session_state.api_key_missing = True
         else:
-            st.session_state.anthropic_api_key = api_key
+            st.session_state.openai_api_key = api_key
             st.session_state.api_key_missing = False
 
         st.session_state.file_parser = AIFileParser(api_key)
@@ -136,7 +101,6 @@ def initialize_components():
         st.session_state.components_initialized = True
 
 # --- UI Sections ---
-
 def display_header():
     """Displays the main header of the application."""
     st.markdown(
@@ -186,8 +150,6 @@ def display_dashboard():
 
     st.markdown(f"### Overall Analysis for SKU: **{summary_data['sku']}**")
     
-    # --- FIX for overlapping text ---
-    # Using two rows of two columns is more responsive and prevents overlap.
     col1, col2 = st.columns(2)
     with col1:
         st.metric("Return Rate", f"{summary_data['return_rate']:.2f}%", help="Percentage of units sold that were returned.")
@@ -232,11 +194,9 @@ def display_ai_chat_interface(tab_name: str):
     
     if user_query:
         if st.session_state.get('api_key_missing', True):
-            st.error("Cannot generate response. Anthropic API key is not configured in your Streamlit secrets.")
+            st.error("Cannot generate response. OpenAI API key is not configured in your Streamlit secrets.")
         else:
             with st.spinner("AI is thinking..."):
-                # --- FIX for AI Assistant ---
-                # This now calls the actual helper class to get a real response.
                 try:
                     response = st.session_state.ai_context_helper.generate_response(user_query)
                     st.markdown(response)
@@ -261,7 +221,7 @@ def display_resources_tab():
     st.info("A quick reference for key regulations and standards in the medical device industry.")
     col1, col2 = st.columns(2)
     with col1:
-        with st.container(border=True): st.markdown("##### **ISO 13485:2016**\nThe QMS standard for medical devices.")
+        with st.container(border=True): st.markdown("##### **ISO 13458:2016**\nThe QMS standard for medical devices.")
     with col2:
         with st.container(border=True): st.markdown("##### **ISO 14971**\nThe standard for risk management for medical devices.")
 

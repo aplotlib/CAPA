@@ -151,6 +151,39 @@ def initialize_components():
             st.session_state.doc_generator = CapaDocumentGenerator()
         st.session_state.components_initialized = True
 
+# --- Helper Functions ---
+def parse_manual_input(input_str: str, target_sku: str) -> pd.DataFrame:
+    """
+    Intelligently parses manual string input.
+    - If it's a number, it assigns it to the target SKU.
+    - If it's CSV-like, it reads it as a DataFrame.
+    """
+    input_str = input_str.strip()
+    if not input_str:
+        return pd.DataFrame()
+
+    # Case 1: Input is just a number (quantity)
+    if input_str.isnumeric():
+        return pd.DataFrame([{'sku': target_sku, 'quantity': int(input_str)}])
+    
+    # Case 2: Input is likely a full CSV
+    try:
+        df = pd.read_csv(StringIO(input_str))
+        # Basic validation for expected columns
+        if 'sku' in df.columns and 'quantity' in df.columns:
+            return df
+        else:
+            # Handle case where headers are missing but data is there
+            if len(df.columns) == 2:
+                df.columns = ['sku', 'quantity']
+                return df
+            else:
+                st.error("Manual data must have 'sku' and 'quantity' columns.")
+                return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Could not parse data. Please use 'sku,quantity' format or just a single quantity number. Error: {e}")
+        return pd.DataFrame()
+
 # --- UI Sections ---
 def display_header():
     """Displays the main header of the application."""
@@ -177,9 +210,9 @@ def display_sidebar():
         
         # --- Manual Data Entry (Default) ---
         st.subheader("✍️ Manual Data Entry")
-        st.caption("Paste comma-separated data below (e.g., SKU-123,50).")
-        sales_placeholder = "sku,quantity\nSKU-12345,100\nSKU-ABCDE,50"
-        returns_placeholder = "sku,quantity\nSKU-12345,10"
+        st.caption("Enter a single quantity or paste CSV data.")
+        sales_placeholder = "e.g., 9502\n\nOr paste CSV:\nsku,quantity\nSKU-12345,100"
+        returns_placeholder = "e.g., 150\n\nOr paste CSV:\nsku,quantity\nSKU-12345,10"
         
         manual_sales = st.text_area("Sales Data", height=150, placeholder=sales_placeholder, key="manual_sales_input")
         manual_returns = st.text_area("Returns Data", height=150, placeholder=returns_placeholder, key="manual_returns_input")
@@ -308,7 +341,6 @@ def reset_analysis_state():
 def run_ai_file_analysis():
     """Runs the AI analysis on uploaded files and stores the results."""
     reset_analysis_state() # Reset state before starting new analysis
-    # Clear manual input fields to avoid confusion
     st.session_state.manual_sales_input = ""
     st.session_state.manual_returns_input = ""
     
@@ -325,28 +357,27 @@ def process_manual_data():
     reset_analysis_state() # Reset state before starting new analysis
     
     with st.spinner("Processing manual data..."):
-        try:
-            sales_str = st.session_state.manual_sales_input
-            returns_str = st.session_state.manual_returns_input
+        sales_str = st.session_state.manual_sales_input
+        returns_str = st.session_state.manual_returns_input
+        
+        # Use the new intelligent parser
+        sales_df = parse_manual_input(sales_str, st.session_state.target_sku)
+        returns_df = parse_manual_input(returns_str, st.session_state.target_sku)
             
-            sales_df = pd.read_csv(StringIO(sales_str)) if sales_str.strip() else pd.DataFrame()
-            returns_df = pd.read_csv(StringIO(returns_str)) if returns_str.strip() else pd.DataFrame()
-            
-            # --- Re-use the existing analysis pipeline ---
-            st.session_state.sales_data = st.session_state.data_processor.process_sales_data(sales_df)
-            st.session_state.returns_data = st.session_state.data_processor.process_returns_data(returns_df)
+        # --- Re-use the existing analysis pipeline ---
+        st.session_state.sales_data = st.session_state.data_processor.process_sales_data(sales_df)
+        st.session_state.returns_data = st.session_state.data_processor.process_returns_data(returns_df)
 
-            report_period_days = (st.session_state.end_date - st.session_state.start_date).days
-            st.session_state.analysis_results = run_full_analysis(
-                sales_df=st.session_state.sales_data,
-                returns_df=st.session_state.returns_data,
-                report_period_days=report_period_days,
-                unit_cost=st.session_state.unit_cost,
-                sales_price=st.session_state.sales_price
-            )
+        report_period_days = (st.session_state.end_date - st.session_state.start_date).days
+        st.session_state.analysis_results = run_full_analysis(
+            sales_df=st.session_state.sales_data,
+            returns_df=st.session_state.returns_data,
+            report_period_days=report_period_days,
+            unit_cost=st.session_state.unit_cost,
+            sales_price=st.session_state.sales_price
+        )
+        if "error" not in st.session_state.analysis_results:
             st.success("Manual data processed successfully!")
-        except Exception as e:
-            st.error(f"Error parsing manual data: {e}. Please ensure it's in 'sku,quantity' format.")
 
 def process_and_run_full_analysis():
     """Processes the user-selected files and runs the main analysis."""

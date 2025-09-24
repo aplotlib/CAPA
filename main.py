@@ -77,28 +77,18 @@ def initialize_session_state():
             st.session_state[key] = value
 
 def get_serializable_state() -> str:
-    """Creates a JSON-serializable representation of the session state, excluding non-serializable items."""
-    serializable_keys = [
-        'target_sku', 'unit_cost', 'sales_price', 'start_date', 'end_date',
-        'analysis_results', 'capa_feasibility_analysis', 'capa_data',
-        'fmea_data', 'pre_mortem_summary', 'medical_device_classification',
-        'vendor_email_draft', 'risk_assessment', 'urra', 'chat_history',
-        'pre_mortem_data', 'sales_data', 'returns_data'
-    ]
-    
+    """Creates a JSON-serializable representation of the session state."""
+    serializable_keys = [k for k, v in st.session_state.items() if not callable(v) and not k.startswith(('components_', 'ai_', 'doc_', 'file_'))]
     state_to_save = {key: st.session_state.get(key) for key in serializable_keys}
-    
     def serialize_value(v):
         if isinstance(v, pd.DataFrame): return v.to_json(orient='split')
         if isinstance(v, (datetime, date)): return v.isoformat()
         return v
-
     state_copy = copy.deepcopy(state_to_save)
     for k, v in state_copy.items():
         state_copy[k] = serialize_value(v)
         if k == 'analysis_results' and isinstance(v, dict) and 'return_summary' in v:
             state_copy[k]['return_summary'] = serialize_value(v['return_summary'])
-            
     return json.dumps(state_copy, indent=2, default=str)
 
 def load_state_from_json(uploaded_file):
@@ -270,7 +260,7 @@ def display_risk_safety_tab():
              current_fmea = st.session_state.fmea_data if st.session_state.fmea_data is not None else pd.DataFrame()
              st.session_state.fmea_data = pd.concat([current_fmea, pd.DataFrame([new_row])], ignore_index=True)
 
-        if st.session_state.fmea_data is not None:
+        if 'fmea_data' in st.session_state and st.session_state.fmea_data is not None:
             edited_df = st.data_editor(st.session_state.fmea_data, num_rows="dynamic", key="fmea_editor", use_container_width=True, column_config={
                 "Severity": st.column_config.NumberColumn(min_value=1, max_value=10, required=True), "Occurrence": st.column_config.NumberColumn(min_value=1, max_value=10, required=True),
                 "Detection": st.column_config.NumberColumn(min_value=1, max_value=10, required=True), "RPN": st.column_config.NumberColumn(disabled=True)
@@ -341,7 +331,7 @@ def display_compliance_tab():
                 questions = st.session_state.pre_mortem_generator.generate_questions(scenario)
                 st.session_state.pre_mortem_data = [{"question": q, "answer": ""} for q in questions]
 
-        if st.session_state.pre_mortem_data:
+        if 'pre_mortem_data' in st.session_state and st.session_state.pre_mortem_data:
             for i, item in enumerate(st.session_state.pre_mortem_data):
                  item['answer'] = st.text_area(f"**Q:** {item['question']}", key=f"pm_q_{i}")
             if st.button("Summarize Session"):
@@ -376,12 +366,9 @@ def display_ai_chat_interface(tab_name: str):
 
 # --- Process Functions ---
 def reset_analysis_state():
-    st.session_state.analysis_results = None
-    st.session_state.capa_feasibility_analysis = None
-    st.session_state.ai_file_analyses = []
-    st.session_state.user_file_selections = {}
-    st.session_state.sales_data = pd.DataFrame()
-    st.session_state.returns_data = pd.DataFrame()
+    st.session_state.analysis_results, st.session_state.capa_feasibility_analysis = None, None
+    st.session_state.ai_file_analyses, st.session_state.user_file_selections = [], {}
+    st.session_state.sales_data, st.session_state.returns_data = pd.DataFrame(), pd.DataFrame()
 
 def run_ai_file_analysis(files):
     reset_analysis_state()

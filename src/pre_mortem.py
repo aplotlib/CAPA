@@ -47,6 +47,9 @@ class PreMortem:
             )
             result = json.loads(response.choices[0].message.content)
             return result.get("questions", ["Failed to parse questions from AI."])
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON from AI response: {e}")
+            return ["Error parsing AI response."]
         except Exception as e:
             print(f"Error generating pre-mortem questions: {e}")
             return [f"Error: {e}"]

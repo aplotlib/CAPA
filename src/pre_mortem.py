@@ -2,48 +2,56 @@
 
 from typing import List, Dict, Optional
 import json
-import anthropic
+import openai
+from .utils import retry_with_backoff
 
 class PreMortem:
-    """Handles proactive Pre-Mortem analysis logic."""
+    """Handles proactive Pre-Mortem analysis logic using OpenAI."""
 
     def __init__(self, api_key: Optional[str] = None):
         self.client = None
         if api_key:
             try:
-                self.client = anthropic.Anthropic(api_key=api_key)
-                self.model = "claude-3-5-sonnet-20240620"
+                self.client = openai.OpenAI(api_key=api_key)
+                self.model = "gpt-4o"
             except Exception as e:
-                print(f"Failed to initialize Pre-Mortem AI client: {e}")
+                print(f"Failed to initialize Pre-Mortem OpenAI client: {e}")
 
+    @retry_with_backoff()
     def generate_questions(self, scenario: str) -> List[str]:
         """Generates guiding questions for a pre-mortem session."""
         if not self.client:
             return ["AI client not initialized."]
 
-        prompt = f"""
-        You are a facilitator for a pre-mortem analysis. The team has defined the following failure scenario:
-        "{scenario}"
-
-        Generate a list of 5-7 thought-provoking questions to help the team brainstorm potential reasons for this failure.
+        system_prompt = """
+        You are a facilitator for a pre-mortem analysis. Generate a list of 5-7 thought-provoking questions.
         The questions should cover different domains like Design, Manufacturing, Supply Chain, Marketing, and Customer Support.
-
-        Return a JSON list of strings.
-        Example: ["What if our key supplier delivered a faulty batch of components?", "Could a misunderstanding of user needs lead to this outcome?"]
-
-        Return ONLY the valid JSON list.
+        Return a single JSON object with a key "questions" which contains a list of strings.
+        Return ONLY the valid JSON object.
+        """
+        user_prompt = f"""
+        The team has defined the following failure scenario:
+        "{scenario}"
+        
+        Example of a good question: "What if our key supplier delivered a faulty batch of components?"
         """
         try:
-            response = self.client.messages.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
                 max_tokens=1000,
-                messages=[{"role": "user", "content": prompt}]
-            ).content[0].text
-            return json.loads(response)
+                response_format={"type": "json_object"}
+            )
+            result = json.loads(response.choices[0].message.content)
+            return result.get("questions", ["Failed to parse questions from AI."])
         except Exception as e:
             print(f"Error generating pre-mortem questions: {e}")
             return [f"Error: {e}"]
 
+    @retry_with_backoff()
     def summarize_answers(self, qa_list: List[Dict[str, str]]) -> str:
         """Summarizes the pre-mortem answers into a report."""
         if not self.client:
@@ -51,28 +59,26 @@ class PreMortem:
 
         context = "\n".join([f"Q: {item['question']}\nA: {item['answer']}" for item in qa_list])
 
-        prompt = f"""
+        system_prompt = """
         You are a project manager summarizing the results of a pre-mortem analysis.
-        The team has answered a series of questions about a potential failure scenario.
-
-        Here is the transcript:
-        {context}
-
-        Synthesize the team's answers into a coherent summary.
+        Synthesize the team's answers into a coherent summary using Markdown.
         1. Start with a brief overview of the key themes that emerged.
-        2. Group the identified risks into logical categories (e.g., Technical Risks, Market Risks, Operational Risks).
+        2. Group the identified risks into logical categories (e.g., Technical, Market, Operational).
         3. For each category, list the specific risks identified.
         4. Conclude with a list of the top 3-5 highest-priority risks that require immediate mitigation planning.
-
-        Format the output using Markdown.
         """
+        user_prompt = f"Here is the transcript from the session:\n{context}"
+        
         try:
-            response = self.client.messages.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
                 max_tokens=2000,
-                messages=[{"role": "user", "content": prompt}]
-            ).content[0].text
-            return response
+            )
+            return response.choices[0].message.content
         except Exception as e:
             print(f"Error summarizing pre-mortem: {e}")
             return f"Error creating summary: {e}"

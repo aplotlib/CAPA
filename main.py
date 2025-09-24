@@ -65,8 +65,10 @@ def initialize_session_state():
         'components_initialized': False, 'api_key_missing': True, 'openai_api_key': None,
         'target_sku': 'SKU-12345', 'unit_cost': 15.50, 'sales_price': 49.99,
         'start_date': date.today() - timedelta(days=30), 'end_date': date.today(),
-        'analysis_results': None, 'capa_data': {}, 'fmea_data': None, 
-        'pre_mortem_summary': None, 'medical_device_classification': None,
+        'uploaded_files_list': [], 'ai_file_analyses': [], 'user_file_selections': {},
+        'sales_data': pd.DataFrame(), 'returns_data': pd.DataFrame(),
+        'analysis_results': None, 'capa_feasibility_analysis': None, 'capa_data': {},
+        'fmea_data': None, 'pre_mortem_summary': None, 'medical_device_classification': None,
         'vendor_email_draft': None, 'risk_assessment': None, 'urra': None,
         'chat_history': {}, 'pre_mortem_data': []
     }
@@ -75,18 +77,28 @@ def initialize_session_state():
             st.session_state[key] = value
 
 def get_serializable_state() -> str:
-    """Creates a JSON-serializable representation of the session state."""
-    serializable_keys = [k for k, v in st.session_state.items() if not callable(v) and not k.endswith('_list') and not k.startswith('ai_')]
+    """Creates a JSON-serializable representation of the session state, excluding non-serializable items."""
+    serializable_keys = [
+        'target_sku', 'unit_cost', 'sales_price', 'start_date', 'end_date',
+        'analysis_results', 'capa_feasibility_analysis', 'capa_data',
+        'fmea_data', 'pre_mortem_summary', 'medical_device_classification',
+        'vendor_email_draft', 'risk_assessment', 'urra', 'chat_history',
+        'pre_mortem_data', 'sales_data', 'returns_data'
+    ]
+    
     state_to_save = {key: st.session_state.get(key) for key in serializable_keys}
+    
     def serialize_value(v):
         if isinstance(v, pd.DataFrame): return v.to_json(orient='split')
         if isinstance(v, (datetime, date)): return v.isoformat()
         return v
+
     state_copy = copy.deepcopy(state_to_save)
     for k, v in state_copy.items():
         state_copy[k] = serialize_value(v)
         if k == 'analysis_results' and isinstance(v, dict) and 'return_summary' in v:
             state_copy[k]['return_summary'] = serialize_value(v['return_summary'])
+            
     return json.dumps(state_copy, indent=2, default=str)
 
 def load_state_from_json(uploaded_file):
@@ -117,7 +129,7 @@ def initialize_components():
             st.session_state.data_processor = DataProcessor(api_key)
             st.session_state.ai_context_helper = AIContextHelper(api_key)
             st.session_state.ai_capa_helper = AICAPAHelper(api_key)
-            st.session_state.ai_email_drafter = AIEmailDrafter(api_key) # CORRECT INITIALIZATION
+            st.session_state.ai_email_drafter = AIEmailDrafter(api_key)
             st.session_state.medical_device_classifier = MedicalDeviceClassifier(api_key)
             st.session_state.risk_assessment_generator = RiskAssessmentGenerator(api_key)
             st.session_state.urra_generator = UseRelatedRiskAnalyzer(api_key)
@@ -179,7 +191,60 @@ def display_sidebar():
 
 def display_dashboard():
     st.header("📊 Quality Dashboard")
-    # ... (code for dashboard remains the same and is correct) ...
+    if 'ai_file_analyses' in st.session_state and st.session_state.ai_file_analyses:
+        with st.container(border=True):
+            st.subheader("Step 1: Review AI File Analysis")
+            selections = {}
+            for i, analysis in enumerate(st.session_state.ai_file_analyses):
+                col1, col2 = st.columns([0.8, 0.2])
+                with col1:
+                    st.markdown(f"**📄 File:** `{analysis.get('filename', f'File {i+1}')}` | **Type:** `{analysis.get('content_type', 'N/A').upper()}`")
+                with col2:
+                    selections[i] = st.checkbox("✅ Use", value=True, key=f"select_{i}", label_visibility="collapsed")
+            st.session_state.user_file_selections = selections
+            if st.button("Confirm & Run Analysis", type="primary"): process_and_run_full_analysis()
+
+    if not st.session_state.analysis_results:
+        st.info('**Welcome!** Enter data in the sidebar to begin.')
+        return
+    results = st.session_state.analysis_results
+    if "error" in results:
+        st.error(f"Analysis Failed: {results['error']}")
+        return
+    summary_df = results.get('return_summary')
+    if summary_df is None or summary_df.empty:
+        st.warning("No data found for the target SKU.")
+        return
+    sku_summary = summary_df[summary_df['sku'] == st.session_state.target_sku]
+    if sku_summary.empty:
+        st.warning(f"No summary data for SKU: {st.session_state.target_sku}")
+        return
+    summary_data = sku_summary.iloc[0]
+    
+    with st.container(border=True):
+        st.markdown(f"### Analysis for SKU: **{summary_data['sku']}**")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Return Rate", f"{summary_data['return_rate']:.2f}%")
+        c2.metric("Total Returned", f"{int(summary_data['total_returned']):,}")
+        c3.metric("Total Sold", f"{int(summary_data['total_sold']):,}")
+        c4.metric("Quality Score", f"{results['quality_metrics'].get('quality_score', 'N/A')}/100", delta=results['quality_metrics'].get('risk_level', ''), delta_color="inverse")
+        st.markdown(f"**🧠 AI Insights**: {results.get('insights', 'N/A')}")
+
+    with st.container(border=True):
+        st.subheader("💡 Cost-Benefit Analysis")
+        with st.form("cost_benefit_form"):
+            c1, c2 = st.columns(2)
+            cost_change = c1.number_input("Cost increase per unit ($)", 0.0, format="%.2f")
+            expected_rr_reduction = c2.number_input("Expected return rate reduction (%)", 0.0, 100.0, format="%.1f")
+            if st.form_submit_button("Calculate Financial Impact", type="primary", use_container_width=True):
+                st.session_state.capa_feasibility_analysis = calculate_cost_benefit(
+                    results, st.session_state.unit_cost, cost_change, expected_rr_reduction,
+                    (st.session_state.end_date - st.session_state.start_date).days, st.session_state.target_sku
+                )
+        if st.session_state.capa_feasibility_analysis:
+            res = st.session_state.capa_feasibility_analysis
+            st.success(f"**Summary:** {res['summary']}")
+            with st.expander("Show calculation"): st.table(pd.DataFrame.from_dict(res['details'], orient='index', columns=["Value"]))
 
 def display_risk_safety_tab():
     st.header("🛡️ Risk & Safety Analysis Hub")
@@ -197,11 +262,13 @@ def display_risk_safety_tab():
                     insights = st.session_state.analysis_results.get('insights', 'High return rate observed.')
                     suggestions = st.session_state.fmea_generator.suggest_failure_modes(insights, st.session_state.analysis_results)
                     for item in suggestions: item.update({'Severity': 1, 'Occurrence': 1, 'Detection': 1, 'RPN': 1})
-                    st.session_state.fmea_data = pd.concat([st.session_state.fmea_data, pd.DataFrame(suggestions)], ignore_index=True) if st.session_state.fmea_data is not None else pd.DataFrame(suggestions)
+                    current_fmea = st.session_state.fmea_data if st.session_state.fmea_data is not None else pd.DataFrame()
+                    st.session_state.fmea_data = pd.concat([current_fmea, pd.DataFrame(suggestions)], ignore_index=True)
             else: st.warning("Run an analysis on the dashboard first.")
         if c2.button("➕ Add Manual FMEA Row", use_container_width=True):
              new_row = {"Potential Failure Mode": "", "Potential Effect(s)": "", "Severity": 1, "Potential Cause(s)": "", "Occurrence": 1, "Current Controls": "", "Detection": 1, "RPN": 1}
-             st.session_state.fmea_data = pd.concat([st.session_state.fmea_data, pd.DataFrame([new_row])], ignore_index=True) if st.session_state.fmea_data is not None else pd.DataFrame([new_row])
+             current_fmea = st.session_state.fmea_data if st.session_state.fmea_data is not None else pd.DataFrame()
+             st.session_state.fmea_data = pd.concat([current_fmea, pd.DataFrame([new_row])], ignore_index=True)
 
         if st.session_state.fmea_data is not None:
             edited_df = st.data_editor(st.session_state.fmea_data, num_rows="dynamic", key="fmea_editor", use_container_width=True, column_config={
@@ -244,7 +311,6 @@ def display_vendor_comm_tab():
             english_ability = st.slider("Recipient's English Proficiency", 1, 5, 3)
             if st.form_submit_button("Draft Email", type="primary"):
                 with st.spinner("AI is drafting email..."):
-                    # CORRECTED: Call the right object
                     st.session_state.vendor_email_draft = st.session_state.ai_email_drafter.draft_vendor_email(
                         goal, st.session_state.analysis_results, st.session_state.target_sku,
                         vendor_name, contact_name, english_ability
@@ -254,7 +320,34 @@ def display_vendor_comm_tab():
 def display_compliance_tab():
     st.header("⚖️ Compliance Center")
     if st.session_state.api_key_missing: st.error("AI features disabled."); return
-    # ... (code for compliance tab remains the same and is correct) ...
+
+    with st.container(border=True):
+        st.subheader("Medical Device Classification (U.S. FDA)")
+        with st.form("classification_form"):
+            device_desc = st.text_area("Describe your device")
+            if st.form_submit_button("Classify Device", type="primary"):
+                with st.spinner("AI is classifying..."):
+                    st.session_state.medical_device_classification = st.session_state.medical_device_classifier.classify_device(device_desc)
+        if st.session_state.medical_device_classification:
+            res = st.session_state.medical_device_classification
+            st.success(f"**Classification:** {res.get('classification', 'N/A')}")
+            st.markdown(f"**Rationale:** {res.get('rationale', 'N/A')}")
+
+    with st.container(border=True):
+        st.subheader("Pre-Mortem Analysis")
+        scenario = st.text_input("Define failure scenario:", "Our new product launch failed.")
+        if st.button("Generate Pre-Mortem Questions"):
+            with st.spinner("AI is generating questions..."):
+                questions = st.session_state.pre_mortem_generator.generate_questions(scenario)
+                st.session_state.pre_mortem_data = [{"question": q, "answer": ""} for q in questions]
+
+        if st.session_state.pre_mortem_data:
+            for i, item in enumerate(st.session_state.pre_mortem_data):
+                 item['answer'] = st.text_area(f"**Q:** {item['question']}", key=f"pm_q_{i}")
+            if st.button("Summarize Session"):
+                with st.spinner("AI is summarizing..."):
+                    st.session_state.pre_mortem_summary = st.session_state.pre_mortem_generator.summarize_answers(st.session_state.pre_mortem_data)
+        if st.session_state.pre_mortem_summary: st.markdown(st.session_state.pre_mortem_summary)
 
 def display_exports_tab():
     st.header("📄 Exports")
@@ -283,8 +376,9 @@ def display_ai_chat_interface(tab_name: str):
 
 # --- Process Functions ---
 def reset_analysis_state():
-    st.session_state.analysis_results = None
-    # ... (rest of reset logic is correct) ...
+    st.session_state.analysis_results, st.session_state.capa_feasibility_analysis = None, None
+    st.session_state.ai_file_analyses, st.session_state.user_file_selections = [], {}
+    st.session_state.sales_data, st.session_state.returns_data = pd.DataFrame(), pd.DataFrame()
 
 def run_ai_file_analysis(files):
     reset_analysis_state()
@@ -295,10 +389,28 @@ def run_ai_file_analysis(files):
 
 def process_manual_data():
     reset_analysis_state()
-    # ... (rest of manual process logic is correct) ...
+    with st.spinner("Processing data..."):
+        sales_df = parse_manual_input(st.session_state.manual_sales_input, st.session_state.target_sku)
+        returns_df = parse_manual_input(st.session_state.manual_returns_input, st.session_state.target_sku)
+        st.session_state.sales_data = st.session_state.data_processor.process_sales_data(sales_df)
+        st.session_state.returns_data = st.session_state.data_processor.process_returns_data(returns_df)
+        st.session_state.analysis_results = run_full_analysis(st.session_state.sales_data, st.session_state.returns_data, (st.session_state.end_date - st.session_state.start_date).days, st.session_state.unit_cost, st.session_state.sales_price)
+        if "error" not in st.session_state.analysis_results: st.success("Manual data processed!")
 
 def process_and_run_full_analysis():
-    # ... (rest of file process logic is correct) ...
+    with st.spinner("Extracting and analyzing data..."):
+        sales_dfs, returns_dfs = [], []
+        for i, analysis in enumerate(st.session_state.ai_file_analyses):
+            if st.session_state.user_file_selections.get(i, False):
+                df = st.session_state.file_parser.extract_data(st.session_state.uploaded_files_list[i], analysis, st.session_state.target_sku)
+                if df is not None:
+                    if analysis.get('content_type') == 'sales': sales_dfs.append(df)
+                    elif analysis.get('content_type') == 'returns': returns_dfs.append(df)
+        st.session_state.sales_data = st.session_state.data_processor.process_sales_data(pd.concat(sales_dfs, ignore_index=True) if sales_dfs else pd.DataFrame())
+        st.session_state.returns_data = st.session_state.data_processor.process_returns_data(pd.concat(returns_dfs, ignore_index=True) if returns_dfs else pd.DataFrame())
+        st.session_state.analysis_results = run_full_analysis(st.session_state.sales_data, st.session_state.returns_data, (st.session_state.end_date - st.session_state.start_date).days, st.session_state.unit_cost, st.session_state.sales_price)
+    st.success("Analysis complete!")
+    st.session_state.ai_file_analyses, st.session_state.user_file_selections = [], {}
 
 # --- Main App Flow ---
 def main():

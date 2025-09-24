@@ -58,7 +58,7 @@ class FMEA:
                 response_format={"type": "json_object"}
             )
             result = json.loads(response.choices[0].message.content)
-            return result.get("failure_modes", []) # Safely extract the list
+            return result.get("failure_modes", [])
         except Exception as e:
             print(f"Error suggesting failure modes: {e}")
             return [{"Potential Failure Mode": "Error generating AI suggestions.", "Potential Effect(s)": str(e), "Potential Cause(s)": ""}]

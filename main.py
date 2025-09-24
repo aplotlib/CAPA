@@ -175,8 +175,23 @@ def display_sidebar():
 
         st.header("➕ Add Data")
         
-        # --- File Uploader ---
-        with st.expander("📁 Upload Files", expanded=True):
+        # --- Manual Data Entry (Default) ---
+        st.subheader("✍️ Manual Data Entry")
+        st.caption("Paste comma-separated data below (e.g., SKU-123,50).")
+        sales_placeholder = "sku,quantity\nSKU-12345,100\nSKU-ABCDE,50"
+        returns_placeholder = "sku,quantity\nSKU-12345,10"
+        
+        manual_sales = st.text_area("Sales Data", height=150, placeholder=sales_placeholder, key="manual_sales_input")
+        manual_returns = st.text_area("Returns Data", height=150, placeholder=returns_placeholder, key="manual_returns_input")
+
+        if st.button("Process Manual Data", type="primary", use_container_width=True):
+            if not manual_sales:
+                st.warning("Please provide sales data.")
+            else:
+                process_manual_data()
+
+        # --- File Uploader (Optional) ---
+        with st.expander("📁 Or Upload Files"):
             uploaded_files = st.file_uploader(
                 "Upload Sales/Returns Files",
                 accept_multiple_files=True,
@@ -186,28 +201,13 @@ def display_sidebar():
             if uploaded_files:
                 st.session_state.uploaded_files_list = uploaded_files
 
-            if st.button("🤖 Process Uploaded Files", type="primary", use_container_width=True):
+            if st.button("🤖 Process Uploaded Files", use_container_width=True):
                 if not st.session_state.uploaded_files_list:
                     st.warning("Please upload files first.")
                 elif st.session_state.api_key_missing:
                     st.error("Cannot process files. OpenAI API key is missing.")
                 else:
                     run_ai_file_analysis()
-        
-        # --- Manual Data Entry ---
-        with st.expander("✍️ Manual Data Entry"):
-            st.caption("Paste comma-separated data below (e.g., SKU-123,50).")
-            sales_placeholder = "sku,quantity\nSKU-12345,100\nSKU-ABCDE,50"
-            returns_placeholder = "sku,quantity\nSKU-12345,10"
-            
-            manual_sales = st.text_area("Sales Data", height=150, placeholder=sales_placeholder, key="manual_sales_input")
-            manual_returns = st.text_area("Returns Data", height=150, placeholder=returns_placeholder, key="manual_returns_input")
-
-            if st.button("Process Manual Data", use_container_width=True):
-                if not manual_sales:
-                    st.warning("Please provide sales data.")
-                else:
-                    process_manual_data()
 
 def display_dashboard():
     """Displays the main dashboard with metrics and analyses."""
@@ -240,7 +240,7 @@ def display_dashboard():
 
     # --- Step 2: Display Analysis Results ---
     if not st.session_state.analysis_results:
-        st.info('**Welcome!** Configure your product, then upload files or enter data manually in the sidebar to begin.')
+        st.info('**Welcome!** Configure your product, then enter data manually or upload files in the sidebar to begin.')
         return
 
     results = st.session_state.analysis_results
@@ -296,8 +296,22 @@ def display_dashboard():
         with st.expander("Show detailed calculation"):
             st.table(pd.DataFrame.from_dict(cb_results['details'], orient='index', columns=["Value"]))
 
+def reset_analysis_state():
+    """Clears previous analysis results to prevent data mixing."""
+    st.session_state.analysis_results = None
+    st.session_state.capa_feasibility_analysis = None
+    st.session_state.ai_file_analyses = []
+    st.session_state.user_file_selections = {}
+    st.session_state.sales_data = pd.DataFrame()
+    st.session_state.returns_data = pd.DataFrame()
+
 def run_ai_file_analysis():
     """Runs the AI analysis on uploaded files and stores the results."""
+    reset_analysis_state() # Reset state before starting new analysis
+    # Clear manual input fields to avoid confusion
+    st.session_state.manual_sales_input = ""
+    st.session_state.manual_returns_input = ""
+    
     with st.spinner("AI is analyzing file contents..."):
         analyses = []
         for file in st.session_state.uploaded_files_list:
@@ -308,6 +322,8 @@ def run_ai_file_analysis():
 
 def process_manual_data():
     """Processes manually entered data and runs the full analysis."""
+    reset_analysis_state() # Reset state before starting new analysis
+    
     with st.spinner("Processing manual data..."):
         try:
             sales_str = st.session_state.manual_sales_input

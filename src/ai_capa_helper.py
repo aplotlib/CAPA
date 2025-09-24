@@ -7,7 +7,51 @@ from .utils import retry_with_backoff
 
 class AICAPAHelper:
     """AI assistant for generating CAPA form suggestions using OpenAI."""
-    # ... (no changes here) ...
+
+    def __init__(self, api_key: Optional[str] = None): #<-- FIX: api_key parameter was missing
+        """Initialize with OpenAI API key."""
+        self.client = None
+        if api_key:
+            try:
+                self.client = openai.OpenAI(api_key=api_key)
+                self.model = "gpt-4o"
+            except Exception as e:
+                print(f"Failed to initialize AI helper: {e}")
+
+    @retry_with_backoff()
+    def generate_capa_suggestions(self, issue_summary: str, analysis_results: Dict) -> Dict[str, str]:
+        """Generate AI suggestions for CAPA form fields."""
+        if not self.client: return {}
+
+        summary = analysis_results.get('return_summary', {}).iloc[0] if not analysis_results.get('return_summary', {}).empty else {}
+        context = f"""
+        Issue Summary: {issue_summary}
+        SKU: {summary.get('sku', 'N/A')}
+        Return Rate: {summary.get('return_rate', 0):.2f}%
+        Total Returns: {int(summary.get('total_returned', 0))}
+        """
+
+        system_prompt = """
+        You are a medical device quality expert helping to complete a CAPA form based on the provided context.
+        Generate content for each CAPA field following ISO 13485, FDA 21 CFR 820.100, and EU MDR standards.
+        Return ONLY a valid JSON object with keys for the most critical fields: "issue_description", "root_cause_analysis", "corrective_action", "preventive_action", and "effectiveness_verification_plan".
+        """
+        user_prompt = f"Here is the context for the CAPA form:\n{context}"
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                max_tokens=2000,
+                response_format={"type": "json_object"}
+            )
+            return json.loads(response.choices[0].message.content)
+        except Exception as e:
+            print(f"Error generating CAPA suggestions: {e}")
+            return {}
 
 class AIEmailDrafter:
     """AI assistant for drafting vendor communications using OpenAI."""

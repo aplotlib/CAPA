@@ -96,11 +96,9 @@ def _generate_insights(summary_data: pd.Series, quality_metrics: Dict,
 
     if sales_price and sales_price > 0:
         lost_revenue = summary_data['total_returned'] * sales_price
-        # FIX: Added spaces for proper formatting
         insights.append(f"💰 **Financial Impact**: Based on a sales price of ${sales_price:,.2f}, the estimated lost revenue from returns for this period is **${lost_revenue:,.2f}**.")
     elif unit_cost and unit_cost > 0:
         return_cost = summary_data['total_returned'] * unit_cost
-        # FIX: Added spaces for proper formatting
         insights.append(f"💰 **Financial Impact**: Based on a unit cost of ${unit_cost:,.2f}, the cost of returned goods for this period is approximately **${return_cost:,.2f}**.")
 
     return "\n\n".join(insights)

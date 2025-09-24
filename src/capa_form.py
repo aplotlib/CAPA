@@ -2,7 +2,7 @@
 
 import streamlit as st
 from datetime import date
-from .compliance import validate_capa_data # Correctly import the validation function
+from .compliance import validate_capa_data
 
 def display_capa_form():
     """
@@ -24,7 +24,6 @@ def display_capa_form():
         if st.button("🤖 Get AI Suggestions for CAPA Form", help="Uses AI to fill in key fields based on the dashboard data."):
             if st.session_state.get('analysis_results'):
                 with st.spinner("AI is generating CAPA suggestions..."):
-                    # Ensure analysis_results is not None and has the required data
                     return_summary = st.session_state.analysis_results.get('return_summary')
                     if return_summary is not None and not return_summary.empty:
                         issue_summary = f"High return rate of {return_summary.iloc[0]['return_rate']:.2f}% for SKU {st.session_state.target_sku}."
@@ -32,10 +31,8 @@ def display_capa_form():
                             issue_summary,
                             st.session_state.analysis_results
                         )
-                        # Update the session state with the suggestions
                         st.session_state.capa_data.update(suggestions)
                         st.success("AI suggestions have been added to the form.")
-                        # Rerun to show the new values in the form fields
                         st.rerun()
                     else:
                         st.warning("Analysis results are incomplete. Cannot generate suggestions.")
@@ -43,6 +40,7 @@ def display_capa_form():
                 st.warning("Please analyze some data on the dashboard first to provide context for the AI.")
 
     # --- Workflow Step 1: Initiation ---
+    # FIX: Corrected expander labels to use emojis, not broken icon codes.
     with st.expander("📂 Step 1: CAPA Initiation & Problem Description", expanded=True):
         st.markdown("##### **1.1 Identification**")
         col1, col2 = st.columns(2)
@@ -53,88 +51,44 @@ def display_capa_form():
             data['date'] = st.date_input("Initiation Date", value=data.get('date', date.today()))
             data['prepared_by'] = st.text_input("Prepared By", value=data.get('prepared_by', ''), help="Name/title of the person initiating the CAPA.")
 
-        data['source_of_issue'] = st.selectbox(
-            "Source of Issue (CAPA Input)",
-            ["Internal Audit", "Customer Complaint", "Non-conforming Product", "Management Review", "Trend Analysis", "Other"],
-            index=data.get('source_of_issue_index', 4), # Default to Trend Analysis
-            help="Where was the issue first identified?"
-        )
+        data['source_of_issue'] = st.selectbox("Source of Issue", ["Internal Audit", "Customer Complaint", "Non-conforming Product", "Management Review", "Trend Analysis", "Other"])
 
         st.markdown("##### **1.2 Problem Description**")
-        data['issue_description'] = st.text_area(
-            "Detailed Description of Non-conformity",
-            height=150,
-            value=data.get('issue_description', ''),
-            help="Provide a clear, detailed description of the issue. Include what happened, where it happened, when, and its impact."
-        )
+        data['issue_description'] = st.text_area("Detailed Description of Non-conformity", height=150, value=data.get('issue_description', ''))
 
         st.markdown("##### **1.3 Immediate Actions & Containment**")
-        data['immediate_containment_actions'] = st.text_area(
-            "Immediate Actions/Containment",
-            height=100,
-            value=data.get('immediate_containment_actions', ''),
-            help="Describe actions taken to immediately contain the issue (e.g., quarantining stock, issuing a notice)."
-        )
+        data['immediate_containment_actions'] = st.text_area("Immediate Actions/Containment", height=100, value=data.get('immediate_containment_actions', ''))
 
     # --- Workflow Step 2: Investigation ---
     with st.expander("🔍 Step 2: Investigation & Root Cause Analysis"):
         st.markdown("##### **2.1 Risk Assessment**")
-        st.markdown("Assess the risk associated with the issue *before* corrective action, as per ISO 14971.")
         r_col1, r_col2 = st.columns(2)
-        with r_col1:
-            data['risk_severity'] = st.slider("Severity of Potential Harm", 1, 5, value=data.get('risk_severity', 3), help="1=Negligible, 5=Catastrophic")
-        with r_col2:
-            data['risk_probability'] = st.slider("Probability of Occurrence", 1, 5, value=data.get('risk_probability', 3), help="1=Improbable, 5=Frequent")
-        risk_level = data.get('risk_severity', 3) * data.get('risk_probability', 3)
-        st.metric("Calculated Risk Priority", f"{risk_level}", help="Risk = Severity x Probability. This determines the urgency and depth of the investigation.")
+        data['risk_severity'] = r_col1.slider("Severity of Potential Harm", 1, 5, value=data.get('risk_severity', 3))
+        data['risk_probability'] = r_col2.slider("Probability of Occurrence", 1, 5, value=data.get('risk_probability', 3))
+        st.metric("Calculated Risk Priority", f"{data.get('risk_severity', 3) * data.get('risk_probability', 3)}")
 
         st.markdown("##### **2.2 Root Cause Analysis (RCA)**")
-        data['root_cause'] = st.text_area(
-            "Root Cause Analysis Findings",
-            height=200,
-            value=data.get('root_cause', ''),
-            help="Detail the investigation and the identified root cause(s). Common tools include 5 Whys or a Fishbone (Ishikawa) Diagram."
-        )
+        data['root_cause'] = st.text_area("Root Cause Analysis Findings", height=200, value=data.get('root_cause', ''))
 
     # --- Workflow Step 3: Action Plan ---
     with st.expander("🛠️ Step 3: Corrective & Preventive Action Plan"):
         st.markdown("##### **3.1 Corrective Action Plan**")
-        data['corrective_action'] = st.text_area(
-            "Corrective Action(s) to Eliminate Root Cause",
-            height=150,
-            value=data.get('corrective_action', ''),
-            help="Describe the actions that will be taken to fix the root cause of the problem."
-        )
-
+        data['corrective_action'] = st.text_area("Corrective Action(s)", height=150, value=data.get('corrective_action', ''))
         st.markdown("##### **3.2 Preventive Action Plan**")
-        data['preventive_action'] = st.text_area(
-            "Preventive Action(s) to Prevent Recurrence",
-            height=150,
-            value=data.get('preventive_action', ''),
-            help="Describe actions to prevent this or similar issues from happening again across other products or processes."
-        )
+        data['preventive_action'] = st.text_area("Preventive Action(s)", height=150, value=data.get('preventive_action', ''))
 
     # --- Workflow Step 4: Verification & Closure ---
     with st.expander("✅ Step 4: Verification of Effectiveness & Closure"):
         st.markdown("##### **4.1 Verification of Effectiveness**")
-        data['effectiveness_verification_plan'] = st.text_area(
-            "Verification Plan",
-            height=150,
-            value=data.get('effectiveness_verification_plan', ''),
-            help="How will you confirm that the actions taken were effective and did not introduce new risks? Define success criteria, data to be collected, and timeframe."
-        )
-
+        data['effectiveness_verification_plan'] = st.text_area("Verification Plan", height=150, value=data.get('effectiveness_verification_plan', ''))
         st.markdown("##### **4.2 CAPA Closure**")
         c_col1, c_col2 = st.columns(2)
-        with c_col1:
-            data['closed_by'] = st.text_input("Closed By (Name/Title)", value=data.get('closed_by', ''))
-        with c_col2:
-            data['closure_date'] = st.date_input("Closure Date", value=data.get('closure_date', date.today()))
+        data['closed_by'] = c_col1.text_input("Closed By", value=data.get('closed_by', ''))
+        data['closure_date'] = c_col2.date_input("Closure Date", value=data.get('closure_date', date.today()))
 
-    # --- Update session state before submission ---
     st.session_state.capa_data = data
     data['sku'] = st.session_state.target_sku
-    data['product'] = data.get('product_name') # Alias for compliance check
+    data['product'] = data.get('product_name')
 
     # --- Submission Button ---
     st.markdown("---")

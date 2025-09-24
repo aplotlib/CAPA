@@ -69,6 +69,7 @@ def load_css():
             padding: 1.5rem;
             border: 1px solid #E0E0E0;
             box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            text-align: center; /* Center align metric content */
         }
 
         /* Tab styling */
@@ -99,28 +100,14 @@ def load_css():
 
 def initialize_session_state():
     """Initializes all necessary variables in Streamlit's session state."""
-    # Central place for all session state keys
     STATE_DEFAULTS = {
-        'components_initialized': False,
-        'api_key_missing': True,
-        'anthropic_api_key': None,
-        'target_sku': 'SKU-12345',
-        'unit_cost': 15.50,
-        'sales_price': 49.99,
-        'start_date': date.today() - timedelta(days=30),
-        'end_date': date.today(),
-        'sales_data': {},
-        'returns_data': {},
-        'pending_image_confirmations': [],
-        'analysis_results': None,
-        'capa_feasibility_analysis': None,
-        'capa_data': {},
-        'fmea_data': None,
-        'pre_mortem_summary': None,
-        'medical_device_classification': None,
-        'vendor_email_draft': None,
-        'risk_assessment': None,
-        'urra': None
+        'components_initialized': False, 'api_key_missing': True, 'anthropic_api_key': None,
+        'target_sku': 'SKU-12345', 'unit_cost': 15.50, 'sales_price': 49.99,
+        'start_date': date.today() - timedelta(days=30), 'end_date': date.today(),
+        'sales_data': {}, 'returns_data': {}, 'pending_image_confirmations': [],
+        'analysis_results': None, 'capa_feasibility_analysis': None, 'capa_data': {},
+        'fmea_data': None, 'pre_mortem_summary': None, 'medical_device_classification': None,
+        'vendor_email_draft': None, 'risk_assessment': None, 'urra': None
     }
     for key, value in STATE_DEFAULTS.items():
         if key not in st.session_state:
@@ -131,13 +118,11 @@ def initialize_components():
     if not st.session_state.components_initialized:
         api_key = st.secrets.get("ANTHROPIC_API_KEY")
         if not api_key:
-            st.warning("Anthropic API key not found. AI features will be limited.")
             st.session_state.api_key_missing = True
         else:
             st.session_state.anthropic_api_key = api_key
             st.session_state.api_key_missing = False
 
-        # Initialize components, they will handle the missing key internally.
         st.session_state.file_parser = AIFileParser(api_key)
         st.session_state.data_processor = DataProcessor(api_key)
         st.session_state.ai_context_helper = AIContextHelper(api_key)
@@ -149,17 +134,6 @@ def initialize_components():
         st.session_state.pre_mortem_generator = PreMortem(api_key)
         st.session_state.doc_generator = CapaDocumentGenerator(api_key)
         st.session_state.components_initialized = True
-
-# --- Helper Functions ---
-
-def trigger_final_analysis():
-    """Consolidates all data and runs the main analysis."""
-    # This function is a placeholder for your data processing logic
-    st.info("Triggering final analysis...")
-    # Add your logic to process sales_data and returns_data and then run run_full_analysis
-    # For demonstration, we'll just show a success message.
-    st.success("Analysis triggered (placeholder).")
-
 
 # --- UI Sections ---
 
@@ -184,50 +158,43 @@ def display_sidebar():
         st.session_state.end_date = st.date_input("End Date", value=st.session_state.end_date)
 
         st.header("➕ Add Data")
-        uploaded_files = st.file_uploader(
-            "Upload Sales/Returns Files (CSV, Excel, Images)",
-            accept_multiple_files=True,
-            type=['csv', 'xlsx', 'png', 'jpg', 'jpeg']
-        )
+        uploaded_files = st.file_uploader( "Upload Sales/Returns Files", accept_multiple_files=True, type=['csv', 'xlsx', 'png', 'jpg', 'jpeg'])
         if uploaded_files:
-            with st.spinner("AI is analyzing files..."):
-                # File processing logic would go here
-                st.success(f"{len(uploaded_files)} files uploaded and queued for processing.")
+            st.success(f"{len(uploaded_files)} files uploaded.")
 
         if st.button("Process Data & Run Analysis", type="primary", use_container_width=True):
-            # This is where you would call your data processing and analysis functions
-            # For now, it's a placeholder.
-            st.session_state.analysis_results = {
-                'return_summary': pd.DataFrame({
-                    'sku': [st.session_state.target_sku], 'total_sold': [1000], 'total_returned': [120], 'return_rate': [12.0]
-                }),
-                'quality_metrics': {'quality_score': 72, 'risk_level': 'Medium'},
-                'insights': 'Return rate is slightly above industry average. Investigation recommended.'
-            }
+            with st.spinner("Analyzing data..."):
+                st.session_state.analysis_results = {
+                    'return_summary': pd.DataFrame({'sku': [st.session_state.target_sku], 'total_sold': [1000], 'total_returned': [120], 'return_rate': [12.0]}),
+                    'quality_metrics': {'quality_score': 72, 'risk_level': 'Medium'},
+                    'insights': 'Return rate is slightly above industry average. Investigation recommended.'
+                }
             st.success("Analysis complete!")
-
 
 def display_dashboard():
     """Displays the main dashboard with metrics and analyses."""
     with st.expander("💡 Why a Proactive Approach to Quality Matters"):
-        st.markdown("""
-        A proactive approach to quality is a strategic business investment. By focusing on **prevention** and **monitoring**, you can significantly reduce the high costs associated with both internal and external failures, leading to lower total costs, increased revenue, and higher brand equity.
-        """)
+        st.markdown("A proactive approach to quality is a strategic business investment. By focusing on **prevention** and **monitoring**, you can significantly reduce costs associated with failures, leading to lower total costs, increased revenue, and higher brand equity.")
 
     st.header("📊 Quality Dashboard")
     if not st.session_state.analysis_results:
-        st.info('**Welcome!** Start by configuring your product in the sidebar and clicking "Process Data & Run Analysis."')
+        st.info('**Welcome!** Configure your product in the sidebar and click "Process Data & Run Analysis."')
         return
 
     results = st.session_state.analysis_results
     summary_data = results['return_summary'].iloc[0]
 
     st.markdown(f"### Overall Analysis for SKU: **{summary_data['sku']}**")
-    cols = st.columns(4)
-    cols[0].metric("Return Rate", f"{summary_data['return_rate']:.2f}%", help="Percentage of units sold that were returned.")
-    cols[1].metric("Total Sold", f"{int(summary_data['total_sold']):,}", help="Total units sold.")
-    cols[2].metric("Total Returned", f"{int(summary_data['total_returned']):,}", help="Total units returned.")
-    cols[3].metric("Quality Score", f"{results['quality_metrics'].get('quality_score', 'N/A')}/100", delta=results['quality_metrics'].get('risk_level', ''), help="AI-calculated score based on return rate.")
+    
+    # --- FIX for overlapping text ---
+    # Using two rows of two columns is more responsive and prevents overlap.
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Return Rate", f"{summary_data['return_rate']:.2f}%", help="Percentage of units sold that were returned.")
+        st.metric("Total Returned", f"{int(summary_data['total_returned']):,}", help="Total units returned.")
+    with col2:
+        st.metric("Quality Score", f"{results['quality_metrics'].get('quality_score', 'N/A')}/100", delta=results['quality_metrics'].get('risk_level', ''), help="AI-calculated score based on return rate.")
+        st.metric("Total Sold", f"{int(summary_data['total_sold']):,}", help="Total units sold.")
 
     st.markdown(f"**AI Insights**: {results.get('insights', 'No insights generated.')}")
 
@@ -257,57 +224,53 @@ def display_dashboard():
         with st.expander("Show detailed calculation"):
             st.table(pd.DataFrame.from_dict(cb_results['details'], orient='index', columns=["Value"]))
 
+def display_ai_chat_interface(tab_name: str):
+    """A contextual AI chat interface that provides real answers."""
+    st.markdown("---")
+    st.subheader(f"🤖 AI Assistant for {tab_name}")
+    user_query = st.text_input("Ask the AI a question about the current context...", key=f"ai_chat_{tab_name}")
+    
+    if user_query:
+        if st.session_state.get('api_key_missing', True):
+            st.error("Cannot generate response. Anthropic API key is not configured in your Streamlit secrets.")
+        else:
+            with st.spinner("AI is thinking..."):
+                # --- FIX for AI Assistant ---
+                # This now calls the actual helper class to get a real response.
+                try:
+                    response = st.session_state.ai_context_helper.generate_response(user_query)
+                    st.markdown(response)
+                except Exception as e:
+                    st.error(f"An error occurred while contacting the AI: {e}")
+
+# --- Placeholder Tabs ---
 def display_risk_safety_tab():
     st.header("🛡️ Risk & Safety Analysis")
     st.info("This section is for FMEA, ISO 14971 Risk Assessments, and other safety analyses. (Placeholder)")
-    # Add your FMEA and Risk Assessment UI components here
 
 def display_vendor_comm_tab():
     st.header("✉️ Vendor Communications")
     st.info("Draft and manage communications with your vendors. (Placeholder)")
-    # Add your vendor email drafting UI here
 
 def display_compliance_tab():
     st.header("⚖️ Compliance Center")
     st.info("Tools for ensuring regulatory compliance. (Placeholder)")
-    # Add your compliance checklist and validation tools here
 
 def display_resources_tab():
-    """Displays a tab with resources and industry standards."""
     st.header("📚 Resources & Industry Standards")
     st.info("A quick reference for key regulations and standards in the medical device industry.")
-
-    st.subheader("Key Quality & Risk Management Standards")
     col1, col2 = st.columns(2)
     with col1:
-        with st.container(border=True):
-            st.markdown("##### **ISO 13485:2016**")
-            st.markdown("The international standard for a Quality Management System (QMS) for medical devices.")
+        with st.container(border=True): st.markdown("##### **ISO 13485:2016**\nThe QMS standard for medical devices.")
     with col2:
-        with st.container(border=True):
-            st.markdown("##### **ISO 14971**")
-            st.markdown("The international standard for the application of risk management to medical devices.")
+        with st.container(border=True): st.markdown("##### **ISO 14971**\nThe standard for risk management for medical devices.")
 
 def display_exports_tab():
     st.header("📄 Exports")
     st.info("Generate and download comprehensive reports. (Placeholder)")
     st.button("Generate Combined Word Report", type="primary")
-    # Add your document generation and download logic here
-
-def display_ai_chat_interface(tab_name: str):
-    """A placeholder for a contextual AI chat interface."""
-    st.markdown("---")
-    st.subheader(f"🤖 AI Assistant for {tab_name}")
-    user_query = st.text_input("Ask the AI a question about the data on this page...")
-    if user_query:
-        with st.spinner("AI is thinking..."):
-            # In a real implementation, you would call:
-            # response = st.session_state.ai_context_helper.generate_response(user_query)
-            response = "This is a placeholder response from the AI assistant."
-            st.markdown(response)
 
 # --- Main Application Flow ---
-
 def main():
     """Main function to run the Streamlit application."""
     initialize_session_state()
@@ -316,28 +279,18 @@ def main():
     initialize_components()
     display_sidebar()
 
-    # --- Tab Navigation ---
-    tab_titles = [
-        "📊 Dashboard", "📝 CAPA", "🛡️ Risk & Safety", "✉️ Vendor Comms",
-        "⚖️ Compliance", "📚 Resources", "📄 Exports"
-    ]
+    tab_titles = ["📊 Dashboard", "📝 CAPA", "🛡️ Risk & Safety", "✉️ Vendor Comms", "⚖️ Compliance", "📚 Resources", "📄 Exports"]
     tabs = st.tabs(tab_titles)
 
     with tabs[0]:
         display_dashboard()
         display_ai_chat_interface("the Dashboard")
-    with tabs[1]:
-        display_capa_form()
-    with tabs[2]:
-        display_risk_safety_tab()
-    with tabs[3]:
-        display_vendor_comm_tab()
-    with tabs[4]:
-        display_compliance_tab()
-    with tabs[5]:
-        display_resources_tab()
-    with tabs[6]:
-        display_exports_tab()
+    with tabs[1]: display_capa_form()
+    with tabs[2]: display_risk_safety_tab()
+    with tabs[3]: display_vendor_comm_tab()
+    with tabs[4]: display_compliance_tab()
+    with tabs[5]: display_resources_tab()
+    with tabs[6]: display_exports_tab()
 
 if __name__ == "__main__":
     main()

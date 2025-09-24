@@ -119,19 +119,36 @@ def initialize_session_state():
             st.session_state[key] = value
 
 def get_serializable_state() -> str:
-    """Creates a JSON-serializable representation of the session state."""
-    state_to_save = {key: st.session_state.get(key) for key in st.session_state.keys() if not callable(st.session_state[key])}
-    state_copy = copy.deepcopy(state_to_save)
+    """Creates a JSON-serializable representation of the session state, excluding non-serializable items."""
+    serializable_keys = [
+        'target_sku', 'unit_cost', 'sales_price', 'start_date', 'end_date',
+        'analysis_results', 'capa_feasibility_analysis', 'capa_data',
+        'fmea_data', 'pre_mortem_summary', 'medical_device_classification',
+        'vendor_email_draft', 'risk_assessment', 'urra', 'chat_history',
+        'pre_mortem_questions', 'sales_data', 'returns_data'
+    ]
     
-    for k, v in state_copy.items():
+    state_to_save = {key: st.session_state.get(key) for key in serializable_keys}
+    
+    # Custom serialization for complex objects
+    def serialize_value(v):
         if isinstance(v, pd.DataFrame):
-            state_copy[k] = v.to_json(orient='split')
-        elif isinstance(v, (datetime, date)):
-            state_copy[k] = v.isoformat()
-        elif isinstance(v, BytesIO):
-            state_copy[k] = None # Don't save file bytes
+            return v.to_json(orient='split')
+        if isinstance(v, (datetime, date)):
+            return v.isoformat()
+        if isinstance(v, (dict, list)):
+            return json.loads(json.dumps(v, default=str)) # A trick to serialize nested structures
+        return v
 
+    state_copy = copy.deepcopy(state_to_save)
+    for k, v in state_copy.items():
+        state_copy[k] = serialize_value(v)
+        # Special handling for nested dataframes
+        if k == 'analysis_results' and isinstance(v, dict) and 'return_summary' in v:
+            state_copy[k]['return_summary'] = serialize_value(v['return_summary'])
+            
     return json.dumps(state_copy, indent=2, default=str)
+
 
 def load_state_from_json(uploaded_file):
     """Loads session state from an uploaded JSON file."""
@@ -139,16 +156,25 @@ def load_state_from_json(uploaded_file):
         loaded_state = json.load(uploaded_file)
         for key, value in loaded_state.items():
             if key in st.session_state:
-                if isinstance(value, str) and 'split' in value and 'data' in value:
-                     try: st.session_state[key] = pd.read_json(StringIO(value), orient='split')
-                     except: pass
-                elif key in ['start_date', 'end_date'] and isinstance(value, str):
-                    st.session_state[key] = date.fromisoformat(value)
+                if isinstance(value, str):
+                     try:
+                        # Attempt to parse as DataFrame
+                        st.session_state[key] = pd.read_json(StringIO(value), orient='split')
+                     except (ValueError, TypeError):
+                        # Attempt to parse as date
+                        try:
+                            st.session_state[key] = date.fromisoformat(value)
+                        except (ValueError, TypeError):
+                            st.session_state[key] = value # Assign as string
+                elif key == 'analysis_results' and isinstance(value, dict) and 'return_summary' in value:
+                    value['return_summary'] = pd.read_json(StringIO(value['return_summary']), orient='split')
+                    st.session_state[key] = value
                 else:
                     st.session_state[key] = value
         st.success("Session loaded successfully!")
     except Exception as e:
         st.error(f"Failed to load session: {e}")
+
 
 # --- Component Initialization ---
 def initialize_components():
@@ -295,16 +321,18 @@ def display_risk_safety_tab():
                     st.session_state.fmea_data = pd.DataFrame(suggestions)
             else: st.warning("Run an analysis on the dashboard first.")
         
-        if st.session_state.fmea_data is not None:
-            edited_df = st.data_editor(st.session_state.fmea_data, num_rows="dynamic", key="fmea_editor", column_config={
-                "Severity": st.column_config.NumberColumn(min_value=1, max_value=10, required=True),
-                "Occurrence": st.column_config.NumberColumn(min_value=1, max_value=10, required=True),
-                "Detection": st.column_config.NumberColumn(min_value=1, max_value=10, required=True),
-                "RPN": st.column_config.NumberColumn(disabled=True, help="S x O x D")
-            })
-            for col in ['Severity', 'Occurrence', 'Detection']: edited_df[col] = pd.to_numeric(edited_df[col], errors='coerce').fillna(1)
-            edited_df['RPN'] = edited_df['Severity'] * edited_df['Occurrence'] * edited_df['Detection']
-            st.session_state.fmea_data = edited_df
+        if 'fmea_data' not in st.session_state or st.session_state.fmea_data is None:
+             st.session_state.fmea_data = pd.DataFrame(columns=["Potential Failure Mode", "Potential Effect(s)", "Severity", "Potential Cause(s)", "Occurrence", "Current Controls", "Detection", "RPN"])
+
+        edited_df = st.data_editor(st.session_state.fmea_data, num_rows="dynamic", key="fmea_editor", column_config={
+            "Severity": st.column_config.NumberColumn(min_value=1, max_value=10, required=True),
+            "Occurrence": st.column_config.NumberColumn(min_value=1, max_value=10, required=True),
+            "Detection": st.column_config.NumberColumn(min_value=1, max_value=10, required=True),
+            "RPN": st.column_config.NumberColumn(disabled=True, help="S x O x D")
+        })
+        for col in ['Severity', 'Occurrence', 'Detection']: edited_df[col] = pd.to_numeric(edited_df[col], errors='coerce').fillna(1)
+        edited_df['RPN'] = edited_df['Severity'] * edited_df['Occurrence'] * edited_df['Detection']
+        st.session_state.fmea_data = edited_df
 
     with st.container(border=True):
         st.subheader("ISO 14971 Risk Assessment")
@@ -372,8 +400,19 @@ def display_exports_tab():
     st.info("Compile all session data into a single Word document.")
     if st.button("Generate Combined Word Report", type="primary"):
         with st.spinner("Generating document..."):
-            content = {key: st.session_state.get(key) for key in st.session_state.keys()}
-            doc_buffer = st.session_state.doc_generator.export_all_to_docx(content)
+            # Create a dictionary of only the data we want to export
+            export_content = {
+                'sku': st.session_state.target_sku,
+                'analysis_results': st.session_state.analysis_results,
+                'capa_data': st.session_state.capa_data,
+                'fmea_data': st.session_state.fmea_data,
+                'medical_device_classification': st.session_state.medical_device_classification,
+                'risk_assessment': st.session_state.risk_assessment,
+                'urra': st.session_state.urra,
+                'pre_mortem_summary': st.session_state.pre_mortem_summary,
+                'vendor_email_draft': st.session_state.vendor_email_draft
+            }
+            doc_buffer = st.session_state.doc_generator.export_all_to_docx(export_content)
             st.download_button("📥 Download Report", doc_buffer, f"Quality_Report_{st.session_state.target_sku}.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
         st.success("Report generated!")
 

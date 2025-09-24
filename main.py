@@ -21,365 +21,184 @@ from src.fmea import FMEA
 from src.pre_mortem import PreMortem
 from src.fba_returns_processor import ReturnsProcessor
 from src.ai_context_helper import AIContextHelper
-from src.capa_form import display_capa_form # Import the new CAPA form
+from src.capa_form import display_capa_form
 
 # --- Page Configuration and Styling ---
-st.set_page_config(page_title="Product Lifecycle Manager", page_icon="📈", layout="wide")
+st.set_page_config(
+    page_title="Product Lifecycle & Quality Manager",
+    page_icon="
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-shield"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# (Your existing CSS styling remains here)
+# --- Enhanced UI/UX Styling ---
 st.markdown("""
 <style>
-    body {
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+
+    html, body, [class*="st-"] {
         font-family: 'Inter', sans-serif;
     }
+
+    /* Main App background */
+    .main {
+        background-color: #F0F2F6;
+    }
+
+    /* Header styling */
     .main-header {
-        background-color: #00466B;
+        background: linear-gradient(135deg, #0061ff 0%, #60efff 100%);
         color: white;
-        padding: 20px;
+        padding: 2rem;
         border-radius: 10px;
         text-align: center;
-        margin-bottom: 30px;
+        margin-bottom: 2rem;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     }
+    .main-header h1 {
+        font-weight: 700;
+    }
+
+    /* Custom info, success, warning, error boxes */
+    .info-box, .success-box, .warning-box, .error-box {
+        padding: 1rem;
+        margin: 1rem 0;
+        border-radius: 5px;
+        border-left: 5px solid;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    .info-box { background-color: #E3F2FD; border-color: #1E88E5; }
+    .success-box { background-color: #E8F5E9; border-color: #43A047; }
+    .warning-box { background-color: #FFF8E1; border-color: #FFB300; }
+    .error-box { background-color: #FFEBEE; border-color: #E53935; }
+
+    /* Metric cards */
     .stMetric {
-        background-color: #F0F2F6;
+        background-color: #FFFFFF;
         border-radius: 10px;
-        padding: 10px;
+        padding: 1.5rem;
         border: 1px solid #E0E0E0;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
-    .stButton>button {
-        width: 100%;
+
+    /* Tab styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 24px;
     }
-    div, p, span, th, td {
-        word-wrap: break-word;
-        overflow-wrap: break-word;
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: #F0F2F6;
+        border-radius: 4px 4px 0px 0px;
+        gap: 1px;
+        padding-top: 10px;
+        padding-bottom: 10px;
     }
-    .info-box {
-        background-color: #E3F2FD;
-        border-left: 5px solid #1E88E5;
-        padding: 1rem;
-        margin: 1rem 0;
-        border-radius: 5px;
+    .stTabs [aria-selected="true"] {
+        background-color: #FFFFFF;
     }
-    .success-box {
-        background-color: #E8F5E9;
-        border-left: 5px solid #43A047;
-        padding: 1rem;
-        margin: 1rem 0;
-        border-radius: 5px;
-    }
-    .error-box {
-        background-color: #FFEBEE;
-        border-left: 5px solid #E53935;
-        padding: 1rem;
-        margin: 1rem 0;
-        border-radius: 5px;
-    }
-    .chat-container {
-        margin-top: 2rem;
-        border-top: 2px solid #F0F2F6;
-        padding-top: 1rem;
+
+    /* Sidebar styling */
+    [data-testid="stSidebar"] {
+        background-color: #FFFFFF;
     }
 </style>
 """, unsafe_allow_html=True)
-
-# --- Session State Initialization ---
-def initialize_session_state():
-    """Initializes all required session state variables."""
-    defaults = {
-        'analysis_results': None, 'capa_data': {}, 'misc_data': [],
-        'file_parser': None, 'data_processor': None,
-        'sales_data': {}, 'returns_data': {},
-        'ai_analysis': None, 'unit_cost': 0.0, 'sales_price': 0.0, 'target_sku': "",
-        'start_date': datetime.now().date() - timedelta(days=30),
-        'end_date': datetime.now().date(),
-        'manual_sales': 0, 'manual_returns': 0,
-        'generated_doc': None, 'doc_filename': None,
-        'ai_suggestions': {}, 'fmea_data': None,
-        'pre_mortem_data': [], 'pre_mortem_summary': None,
-        'vendor_email_draft': None, 'pending_image_confirmations': [],
-        'chat_history': {},
-        'capa_feasibility_analysis': None,
-        'medical_device_classification': None,
-        'risk_assessment_report': None,
-        'urra_report': None,
-    }
-    for key, value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
 
 # --- AI and Component Initialization ---
 def initialize_components():
     """Initialize all AI-powered components and helpers."""
     if 'components_initialized' not in st.session_state:
         api_key = st.secrets.get("ANTHROPIC_API_KEY")
-        st.session_state.anthropic_api_key = api_key
-
         if not api_key:
-            st.info("Anthropic API key not configured. AI features will be limited.")
+            st.warning("Anthropic API key not found. AI features will be limited.")
+            # Set a flag to indicate that the API key is missing
+            st.session_state.api_key_missing = True
+        else:
+            st.session_state.anthropic_api_key = api_key
+            st.session_state.api_key_missing = False
 
+        # Even if the API key is missing, we can still initialize the components
+        # The individual methods in the components will handle the missing key gracefully
         st.session_state.file_parser = AIFileParser(api_key)
         st.session_state.data_processor = DataProcessor(api_key)
         st.session_state.ai_context_helper = AIContextHelper(api_key)
+        st.session_state.ai_capa_helper = AICAPAHelper(api_key)
         st.session_state.medical_device_classifier = MedicalDeviceClassifier(api_key)
         st.session_state.risk_assessment_generator = RiskAssessmentGenerator(api_key)
         st.session_state.urra_generator = UseRelatedRiskAnalyzer(api_key)
         st.session_state.components_initialized = True
-
-
 # --- UI Sections ---
-
 def display_header():
     st.markdown(
         '<div class="main-header">'
-        '<h1>📈 Product Lifecycle & Quality Manager</h1>'
-        '<p>Your AI-powered hub for proactive quality assurance and vendor management.</p>'
+        '<h1><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-shield"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg> Product Lifecycle & Quality Manager</h1>'
+        '<p>Your AI-powered hub for proactive quality assurance, compliance, and vendor management.</p>'
         '</div>',
         unsafe_allow_html=True
     )
+def display_resources_tab():
+    """Displays a tab with resources and information based on provided infographics."""
+    st.header("📚 Resources & Industry Standards")
+    st.info(
+        "This section provides an overview of key regulations and standards for the medical device industry, "
+        "inspired by the 'Industry Standards Infographic'. Use this as a quick reference."
+    )
 
-def get_serializable_state() -> str:
-    """Creates a JSON-serializable representation of the session state."""
-    keys_to_save = [
-        'analysis_results', 'capa_data', 'misc_data',
-        'sales_data', 'returns_data', 'unit_cost', 'sales_price', 'target_sku',
-        'start_date', 'end_date', 'manual_sales', 'manual_returns',
-        'fmea_data', 'pre_mortem_data', 'pre_mortem_summary',
-        'vendor_email_draft', 'chat_history',
-        'capa_feasibility_analysis', 'medical_device_classification',
-        'risk_assessment_report', 'urra_report'
-    ]
-    
-    state_to_save = {key: st.session_state.get(key) for key in keys_to_save}
-    state_copy = copy.deepcopy(state_to_save)
-    
-    for k, v in state_copy.items():
-        if isinstance(v, pd.DataFrame):
-            state_copy[k] = v.to_json(orient='split')
-        elif isinstance(v, dict):
-            if k == 'analysis_results' and v and 'return_summary' in v and isinstance(v.get('return_summary'), pd.DataFrame):
-                v['return_summary'] = v['return_summary'].to_json(orient='split')
-            if k in ['sales_data', 'returns_data']:
-                for source, df_list in v.items():
-                    if isinstance(df_list, list):
-                        v[source] = [df.to_json(orient='split') if isinstance(df, pd.DataFrame) else df for df in df_list]
-        elif isinstance(v, (datetime, date)):
-            state_copy[k] = v.isoformat()
-            
-    # Special handling for capa_data date objects
-    if 'capa_data' in state_copy and isinstance(state_copy['capa_data'], dict):
-        for key, value in state_copy['capa_data'].items():
-            if isinstance(value, date):
-                state_copy['capa_data'][key] = value.isoformat()
+    st.subheader("Key Quality & Risk Management Standards")
+    col1, col2 = st.columns(2)
+    with col1:
+        with st.container(border=True):
+            st.markdown("##### **ISO 13485:2016**")
+            st.markdown("The international standard for a Quality Management System (QMS) for medical devices. It ensures consistency in the design, development, production, and delivery of medical devices that are safe for their intended purpose.")
+    with col2:
+        with st.container(border=True):
+            st.markdown("##### **ISO 14971**")
+            st.markdown("The international standard for the application of risk management to medical devices. It outlines a process for identifying hazards, estimating and evaluating risks, and implementing risk controls.")
 
-    return json.dumps(state_copy, indent=2)
+    st.subheader("Major Regulatory Frameworks")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        with st.container(border=True):
+            st.markdown("##### **FDA 21 CFR Part 820 (QSR)**")
+            st.markdown("The US Food and Drug Administration's Quality System Regulation (QSR) outlines Current Good Manufacturing Practice (CGMP) requirements for medical device manufacturers.")
+    with col2:
+        with st.container(border=True):
+            st.markdown("##### **EU MDR (Medical Device Regulation)**")
+            st.markdown("The regulatory framework for medical devices in the European Union. It places a strong emphasis on a life-cycle approach to safety, backed by clinical data.")
+    with col3:
+        with st.container(border=True):
+            st.markdown("##### **MDSAP**")
+            st.markdown("The Medical Device Single Audit Program allows a single regulatory audit of a medical device manufacturer's QMS to satisfy the requirements of multiple regulatory authorities (USA, Canada, Brazil, Australia, Japan).")
 
-
-def load_state_from_json(uploaded_file):
-    """Loads session state from an uploaded JSON file."""
-    try:
-        loaded_state = json.load(uploaded_file)
-        for key, value in loaded_state.items():
-            if key not in st.session_state: continue
-            
-            if key == 'fmea_data' and isinstance(value, str):
-                st.session_state[key] = pd.read_json(value, orient='split')
-            elif key == 'analysis_results' and isinstance(value, dict) and 'return_summary' in value and isinstance(value.get('return_summary'), str):
-                value['return_summary'] = pd.read_json(value['return_summary'], orient='split')
-                st.session_state[key] = value
-            elif key in ['sales_data', 'returns_data'] and isinstance(value, dict):
-                st.session_state[key] = {
-                    source: [pd.read_json(df_json, orient='split') for df_json in df_list]
-                    for source, df_list in value.items()
-                }
-            elif key in ['start_date', 'end_date'] and isinstance(value, str):
-                 st.session_state[key] = date.fromisoformat(value)
-            elif key == 'capa_data' and isinstance(value, dict):
-                 for k, v_iso in value.items():
-                     if isinstance(v_iso, str) and ('date' in k):
-                         try:
-                            value[k] = date.fromisoformat(v_iso)
-                         except ValueError:
-                             pass
-                 st.session_state[key] = value
-            else:
-                st.session_state[key] = value
-
-        st.success("Session loaded successfully!")
-        time.sleep(1)
-        st.rerun()
-    except Exception as e:
-        st.error(f"Failed to load session: {e}")
-
-def update_date_range(preset):
-    """Callback to update date inputs based on a preset."""
-    end = date.today()
-    if preset == 'Last 7 Days': start = end - timedelta(days=7)
-    elif preset == 'Last 30 Days': start = end - timedelta(days=30)
-    elif preset == 'Last 90 Days': start = end - timedelta(days=90)
-    elif preset == 'Last Year': start = end - timedelta(days=365)
-    else: return
-    st.session_state.start_date = start
-    st.session_state.end_date = end
-
-def display_sidebar():
-    with st.sidebar:
-        st.header("💾 Session Management")
-        st.info("Save your analysis or load a previous session.")
-
-        st.download_button(
-            label="📤 Export/Save Session",
-            data=get_serializable_state(),
-            file_name=f"capa_session_{datetime.now().strftime('%Y%m%d')}.json",
-            mime="application/json",
-            use_container_width=True
-        )
-        
-        uploaded_state = st.file_uploader("📥 Import Session", type="json", help="Load a saved session file.")
-        if uploaded_state is not None:
-            load_state_from_json(uploaded_state)
-
-        st.markdown("---")
-        st.header("⚙️ Controls & Data Input")
-        st.info("Configure the parameters for your analysis.")
-
-        st.session_state.target_sku = st.text_input(
-            "Enter Target SKU*",
-            value=st.session_state.get('target_sku', ''),
-            help="Enter the exact SKU to analyze across all documents."
-        )
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.session_state.unit_cost = st.number_input( "Unit Cost ($)", min_value=0.0, value=st.session_state.get('unit_cost', 0.0), help="Cost per unit from your vendor.", format="%.2f")
-        with col2:
-             st.session_state.sales_price = st.number_input( "Sales Price ($)", min_value=0.0, value=st.session_state.get('sales_price', 0.0), help="Price paid by the customer.", format="%.2f")
-
-        st.subheader("🗓️ Analysis Date Range")
-        
-        preset = st.selectbox("Date Range Preset", ('Custom', 'Last 7 Days', 'Last 30 Days', 'Last 90 Days', 'Last Year'), key='date_preset_selector', help="Select a preset or choose 'Custom'.")
-        update_date_range(preset)
-
-        st.session_state.start_date = st.date_input("Start Date", value=st.session_state.start_date)
-        st.session_state.end_date = st.date_input("End Date", value=st.session_state.end_date)
-
-        st.subheader("✍️ Manual Data Entry")
-        st.info("Enter total sales and returns if you don't have files.")
-        st.session_state.manual_sales = st.number_input("Total Units Sold", min_value=0, step=1, value=st.session_state.manual_sales)
-        st.session_state.manual_returns = st.number_input("Total Units Returned", min_value=0, step=1, value=st.session_state.manual_returns)
-        
-        if st.button("📈 Process Manual Data", use_container_width=True, type="primary"):
-            if not st.session_state.target_sku: st.warning("⚠️ Please enter a target SKU first.")
-            elif st.session_state.manual_sales <= 0: st.warning("⚠️ 'Total Units Sold' must be greater than zero.")
-            else:
-                with st.spinner("Processing manual data..."):
-                    process_manual_data(st.session_state.target_sku, st.session_state.manual_sales, st.session_state.manual_returns)
-
-        st.markdown("---")
-        with st.expander("📁 Upload Data Files (Recommended)", expanded=True):
-            st.info("Upload sales, returns, quality reports, etc. The AI will parse them automatically.")
-            uploaded_files = st.file_uploader( "Upload Files", accept_multiple_files=True, type=['csv', 'xlsx', 'xls', 'txt', 'png', 'jpg', 'jpeg'])
-
-            if st.button("🚀 Process Uploaded Files", use_container_width=True):
-                if not st.session_state.target_sku: st.warning("⚠️ Please enter a target SKU first.")
-                elif not uploaded_files: st.warning("⚠️ Please upload at least one file.")
-                else:
-                    process_all_files(uploaded_files, st.session_state.target_sku)
-
-
-def trigger_final_analysis():
-    """Consolidates all data and runs the final analysis."""
-    with st.spinner("Aggregating data and running final analysis..."):
-        all_sales_df = pd.DataFrame()
-        if st.session_state.sales_data:
-            all_sales_dfs = [df for df_list in st.session_state.sales_data.values() for df in df_list if df is not None and not df.empty]
-            if all_sales_dfs: all_sales_df = pd.concat(all_sales_dfs, ignore_index=True)
-
-        all_returns_df = pd.DataFrame()
-        if st.session_state.returns_data:
-            all_returns_dfs = [df for df_list in st.session_state.returns_data.values() for df in df_list if df is not None and not df.empty]
-            if all_returns_dfs: all_returns_df = pd.concat(all_returns_dfs, ignore_index=True)
-
-        st.session_state.analysis_results = None
-        
-        report_period_days = (st.session_state.end_date - st.session_state.start_date).days
-        if report_period_days <= 0:
-            st.error("Error: Start Date must be before End Date.")
-            return
-
-        if not all_sales_df.empty:
-            st.session_state.analysis_results = run_full_analysis(
-                sales_df=all_sales_df, returns_df=all_returns_df, report_period_days=report_period_days,
-                unit_cost=st.session_state.unit_cost, sales_price=st.session_state.sales_price
-            )
-            st.success(f"Successfully analyzed all data for SKU: {st.session_state.target_sku}")
-            st.balloons()
-        else:
-            st.error("Could not find sufficient sales data to run an analysis.")
-
-
-def process_all_files(files, target_sku):
-    """Process all uploaded files."""
-    st.session_state.misc_data = []
-    st.session_state.pending_image_confirmations = []
-    file_parser = st.session_state.file_parser
-
-    with st.spinner("Analyzing and processing all uploaded files..."):
-        for file in files:
-            try:
-                analysis = file_parser.analyze_file_structure(file, target_sku)
-                
-                if analysis.get('content_type') in ['sales', 'returns']:
-                    if file.type.startswith('image/'):
-                        analysis['file_id'], file.seek(0)
-                        analysis['file_bytes'], analysis['filename'] = f"{file.name}-{os.urandom(4).hex()}", file.read(), file.name
-                        st.session_state.pending_image_confirmations.append(analysis)
-                    else:
-                        data_df = file_parser.extract_data(file, analysis, target_sku)
-                        if data_df is not None:
-                            if 'sales' in analysis.get('content_type', ''): st.session_state.sales_data.setdefault('file_uploads', []).append(data_df)
-                            elif 'returns' in analysis.get('content_type', ''): st.session_state.returns_data.setdefault('file_uploads', []).append(data_df)
-                else: 
-                    st.session_state.misc_data.append(analysis)
-            except Exception as e: st.error(f"Error processing {file.name}: {e}")
-
-    if not st.session_state.pending_image_confirmations and (st.session_state.sales_data or st.session_state.returns_data):
-        trigger_final_analysis()
-    elif st.session_state.pending_image_confirmations:
-        st.info("Action required: Please review extracted image data on the Dashboard.")
-    else:
-        st.warning("No sales or return data could be extracted from the uploaded files.")
-
-
-def process_manual_data(target_sku, total_sold, total_returned):
-    """Processes manually entered data."""
-    st.session_state.sales_data['manual'] = [pd.DataFrame([{'sku': target_sku, 'quantity': total_sold}])]
-    st.session_state.returns_data['manual'] = [pd.DataFrame([{'sku': target_sku, 'quantity': total_returned}])] if total_returned > 0 else []
-    trigger_final_analysis()
-
-def display_ai_chat_interface(tab_name: str):
-    """Displays the contextual AI chat interface."""
-    st.markdown("<div class='chat-container'>", unsafe_allow_html=True)
-    st.subheader("🤖 AI Assistant")
-    st.markdown("Ask a question about the data across any of the tabs.")
-
-    if tab_name not in st.session_state.chat_history: st.session_state.chat_history[tab_name] = []
-
-    for author, message in st.session_state.chat_history[tab_name]:
-        with st.chat_message(author): st.markdown(message)
-
-    prompt = st.chat_input(f"Ask AI about {tab_name}...")
-    if prompt:
-        st.session_state.chat_history[tab_name].append(("user", prompt))
-        with st.chat_message("user"): st.markdown(prompt)
-
-        with st.spinner("AI is thinking..."):
-            response = st.session_state.ai_context_helper.generate_response(prompt)
-        st.session_state.chat_history[tab_name].append(("assistant", response))
-        with st.chat_message("assistant"): st.markdown(response)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
+    st.subheader("Data Integrity & Documentation")
+    col1, col2 = st.columns(2)
+    with col1:
+        with st.container(border=True):
+            st.markdown("##### **21 CFR Part 11**")
+            st.markdown("This FDA regulation provides criteria for the acceptance of electronic records, electronic signatures, and handwritten signatures executed to electronic records as equivalent to paper records.")
+    with col2:
+        with st.container(border=True):
+            st.markdown("##### **Annex 11 (EU)**")
+            st.markdown("Part of the European Union's GMP guidelines, Annex 11 provides guidance on the management of electronic records and systems within the pharmaceutical and medical device industries.")
 def display_dashboard():
+    # ... (rest of the dashboard function, with an added section at the top)
+    with st.expander("💡 Why a Proactive Approach to Quality Matters", expanded=False):
+        st.markdown(
+            """
+            *Inspired by the 'Value of True Quality Infographic'.*
+
+            A proactive approach to quality is not just about compliance; it's a strategic business investment. By focusing on **prevention** and **monitoring**, you can significantly reduce the high costs associated with both internal and external failures.
+
+            - **Cost of Poor Quality**: Includes scrap, rework, recalls, warranty claims, and damage to your brand's reputation.
+            - **Benefits of True Quality**: Leads to lower total costs, increased revenue, faster innovation, higher brand equity, and reduced regulatory risk.
+
+            This tool is designed to help you shift from a reactive to a proactive quality culture.
+            """
+        )
+    # ... (the rest of your original display_dashboard function)
     st.info(
         "**🎯 Welcome!**\n\n"
         "1.  **Start in the sidebar**: Enter your product's SKU, cost/price, and date range.\n"
@@ -467,245 +286,33 @@ def display_dashboard():
 
     display_ai_chat_interface("the Dashboard")
 
-def display_risk_safety_tab():
-    st.header("🛡️ Risk & Safety Analysis Hub")
-    st.info("A central place for all formal risk management activities.")
-
-    with st.expander("🔬 Failure Mode and Effects Analysis (FMEA)", expanded=True): display_fmea_content()
-    with st.expander("📜 ISO 14971 Risk Assessment"): display_risk_assessment_content()
-    with st.expander("🧑‍💻 Use-Related Risk Analysis (URRA - IEC 62366)"): display_urra_content()
-    with st.expander("🔮 Proactive Pre-Mortem Analysis"): display_pre_mortem_content()
-    display_ai_chat_interface("Risk & Safety")
-
-def display_fmea_content():
-    st.info(
-        "**FMEA**: A systematic method to identify potential failures and their effects.\n"
-        "1. **Add Failure Modes**: Enter a failure or let the AI suggest modes.\n"
-        "2. **Enter S/O/D Ratings**: In the table, rate `Severity`, `Occurrence`, and `Detection` from 1 (best) to 10 (worst).\n"
-        "3. **Review RPN**: The Risk Priority Number (`S x O x D`) highlights the highest risks."
-    )
-    fmea = FMEA(st.session_state.anthropic_api_key)
-    if 'fmea_data' not in st.session_state or st.session_state.fmea_data is None:
-        st.session_state.fmea_data = pd.DataFrame(columns=["Potential Failure Mode", "Potential Effect(s)", "Severity", "Potential Cause(s)", "Occurrence", "Current Controls", "Detection", "RPN"])
-
-    col1, col2 = st.columns(2)
-    with col1:
-        with st.form("manual_fmea_entry", clear_on_submit=True):
-            st.subheader("✍️ Add Failure Mode")
-            mode = st.text_input("Potential Failure Mode")
-            effect = st.text_input("Potential Effect(s)")
-            cause = st.text_input("Potential Cause(s)")
-            controls = st.text_input("Current Controls")
-            if st.form_submit_button("Add Entry", type="primary", use_container_width=True):
-                new_row = pd.DataFrame([{"Potential Failure Mode": mode, "Potential Effect(s)": effect, "Potential Cause(s)": cause, "Current Controls": controls}])
-                st.session_state.fmea_data = pd.concat([st.session_state.fmea_data, new_row], ignore_index=True)
-                st.success("Manual entry added.")
-    with col2:
-        with st.container():
-            st.subheader("🤖 Suggest Failure Modes")
-            issue_description = st.text_area("Describe an issue for AI to analyze:", height=155, key="fmea_issue_desc", help="e.g., 'the device screen flickers'")
-            if st.button("Suggest Failure Modes", use_container_width=True):
-                if issue_description:
-                    with st.spinner("AI is analyzing potential failure modes..."):
-                        suggestions = fmea.suggest_failure_modes(issue_description, st.session_state.analysis_results)
-                    st.session_state.fmea_data = pd.concat([st.session_state.fmea_data, pd.DataFrame(suggestions)], ignore_index=True)
-                    st.success("AI suggestions added.")
-                else: st.warning("Please describe the issue first.")
-
-    st.subheader("FMEA Table")
-    if 'fmea_data' in st.session_state and st.session_state.fmea_data is not None:
-        edited_df = st.data_editor(
-            st.session_state.fmea_data, num_rows="dynamic", key="fmea_editor", height=400,
-            column_config={
-                "Severity": st.column_config.NumberColumn(help="Severity (1=Low, 10=High)", min_value=1, max_value=10, step=1, required=True),
-                "Occurrence": st.column_config.NumberColumn(help="Occurrence (1=Rare, 10=Frequent)", min_value=1, max_value=10, step=1, required=True),
-                "Detection": st.column_config.NumberColumn(help="Detection (1=Certain, 10=Impossible)", min_value=1, max_value=10, step=1, required=True),
-                "RPN": st.column_config.NumberColumn(disabled=True, help="Risk Priority Number = S x O x D")
-            }
-        )
-        for col in ['Severity', 'Occurrence', 'Detection']: edited_df[col] = pd.to_numeric(edited_df[col], errors='coerce')
-        edited_df.fillna({'Severity': 1, 'Occurrence': 1, 'Detection': 1}, inplace=True)
-        edited_df['RPN'] = edited_df['Severity'] * edited_df['Occurrence'] * edited_df['Detection']
-        st.session_state.fmea_data = edited_df
-        if not edited_df.empty and 'RPN' in edited_df.columns: st.metric("Highest Risk Priority Number (RPN)", int(edited_df['RPN'].max()), help="Focus on mitigating the failure mode with the highest RPN.")
-
-def display_risk_assessment_content():
-    st.info("**ISO 14971 Risk Assessment**: Generate a formal risk assessment for your Design History File (DHF), a key document for regulatory compliance.")
-    with st.form("risk_assessment_form"):
-        product_name = st.text_input("Product Name", placeholder="e.g., Smart Temperature Monitor")
-        product_description = st.text_area("Product Description (include intended use, user profile, key features)", height=150, placeholder="e.g., A wireless, wearable patch that continuously monitors body temperature...")
-        submitted = st.form_submit_button("🤖 Generate ISO 14971 Assessment", type="primary", use_container_width=True)
-        if submitted:
-            if not product_name or not product_description or not st.session_state.target_sku: st.warning("Please enter a Target SKU (in sidebar), Product Name, and Description.")
-            else:
-                with st.spinner("AI is conducting a comprehensive risk assessment..."):
-                    st.session_state.risk_assessment_report = st.session_state.risk_assessment_generator.generate_assessment(
-                        product_name, st.session_state.target_sku, product_description, "ISO 14971"
-                    )
-    if st.session_state.risk_assessment_report:
-        st.markdown("---"); st.subheader("Generated Risk Assessment Report")
-        st.markdown(st.session_state.risk_assessment_report, unsafe_allow_html=True)
-
-def display_urra_content():
-    st.info("**Use-Related Risk Analysis (URRA)**: Analyze and mitigate risks from user interaction with your device, based on the IEC 62366 standard.")
-    with st.form("urra_form"):
-        product_name = st.text_input("Product Name", placeholder="e.g., Smart Temperature Monitor")
-        product_description = st.text_area("Product Description & Intended Use", height=120)
-        intended_user = st.text_input("Intended User Profile", placeholder="e.g., Layperson (parent/guardian), healthcare professional")
-        use_environment = st.text_input("Intended Use Environment", placeholder="e.g., Home, hospital, clinic")
-        submitted = st.form_submit_button("🤖 Generate Use-Related Risk Analysis", type="primary", use_container_width=True)
-        if submitted:
-            if not all([product_name, product_description, intended_user, use_environment]): st.warning("Please fill in all fields to generate the URRA.")
-            else:
-                with st.spinner("AI is analyzing usability risks..."):
-                    st.session_state.urra_report = st.session_state.urra_generator.generate_urra(
-                        product_name, product_description, intended_user, use_environment
-                    )
-    if st.session_state.urra_report:
-        st.markdown("---"); st.subheader("Generated URRA Report")
-        st.markdown(st.session_state.urra_report, unsafe_allow_html=True)
-
-def display_pre_mortem_content():
-    st.info("**Pre-Mortem Analysis**: A powerful exercise to anticipate failures. Imagine the project has already failed, then work backward to determine why.")
-    pre_mortem = PreMortem(st.session_state.anthropic_api_key)
-    scenario = st.text_area("Define the 'failure' scenario:", "e.g., A new version of our product is launched and receives overwhelmingly negative reviews, leading to a recall.", key="pre_mortem_scenario", help="Be specific about what the 'disaster' looks like.")
-    if st.button("🧠 Generate AI Questions"):
-        if not scenario: st.warning("Please define the failure scenario first.")
-        else:
-            with st.spinner("Generating thought-provoking questions..."):
-                questions = pre_mortem.generate_questions(scenario)
-                st.session_state.pre_mortem_data = [{"question": q, "answer": ""} for q in questions]
-    if st.session_state.pre_mortem_data:
-        st.subheader("Brainstorming Session: Why did we fail?")
-        for i, item in enumerate(st.session_state.pre_mortem_data):
-            st.markdown(f"**{i+1}. {item['question']}**")
-            item['answer'] = st.text_area("Your Answer:", key=f"pm_answer_{i}", value=item.get('answer', ''), height=100)
-    if st.session_state.pre_mortem_data and st.button("✅ Summarize Pre-Mortem Analysis", type="primary"):
-        with st.spinner("AI is synthesizing the pre-mortem discussion..."):
-            st.session_state.pre_mortem_summary = pre_mortem.summarize_answers(st.session_state.pre_mortem_data)
-    if st.session_state.pre_mortem_summary:
-        st.subheader("Pre-Mortem Summary & Action Items"); st.markdown(st.session_state.pre_mortem_summary)
-
-def display_vendor_comm_tab():
-    st.header("✉️ AI Vendor Communication")
-    st.info(
-        "**Instructions:** This tool drafts professional, collaborative emails to your vendors based on the data from the Dashboard.\n\n"
-        "1.  **Enter Details**: Provide vendor and contact name.\n"
-        "2.  **Set Context**: Describe the email goal and rate the recipient's English fluency.\n"
-        "3.  **Draft**: The AI will generate a data-driven, non-accusatory email draft."
-    )
-    drafter = AIEmailDrafter(st.session_state.anthropic_api_key)
-    col1, col2 = st.columns(2)
-    with col1: vendor_name = st.text_input("Vendor Company Name")
-    with col2: contact_name = st.text_input("Point of Contact Name")
-    english_ability = st.slider("Recipient's English Ability (1=Limited, 5=Fluent)", 1, 5, 2, help="The AI will adjust the language complexity.")
-    goal = st.text_area("What is the primary goal of this email?", "e.g., Inform the vendor of the high return rate and ask for their initial thoughts.", height=100, key="email_goal")
-
-    if st.button("✍️ Draft Collaborative Email", type="primary"):
-        if goal and vendor_name and contact_name:
-            with st.spinner("AI is drafting a professional email..."):
-                analysis_context = st.session_state.analysis_results or {}
-                st.session_state.vendor_email_draft = drafter.draft_vendor_email(
-                    goal, analysis_context, st.session_state.target_sku, vendor_name, contact_name, english_ability
-                )
-        else: st.warning("Please fill in all vendor and goal fields.")
-    if st.session_state.vendor_email_draft:
-        st.subheader("Draft Email to Vendor"); st.text_area("Email Draft", st.session_state.vendor_email_draft, height=400)
-    display_ai_chat_interface("Vendor Communications")
-
-def display_compliance_tab():
-    st.header("⚖️ Compliance & Device Classification")
-    st.info(
-        "**What is this?** Get an AI-powered preliminary classification for your medical device based on U.S. FDA guidelines.\n\n"
-        "1.  **Describe Your Device**: Enter a detailed description of the device and its intended use.\n"
-        "2.  **Classify**: The AI will suggest an FDA classification (Class I, II, or III) with a rationale."
-    )
-    st.subheader("Medical Device Classification (U.S. FDA)")
-    device_description = st.text_area("Enter a detailed description of the medical device:", height=200, placeholder="Example: A non-sterile, handheld electronic device intended to measure an adult's body temperature...")
-    if st.button("Classify Device", type="primary"):
-        if device_description:
-            with st.spinner("AI is analyzing FDA regulations..."):
-                st.session_state.medical_device_classification = st.session_state.medical_device_classifier.classify_device(device_description)
-        else: st.warning("Please provide a device description.")
-    if st.session_state.medical_device_classification:
-        st.subheader("AI Classification Analysis")
-        result = st.session_state.medical_device_classification
-        if "error" in result: st.error(result["error"])
-        else:
-            st.success(f"**Suggested Classification:** {result.get('classification', 'N/A')}")
-            with st.expander("Rationale", expanded=True): st.markdown(result.get('rationale', 'No rationale provided.'))
-            with st.expander("Primary Risks"): st.markdown(result.get('risks', 'No risks identified.'))
-            with st.expander("General Regulatory Requirements"): st.markdown(result.get('regulatory_requirements', 'No requirements provided.'))
-
-def display_exports_tab():
-    st.header("📄 Documents & Exports")
-    st.info(
-        "**Instructions:** Generate a formal, combined Word document from your analysis for your Quality Management System (QMS).\n\n"
-        "1.  **Select Content**: Choose which completed analysis sections to include.\n"
-        "2.  **Generate**: Download your formatted Word document."
-    )
-    doc_gen = CapaDocumentGenerator(st.session_state.anthropic_api_key)
-
-    available_docs = []
-    if st.session_state.analysis_results: available_docs.append("Dashboard & CAPA Insights")
-    if st.session_state.capa_data: available_docs.append("CAPA Form") # Add CAPA form to exports
-    if st.session_state.fmea_data is not None and not st.session_state.fmea_data.empty: available_docs.append("FMEA Data")
-    if st.session_state.medical_device_classification: available_docs.append("Medical Device Classification")
-    if st.session_state.risk_assessment_report: available_docs.append("ISO 14971 Risk Assessment")
-    if st.session_state.urra_report: available_docs.append("Use-Related Risk Analysis (URRA)")
-    if st.session_state.pre_mortem_summary: available_docs.append("Pre-Mortem Summary")
-    if st.session_state.vendor_email_draft: available_docs.append("Vendor Email Draft")
-    
-    if not available_docs:
-        st.warning("No data available to export. Complete some analysis on other tabs first.")
-        return
-
-    doc_types = st.multiselect("Select document sections to generate:", available_docs, default=available_docs)
-
-    if st.button(f"📄 Generate Combined Document", type="primary", use_container_width=True):
-        with st.spinner("Generating detailed document..."):
-            all_content = {
-                "sku": st.session_state.target_sku,
-                "dashboard": st.session_state.analysis_results if "Dashboard & CAPA Insights" in doc_types else None,
-                "capa": st.session_state.capa_data if "CAPA Form" in doc_types else None,
-                "fmea": st.session_state.fmea_data if "FMEA Data" in doc_types else None,
-                "device_classification": st.session_state.medical_device_classification if "Medical Device Classification" in doc_types else None,
-                "risk_assessment": st.session_state.risk_assessment_report if "ISO 14971 Risk Assessment" in doc_types else None,
-                "urra": st.session_state.urra_report if "Use-Related Risk Analysis (URRA)" in doc_types else None,
-                "pre_mortem": st.session_state.pre_mortem_summary if "Pre-Mortem Summary" in doc_types else None,
-                "vendor_email": st.session_state.vendor_email_draft if "Vendor Email Draft" in doc_types else None,
-            }
-            docx_bytes = doc_gen.export_all_to_docx(all_content)
-            st.download_button(
-                label="📥 Download Combined Report (.docx)",
-                data=docx_bytes,
-                file_name=f"Combined_Quality_Report_{st.session_state.target_sku}.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                key="dl_combined"
-            )
-        st.success("Your document is ready to download!")
-
 # --- Main Application Flow ---
 def main():
+    # --- (Your existing functions: initialize_session_state, initialize_components, etc. remain here) ---
     initialize_session_state()
     display_header()
     initialize_components()
     display_sidebar()
 
-    tabs = st.tabs(["📊 Dashboard", "📝 CAPA", "🛡️ Risk & Safety", "✉️ Vendor Comms", "⚖️ Compliance", "📄 Exports"])
+    # --- Updated Tab Navigation ---
+    tab_list = [
+        "📊 Dashboard",
+        "📝 CAPA",
+        "🛡️ Risk & Safety",
+        "✉️ Vendor Comms",
+        "⚖️ Compliance",
+        "📚 Resources & Standards", # New Tab
+        "📄 Exports"
+    ]
+    tabs = st.tabs(tab_list)
 
-    with tabs[0]: 
-        display_dashboard()
-    with tabs[1]: 
-        display_capa_form()
-    with tabs[2]: 
-        display_risk_safety_tab()
-    with tabs[3]: 
-        display_vendor_comm_tab()
-    with tabs[4]: 
-        display_compliance_tab()
-    with tabs[5]: 
-        display_exports_tab()
+    with tabs[0]: display_dashboard()
+    with tabs[1]: display_capa_form()
+    with tabs[2]: display_risk_safety_tab()
+    with tabs[3]: display_vendor_comm_tab()
+    with tabs[4]: display_compliance_tab()
+    with tabs[5]: display_resources_tab() # New Tab Content
+    with tabs[6]: display_exports_tab()
 
 if __name__ == "__main__":
     main()

@@ -1,108 +1,263 @@
-# src/capa_form.py
+# src/ai_capa_helper.py
 
-import streamlit as st
-from datetime import date
-from .compliance import validate_capa_data
+import json
+from typing import Dict, Optional
+import openai
+from .utils import retry_with_backoff
 
-def display_capa_form():
-    """
-    Displays an internationally compliant CAPA form, structured as a guided workflow,
-    with AI assistance and a submission button that uses proper validation.
-    """
-    st.header("📝 Corrective and Preventive Action (CAPA) Workflow")
-    st.info(
-        "This guided workflow follows the risk-based CAPA process outlined in industry best practices. "
-        "Complete each section to build a comprehensive and compliant CAPA record."
-    )
+class AICAPAHelper:
+    """AI assistant for generating CAPA form suggestions using OpenAI."""
 
-    if 'capa_data' not in st.session_state:
-        st.session_state.capa_data = {}
-    data = st.session_state.capa_data
+    def __init__(self, api_key: Optional[str] = None): #<-- FIX: api_key parameter was missing
+        """Initialize with OpenAI API key."""
+        self.client = None
+        if api_key:
+            try:
+                self.client = openai.OpenAI(api_key=api_key)
+                self.model = "gpt-4o"
+            except Exception as e:
+                print(f"Failed to initialize AI helper: {e}")
 
-    # --- AI Assistance Button ---
-    if not st.session_state.get('api_key_missing', True):
-        if st.button("🤖 Get AI Suggestions for CAPA Form", help="Uses AI to fill in key fields based on the dashboard data."):
-            if st.session_state.get('analysis_results'):
-                with st.spinner("AI is generating CAPA suggestions..."):
-                    return_summary = st.session_state.analysis_results.get('return_summary')
-                    if return_summary is not None and not return_summary.empty:
-                        issue_summary = f"High return rate of {return_summary.iloc[0]['return_rate']:.2f}% for SKU {st.session_state.target_sku}."
-                        suggestions = st.session_state.ai_capa_helper.generate_capa_suggestions(
-                            issue_summary,
-                            st.session_state.analysis_results
-                        )
-                        st.session_state.capa_data.update(suggestions)
-                        st.success("AI suggestions have been added to the form.")
-                        st.rerun()
-                    else:
-                        st.warning("Analysis results are incomplete. Cannot generate suggestions.")
-            else:
-                st.warning("Please analyze some data on the dashboard first to provide context for the AI.")
+    @retry_with_backoff()
+    def generate_capa_suggestions(self, issue_summary: str, analysis_results: Dict) -> Dict[str, str]:
+        """Generate AI suggestions for CAPA form fields."""
+        if not self.client: return {}
 
-    # --- Workflow Step 1: Initiation ---
-    # FIX: Corrected expander labels to use emojis, not broken icon codes.
-    with st.expander("📂 Step 1: CAPA Initiation & Problem Description", expanded=True):
-        st.markdown("##### **1.1 Identification**")
-        col1, col2 = st.columns(2)
-        with col1:
-            data['capa_number'] = st.text_input("CAPA Number", value=data.get('capa_number', ''), help="Unique identifier, e.g., CAPA-YYYYMMDD-001.")
-            data['product_name'] = st.text_input("Product Name/Model", value=data.get('product_name', st.session_state.get('target_sku', '')), help="Name of the affected product.")
-        with col2:
-            data['date'] = st.date_input("Initiation Date", value=data.get('date', date.today()))
-            data['prepared_by'] = st.text_input("Prepared By", value=data.get('prepared_by', ''), help="Name/title of the person initiating the CAPA.")
+        summary = analysis_results.get('return_summary', {}).iloc[0] if not analysis_results.get('return_summary', {}).empty else {}
+        context = f"""
+        Issue Summary: {issue_summary}
+        SKU: {summary.get('sku', 'N/A')}
+        Return Rate: {summary.get('return_rate', 0):.2f}%
+        Total Returns: {int(summary.get('total_returned', 0))}
+        """
 
-        data['source_of_issue'] = st.selectbox("Source of Issue", ["Internal Audit", "Customer Complaint", "Non-conforming Product", "Management Review", "Trend Analysis", "Other"])
-
-        st.markdown("##### **1.2 Problem Description**")
-        data['issue_description'] = st.text_area("Detailed Description of Non-conformity", height=150, value=data.get('issue_description', ''))
-
-        st.markdown("##### **1.3 Immediate Actions & Containment**")
-        data['immediate_containment_actions'] = st.text_area("Immediate Actions/Containment", height=100, value=data.get('immediate_containment_actions', ''))
-
-    # --- Workflow Step 2: Investigation ---
-    with st.expander("🔍 Step 2: Investigation & Root Cause Analysis"):
-        st.markdown("##### **2.1 Risk Assessment**")
-        r_col1, r_col2 = st.columns(2)
-        data['risk_severity'] = r_col1.slider("Severity of Potential Harm", 1, 5, value=data.get('risk_severity', 3))
-        data['risk_probability'] = r_col2.slider("Probability of Occurrence", 1, 5, value=data.get('risk_probability', 3))
-        st.metric("Calculated Risk Priority", f"{data.get('risk_severity', 3) * data.get('risk_probability', 3)}")
-
-        st.markdown("##### **2.2 Root Cause Analysis (RCA)**")
-        data['root_cause'] = st.text_area("Root Cause Analysis Findings", height=200, value=data.get('root_cause', ''))
-
-    # --- Workflow Step 3: Action Plan ---
-    with st.expander("🛠️ Step 3: Corrective & Preventive Action Plan"):
-        st.markdown("##### **3.1 Corrective Action Plan**")
-        data['corrective_action'] = st.text_area("Corrective Action(s)", height=150, value=data.get('corrective_action', ''))
-        st.markdown("##### **3.2 Preventive Action Plan**")
-        data['preventive_action'] = st.text_area("Preventive Action(s)", height=150, value=data.get('preventive_action', ''))
-
-    # --- Workflow Step 4: Verification & Closure ---
-    with st.expander("✅ Step 4: Verification of Effectiveness & Closure"):
-        st.markdown("##### **4.1 Verification of Effectiveness**")
-        data['effectiveness_verification_plan'] = st.text_area("Verification Plan", height=150, value=data.get('effectiveness_verification_plan', ''))
-        st.markdown("##### **4.2 CAPA Closure**")
-        c_col1, c_col2 = st.columns(2)
-        data['closed_by'] = c_col1.text_input("Closed By", value=data.get('closed_by', ''))
-        data['closure_date'] = c_col2.date_input("Closure Date", value=data.get('closure_date', date.today()))
-
-    st.session_state.capa_data = data
-    data['sku'] = st.session_state.target_sku
-    data['product'] = data.get('product_name')
-
-    # --- Submission Button ---
-    st.markdown("---")
-    if st.button("🚀 Validate & Submit CAPA Report", type="primary"):
-        is_valid, errors, warnings = validate_capa_data(st.session_state.capa_data)
-
-        if warnings:
-            for warning in warnings:
-                st.warning(f"**Suggestion:** {warning}")
+        system_prompt = """
+        You are a medical device quality expert helping to complete a CAPA form based on the provided context.
+        Generate content for each CAPA field following ISO 13485, FDA 21 CFR 820.100, and EU MDR standards.
+        Return ONLY a valid JSON object with keys for the most critical fields: "issue_description", "root_cause_analysis", "corrective_action", "preventive_action", and "effectiveness_verification_plan".
+        """
+        user_prompt = f"Here is the context for the CAPA form:\n{context}"
         
-        if not is_valid:
-            st.error("**Validation Error:** Please fix the following issues before submitting:")
-            for error in errors:
-                st.error(f"- {error}")
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                max_tokens=2000,
+                response_format={"type": "json_object"}
+            )
+            return json.loads(response.choices[0].message.content)
+        except Exception as e:
+            print(f"Error generating CAPA suggestions: {e}")
+            return {}
+
+class AIEmailDrafter:
+    """AI assistant for drafting vendor communications using OpenAI."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.client = None
+        if api_key:
+            try:
+                self.client = openai.OpenAI(api_key=api_key)
+                self.model = "gpt-4o"
+            except Exception as e:
+                print(f"Failed to initialize AI Email Drafter: {e}")
+
+    @retry_with_backoff()
+    def draft_vendor_email(self, goal: str, analysis_results: Dict, sku: str,
+                           vendor_name: str, contact_name: str, english_ability: int) -> str:
+        """Drafts a conservative and collaborative email to a vendor."""
+        if not self.client:
+            return "AI client not initialized. Please configure the API key."
+
+        summary = analysis_results.get('return_summary', {}).iloc[0] if not analysis_results.get('return_summary', {}).empty else {}
+        context = f"""
+        - Product SKU: {sku}
+        - Recent Return Rate: {summary.get('return_rate', 0):.2f}%
+        - Total Units Sold (period): {int(summary.get('total_sold', 0))}
+        - Total Units Returned (period): {int(summary.get('total_returned', 0))}
+        - AI Insights: {analysis_results.get('insights', 'N/A')}
+        """
+        
+        if english_ability <= 2:
+            language_instruction = "IMPORTANT: The recipient has limited English proficiency. Use very simple words, short sentences, and basic grammar. Avoid jargon, idioms, and complex phrasing."
+        elif english_ability == 3:
+            language_instruction = "Use clear and professional language, but avoid overly complex terminology."
         else:
-            st.success("🎉 CAPA report submitted successfully! All required fields are complete.")
-            st.balloons()
+            language_instruction = "Use standard professional business English."
+
+        system_prompt = f"""
+        You are a quality assurance manager writing an email to a valued manufacturing partner, {vendor_name}.
+        Your tone must be super reasonable, conservative, and collaborative, NOT demanding or accusatory.
+        The goal is to start a productive, data-driven conversation to solve a problem together.
+        Recipient's English Ability: {english_ability}/5. {language_instruction}
+        Draft a professional email to {contact_name}.
+        - Start politely.
+        - Present key data concisely.
+        - Frame the issue as a mutual challenge.
+        - Ask for their perspective and suggestions for a joint investigation.
+        - Do not assign blame or demand specific actions.
+        - End with a collaborative closing statement.
+        Return only the full email text.
+        """
+        user_prompt = f"**Email Goal:** {goal}\n\n**Data Context:**\n{context}"
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                max_tokens=1500,
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"Error drafting vendor email: {e}")
+            return f"An error occurred while drafting the email: {e}"
+
+class MedicalDeviceClassifier:
+    """Classifies medical devices based on FDA regulations using OpenAI."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.client = None
+        if api_key:
+            try:
+                self.client = openai.OpenAI(api_key=api_key)
+                self.model = "gpt-4o"
+            except Exception as e:
+                print(f"Failed to initialize Medical Device Classifier: {e}")
+
+    @retry_with_backoff()
+    def classify_device(self, device_description: str) -> Dict[str, str]:
+        """Classifies a medical device, providing rationale, risks, and requirements."""
+        if not self.client:
+            return {"error": "AI client is not initialized."}
+
+        system_prompt = """
+        You are an expert consultant specializing in U.S. FDA medical device classification.
+        Analyze the device description and determine its classification, referencing 21 CFR parts 862-892.
+        Return a single, valid JSON object with the following exact keys:
+        - "classification": The most likely FDA class (e.g., "Class I", "Class II"). State if exempt from 510(k).
+        - "rationale": A detailed explanation for the classification, referencing the relevant regulation number (e.g., 21 CFR 880.2910).
+        - "risks": A bulleted list of the primary risks to the patient or user.
+        - "regulatory_requirements": A bulleted list of general regulatory controls required (e.g., General Controls, Special Controls).
+        Return ONLY the valid JSON object.
+        """
+        user_prompt = f"**Device Description:**\n{device_description}"
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                max_tokens=2500,
+                temperature=0.2,
+                response_format={"type": "json_object"}
+            )
+            return json.loads(response.choices[0].message.content)
+        except Exception as e:
+            print(f"Error classifying device: {e}")
+            return {"error": f"Failed to classify the device due to an AI model error: {e}"}
+
+class RiskAssessmentGenerator:
+    """Generates risk assessments based on ISO 14971 using OpenAI."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.client = None
+        if api_key:
+            try:
+                self.client = openai.OpenAI(api_key=api_key)
+                self.model = "gpt-4o"
+            except Exception as e:
+                print(f"Failed to initialize Risk Assessment Generator: {e}")
+
+    @retry_with_backoff()
+    def generate_assessment(self, product_name: str, sku: str, product_description: str, assessment_type: str) -> str:
+        """Generates a risk assessment report."""
+        if not self.client:
+            return "Error: AI client for Risk Assessment is not initialized."
+
+        system_prompt = """
+        You are a certified risk management expert for medical devices (ISO 14971).
+        Generate a formal risk assessment as a Markdown table.
+        Columns: `Hazard`, `Foreseeable Sequence of Events`, `Hazardous Situation`, `Potential Harm`, `Severity (S)`, `Probability (P)`, `Risk Level`, and `Proposed Mitigation`.
+        - Identify at least 5-7 relevant risks.
+        - Use a 1-5 scale for Severity and Probability.
+        - Determine Risk Level (Low, Medium, High).
+        - Propose a concrete Mitigation for each risk.
+        """
+        user_prompt = f"""
+        **Product Information:**
+        - **Product Name:** {product_name}
+        - **SKU:** {sku}
+        - **Product Description & Intended Use:** {product_description}
+        - **Assessment Standard(s):** {assessment_type}
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                max_tokens=3000,
+                temperature=0.3
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"Error generating risk assessment: {e}")
+            return f"An error occurred while generating the risk assessment: {e}"
+
+class UseRelatedRiskAnalyzer:
+    """Generates a Use-Related Risk Analysis (URRA) based on IEC 62366 using OpenAI."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.client = None
+        if api_key:
+            try:
+                self.client = openai.OpenAI(api_key=api_key)
+                self.model = "gpt-4o"
+            except Exception as e:
+                print(f"Failed to initialize Use-Related Risk Analyzer: {e}")
+    
+    @retry_with_backoff()
+    def generate_urra(self, product_name: str, product_description: str, intended_user: str, use_environment: str) -> str:
+        """Generates a URRA report."""
+        if not self.client:
+            return "Error: AI client for Use-Related Risk Analysis is not initialized."
+
+        system_prompt = """
+        You are a human factors engineering expert (IEC 62366).
+        Generate a formal Use-Related Risk Analysis (URRA) in a Markdown table.
+        Columns: `Use Task`, `Potential Use Error`, `Foreseeable Consequences`, `Potential Harm`, `Severity (S)`, `Probability (P)`, `Risk Level`, and `Proposed Mitigation/Design Recommendation`.
+        - Identify 5-7 critical use tasks.
+        - For each, brainstorm use errors and consequences.
+        - Assign Severity and Probability (1-5) and determine Risk Level.
+        - Provide actionable design recommendations to mitigate the error.
+        """
+        user_prompt = f"""
+        **Product Information:**
+        - **Product Name:** {product_name}
+        - **Product Description & Intended Use:** {product_description}
+        - **Intended User Profile:** {intended_user}
+        - **Intended Use Environment:** {use_environment}
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                max_tokens=3000,
+                temperature=0.4
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"Error generating URRA: {e}")
+            return f"An error occurred while generating the URRA report: {e}"

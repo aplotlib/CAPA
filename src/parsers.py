@@ -29,7 +29,10 @@ class AIFileParser:
         except Exception:
             file.seek(0)
             try: # CSV/TXT
-                content = file.read(2000).decode('utf-8', errors='ignore')
+                # Read a limited number of bytes for preview
+                preview_content = file.read(2000)
+                # Decode safely, replacing errors
+                content = preview_content.decode('utf-8', errors='replace')
                 return f"TEXT PREVIEW:\n{content}"
             except Exception:
                 return "Could not generate file preview."
@@ -94,6 +97,9 @@ class AIFileParser:
                 response_format={"type": "json_object"}
             )
             return json.loads(response.choices[0].message.content)
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON from AI file analysis: {e}")
+            return {"error": "Failed to parse AI response.", "filename": file.name}
         except Exception as e:
             return {"error": f"AI analysis failed: {e}", "filename": file.name}
 

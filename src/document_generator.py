@@ -3,7 +3,7 @@
 import json
 from typing import Dict, Optional, Any, List
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, date
 from docx import Document
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -90,6 +90,48 @@ class CapaDocumentGenerator:
             row_cells = table.add_row().cells
             for i, cell_value in enumerate(row_data):
                 row_cells[i].text = cell_value
+    
+    def _add_capa_to_doc(self, doc: Document, capa_data: Dict[str, Any]):
+        """Adds the CAPA form data to the Word document."""
+        doc.add_heading("Corrective and Preventive Action (CAPA) Report", level=2)
+        
+        # Create a table for a structured look
+        table = doc.add_table(rows=0, cols=2)
+        table.style = 'Table Grid'
+        
+        def add_row(field_name, value):
+            row_cells = table.add_row().cells
+            row_cells[0].text = field_name
+            # Format date objects for display
+            if isinstance(value, date):
+                value = value.strftime('%Y-%m-%d')
+            row_cells[1].text = str(value)
+
+        # Map keys to user-friendly names
+        field_map = {
+            'capa_number': "CAPA Number",
+            'initiation_date': "Initiation Date",
+            'product_name': "Product Name/Model",
+            'source_of_issue': "Source of Issue",
+            'issue_description': "Detailed Description of Non-conformity",
+            'immediate_containment_actions': "Immediate Actions/Containment",
+            'risk_severity': "Risk Severity (1-5)",
+            'risk_probability': "Risk Probability (1-5)",
+            'root_cause_analysis': "Root Cause Analysis Findings",
+            'corrective_action': "Corrective Action(s)",
+            'corrective_action_implementation': "Corrective Action Implementation Plan",
+            'preventive_action': "Preventive Action(s)",
+            'preventive_action_implementation': "Preventive Action Implementation Plan",
+            'effectiveness_verification_plan': "Effectiveness Verification Plan",
+            'effectiveness_verification_results': "Effectiveness Verification Results",
+            'closed_by': "Closed By",
+            'closure_date': "Closure Date"
+        }
+
+        for key, name in field_map.items():
+            add_row(name, capa_data.get(key, ''))
+            
+        doc.add_page_break()
 
 
     def export_all_to_docx(self, content: Dict[str, Any]) -> BytesIO:
@@ -111,6 +153,10 @@ class CapaDocumentGenerator:
             doc.add_heading("AI-Generated Insights", level=3)
             doc.add_paragraph(results.get('insights', 'No insights were generated.'))
             doc.add_page_break()
+            
+        # --- CAPA Section ---
+        if content.get('capa'):
+            self._add_capa_to_doc(doc, content['capa'])
 
         # --- Device Classification Section ---
         if content.get('device_classification'):

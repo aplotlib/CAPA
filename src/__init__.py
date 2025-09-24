@@ -30,6 +30,6 @@ __all__ = [
     'UseRelatedRiskAnalyzer',
     'FMEA',
     'PreMortem',
-    'ReturnsProcessor', # This was missing
+    'ReturnsProcessor',
     'AIContextHelper'
 ]

@@ -59,6 +59,9 @@ class FMEA:
             )
             result = json.loads(response.choices[0].message.content)
             return result.get("failure_modes", [])
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON from AI response: {e}")
+            return [{"Potential Failure Mode": "Error parsing AI suggestions.", "Potential Effect(s)": str(e), "Potential Cause(s)": ""}]
         except Exception as e:
             print(f"Error suggesting failure modes: {e}")
             return [{"Potential Failure Mode": "Error generating AI suggestions.", "Potential Effect(s)": str(e), "Potential Cause(s)": ""}]

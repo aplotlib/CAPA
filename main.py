@@ -20,7 +20,7 @@ from src.ai_context_helper import AIContextHelper
 from src.capa_form import display_capa_form
 
 # --- Page Configuration ---
-st.set_page_config(page_title="Product Quality Manager", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="A.Q.M.S.", page_icon="🛡️", layout="wide")
 
 # --- Fixed CSS ---
 def load_css():
@@ -35,7 +35,6 @@ def load_css():
             background-color: #FFFFFF; border-radius: 10px; padding: 1.5rem;
             border: 1px solid #E0E0E0; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
         }
-        /* FIX: Removed fixed height and adjusted padding to prevent overlap */
         .stTabs [data-baseweb="tab"] {
             padding: 12px 16px;
         }
@@ -74,6 +73,7 @@ def initialize_components():
         st.session_state.file_parser = AIFileParser(api_key)
         st.session_state.doc_generator = DocumentGenerator()
         st.session_state.data_processor = DataProcessor()
+        st.session_state.ai_context_helper = AIContextHelper(api_key)
     st.session_state.components_initialized = True
 
 def parse_manual_input(input_str: str, target_sku: str) -> pd.DataFrame:
@@ -90,7 +90,7 @@ def parse_manual_input(input_str: str, target_sku: str) -> pd.DataFrame:
 
 # --- UI Sections ---
 def display_header():
-    st.markdown('<div class="main-header"><h1>🛡️ Product Lifecycle & Quality Manager</h1><p>Your AI-powered hub for proactive quality assurance, compliance, and vendor management.</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header"><h1>🛡️ A.Q.M.S. - Automated Quality Management System</h1><p>Your AI-powered hub for proactive quality assurance, compliance, and vendor management.</p></div>', unsafe_allow_html=True)
 
 def display_sidebar():
     with st.sidebar:
@@ -188,8 +188,12 @@ def display_vendor_comm_tab():
         if submitted:
             with st.spinner("AI is drafting email..."):
                 st.session_state.vendor_email_draft = st.session_state.ai_email_drafter.draft_vendor_email(
-                    st.session_state.analysis_results, st.session_state.capa_data, st.session_state.target_sku,
-                    vendor_name, contact_name, po_numbers, english_ability, firmness
+                    "High return rate investigation",
+                    st.session_state.analysis_results,
+                    st.session_state.target_sku,
+                    vendor_name,
+                    contact_name,
+                    english_ability,
                 )
     
     if st.session_state.vendor_email_draft:
@@ -222,8 +226,82 @@ def display_compliance_tab():
     with st.expander("Pre-Mortem Analysis"):
         scenario = st.text_input("Define failure scenario:", "Our new product launch failed.")
         if st.button("Generate Pre-Mortem Questions"):
-            # Implementation for Pre-Mortem questions can be added here
-            st.info("Pre-mortem feature to be fully implemented.")
+            with st.spinner("AI is generating questions..."):
+                questions = st.session_state.pre_mortem_generator.generate_questions(scenario)
+                st.session_state.pre_mortem_questions = questions
+        
+        if 'pre_mortem_questions' in st.session_state:
+            answers = {}
+            for q in st.session_state.pre_mortem_questions:
+                answers[q] = st.text_area(q, key=q)
+            if st.button("Summarize Pre-Mortem Analysis"):
+                with st.spinner("AI is summarizing..."):
+                    qa_list = [{"question": q, "answer": a} for q, a in answers.items()]
+                    summary = st.session_state.pre_mortem_generator.summarize_answers(qa_list)
+                    st.session_state.pre_mortem_summary = summary
+        
+        if 'pre_mortem_summary' in st.session_state and st.session_state.pre_mortem_summary:
+            st.markdown(st.session_state.pre_mortem_summary)
+
+def display_cost_of_quality_tab():
+    st.header("💰 Cost of Quality (CoQ) Calculator")
+    st.info("This tool helps you estimate the total cost of quality, broken down into four categories: prevention, appraisal, internal failure, and external failure.")
+
+    with st.form("coq_form"):
+        st.subheader("Prevention Costs")
+        c1, c2 = st.columns(2)
+        quality_planning = c1.number_input("Quality Planning", min_value=0.0, step=100.0)
+        training = c2.number_input("Training", min_value=0.0, step=100.0)
+        
+        st.subheader("Appraisal Costs")
+        c1, c2 = st.columns(2)
+        inspection = c1.number_input("Inspection", min_value=0.0, step=100.0)
+        testing = c2.number_input("Testing", min_value=0.0, step=100.0)
+
+        st.subheader("Internal Failure Costs")
+        c1, c2 = st.columns(2)
+        scrap = c1.number_input("Scrap", min_value=0.0, step=100.0)
+        rework = c2.number_input("Rework", min_value=0.0, step=100.0)
+
+        st.subheader("External Failure Costs")
+        c1, c2 = st.columns(2)
+        warranty_claims = c1.number_input("Warranty Claims", min_value=0.0, step=100.0)
+        returns = c2.number_input("Returns", min_value=0.0, step=100.0)
+
+        submitted = st.form_submit_button("Calculate Cost of Quality", type="primary")
+
+        if submitted:
+            total_prevention = quality_planning + training
+            total_appraisal = inspection + testing
+            total_internal_failure = scrap + rework
+            total_external_failure = warranty_claims + returns
+            total_coq = total_prevention + total_appraisal + total_internal_failure + total_external_failure
+
+            st.session_state.coq_results = {
+                "Total Prevention Costs": total_prevention,
+                "Total Appraisal Costs": total_appraisal,
+                "Total Internal Failure Costs": total_internal_failure,
+                "Total External Failure Costs": total_external_failure,
+                "Total Cost of Quality": total_coq
+            }
+
+    if 'coq_results' in st.session_state:
+        st.subheader("Cost of Quality Results")
+        results = st.session_state.coq_results
+        st.metric("Total Cost of Quality", f"${results['Total Cost of Quality']:,.2f}")
+        
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Prevention Costs", f"${results['Total Prevention Costs']:,.2f}")
+        c2.metric("Appraisal Costs", f"${results['Total Appraisal Costs']:,.2f}")
+        c3.metric("Internal Failure Costs", f"${results['Total Internal Failure Costs']:,.2f}")
+        c4.metric("External Failure Costs", f"${results['Total External Failure Costs']:,.2f}")
+
+        if st.button("🤖 Get AI Insights on CoQ"):
+            with st.spinner("AI is analyzing your Cost of Quality..."):
+                response = st.session_state.ai_context_helper.generate_response(
+                    f"Analyze the following Cost of Quality data and provide insights: {results}"
+                )
+                st.markdown(response)
 
 def display_exports_tab():
     st.header("📄 Document Exports")
@@ -279,14 +357,23 @@ def main():
     display_header()
     display_sidebar()
 
-    tabs = st.tabs(["📊 Dashboard", "📝 CAPA", "🛡️ Risk & Safety", "✉️ Vendor Comms", "⚖️ Compliance", "📄 Exports"])
+    tabs = st.tabs(["📊 Dashboard", "📝 CAPA", "🛡️ Risk & Safety", "✉️ Vendor Comms", "⚖️ Compliance", "💰 Cost of Quality", "📄 Exports"])
     
     with tabs[0]: display_dashboard()
     with tabs[1]: display_capa_form()
     with tabs[2]: display_risk_safety_tab()
     with tabs[3]: display_vendor_comm_tab()
     with tabs[4]: display_compliance_tab()
-    with tabs[5]: display_exports_tab()
+    with tabs[5]: display_cost_of_quality_tab()
+    with tabs[6]: display_exports_tab()
+    
+    if not st.session_state.api_key_missing:
+        with st.expander("🤖 AI Assistant"):
+            user_query = st.text_input("Ask the AI assistant a question about the current context:")
+            if user_query:
+                with st.spinner("AI is thinking..."):
+                    response = st.session_state.ai_context_helper.generate_response(user_query)
+                    st.markdown(response)
 
 if __name__ == "__main__":
     main()

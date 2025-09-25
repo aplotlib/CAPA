@@ -50,7 +50,8 @@ def initialize_session_state():
         'sales_data': pd.DataFrame(), 'returns_data': pd.DataFrame(),
         'analysis_results': None, 'capa_data': {}, 'fmea_data': None,
         'vendor_email_draft': None, 'risk_assessment': None, 'urra': None,
-        'pre_mortem_summary': None, 'medical_device_classification': None
+        'pre_mortem_summary': None, 'medical_device_classification': None,
+        'logged_in': False, 'workflow_mode': None # New state variables
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -75,6 +76,24 @@ def initialize_components():
         st.session_state.data_processor = DataProcessor()
         st.session_state.ai_context_helper = AIContextHelper(api_key)
     st.session_state.components_initialized = True
+
+def check_password():
+    """Returns `True` if the user has the correct password."""
+    if st.session_state.get("logged_in", False):
+        return True
+
+    st.header("A.Q.M.S. Login")
+    password_input = st.text_input("Password", type="password", key="password_input")
+
+    if st.button("Login"):
+        if password_input == st.secrets.get("APP_PASSWORD"):
+            st.session_state.logged_in = True
+            st.rerun()
+        else:
+            st.error("The password you entered is incorrect.")
+    
+    return False
+
 
 def parse_manual_input(input_str: str, target_sku: str) -> pd.DataFrame:
     if not input_str.strip(): return pd.DataFrame()
@@ -136,7 +155,7 @@ def display_sidebar():
                 process_data(sales_df, returns_df)
 
         with st.expander("📁 Or Upload Files"):
-            uploaded_files = st.file_uploader("Upload sales, returns, or other data", accept_multiple_files=True, type=['csv', 'xlsx', 'txt', 'tsv'])
+            uploaded_files = st.file_uploader("Upload sales, returns, or other data", accept_multiple_files=True, type=['csv', 'xlsx', 'txt', 'tsv', 'png', 'jpg'])
             if st.button("Process Uploaded Files", width='stretch'):
                 if not uploaded_files:
                     st.warning("Please upload files to process.")
@@ -191,16 +210,12 @@ def display_risk_safety_tab():
             st.info("You can edit the table below. Severity, Occurrence, and Detection should be on a 1-5 scale.")
             edited_df = st.data_editor(st.session_state.fmea_data, num_rows="dynamic")
             
-            # --- FIX: Ensure RPN columns exist before calculation to prevent KeyError ---
             required_cols = ['Severity', 'Occurrence', 'Detection']
             for col in required_cols:
                 if col not in edited_df.columns:
-                    # Add column with default value if it's missing (e.g., from AI suggestion)
                     edited_df[col] = 1 
-                # Ensure column is numeric, coercing errors and filling NaNs
-                edited_df[col] = pd.to_numeric(edited_df[col], errors='coerce').fillna(1)
+                edited_df[col] = pd.to_numeric(edited_df[col], errors='coerce').fillna(1).astype(int)
 
-            # Now, safely calculate RPN
             edited_df['RPN'] = edited_df['Severity'] * edited_df['Occurrence'] * edited_df['Detection']
             st.session_state.fmea_data = edited_df
 
@@ -214,9 +229,7 @@ def display_vendor_comm_tab():
         c1, c2 = st.columns(2)
         vendor_name = c1.text_input("Vendor Name")
         contact_name = c2.text_input("Contact Name")
-        po_numbers = st.text_input("Relevant Purchase Order #s (optional)")
         
-        firmness = st.slider("Firmness of Tone", 1, 5, 2, help="1: Soft inquiry, 5: Politely demanding")
         english_ability = st.slider("Recipient's English Proficiency", 1, 5, 3)
         
         submitted = st.form_submit_button("Draft Email", type="primary")
@@ -299,7 +312,7 @@ def display_cost_of_quality_tab():
     st.header("💰 Cost of Quality (CoQ) Calculator")
     st.info("Estimate the total cost of quality, broken down into prevention, appraisal, and failure costs.")
 
-    with st.form("coq_form"):
+    with st.form("co_form"):
         st.subheader("Prevention Costs (Proactive)")
         c1, c2 = st.columns(2)
         quality_planning = c1.number_input("Quality Planning ($)", min_value=0.0, step=100.0, help="Costs for creating quality plans, reliability engineering, etc.")
@@ -387,6 +400,7 @@ def process_uploaded_files(uploaded_files):
     sales_dfs, returns_dfs = [], []
     with st.spinner("AI is analyzing uploaded files..."):
         for file in uploaded_files:
+            file_bytes = file.getvalue()
             analysis = parser.analyze_file_structure(file, st.session_state.target_sku)
             st.write(f"File: `{analysis.get('filename', 'N/A')}` → AI identified as: `{analysis.get('content_type', 'unknown')}`")
             df = parser.extract_data(file, analysis, st.session_state.target_sku)
@@ -402,11 +416,8 @@ def process_uploaded_files(uploaded_files):
     returns_df = pd.concat(returns_dfs, ignore_index=True) if returns_dfs else pd.DataFrame()
     process_data(sales_df, returns_df)
 
-# --- Main App Flow ---
-def main():
-    load_css()
-    initialize_session_state()
-    initialize_components()
+def display_main_app():
+    """The main application UI, shown after login and workflow selection."""
     display_header()
     display_sidebar()
 
@@ -428,6 +439,41 @@ def main():
                 with st.spinner("AI is synthesizing an answer..."):
                     response = st.session_state.ai_context_helper.generate_response(user_query)
                     st.markdown(response)
+
+def display_workflow_selection():
+    """Displays the initial workflow selection menu."""
+    st.header("🎯 Select Your Goal")
+    st.write("Choose your primary objective to get started.")
+    
+    workflow_options = [
+        "🔍 Analyze Product Quality & Start a CAPA",
+        "🔬 Perform a Risk Analysis (FMEA)",
+        "🚀 Conduct a Pre-Mortem for a New Product",
+        "📄 Just Analyze Customer Feedback Files",
+        " 자유롭게 사용 (Free Use Mode)"
+    ]
+    
+    selection = st.radio("What would you like to accomplish in this session?", options=workflow_options, key="workflow_selection")
+    
+    if st.button("Begin Workflow", type="primary", width="stretch"):
+        st.session_state.workflow_mode = selection
+        st.rerun()
+
+# --- Main App Flow ---
+def main():
+    load_css()
+    initialize_session_state()
+    
+    if not check_password():
+        st.stop()
+
+    initialize_components()
+
+    if not st.session_state.workflow_mode:
+        display_workflow_selection()
+    else:
+        display_main_app()
+
 
 if __name__ == "__main__":
     main()

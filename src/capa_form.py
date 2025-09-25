@@ -24,7 +24,7 @@ def display_capa_form():
         if not st.session_state.get('analysis_results'):
             st.warning("Run an analysis on the Dashboard tab to enable AI-powered suggestions.")
         else:
-            if st.button("🤖 Get AI Suggestions for CAPA Form", use_container_width=True):
+            if st.button("🤖 Get AI Suggestions for CAPA Form", width='stretch'):
                 with st.spinner("AI is generating CAPA suggestions..."):
                     issue_summary = st.session_state.analysis_results.get('insights', 'No summary available.')
                     suggestions = st.session_state.ai_capa_helper.generate_capa_suggestions(
@@ -45,7 +45,7 @@ def display_capa_form():
     with st.expander("📂 Step 1: Initiation & Problem Description", expanded=True):
         st.markdown("##### **1.1 Identification**")
         col1, col2 = st.columns(2)
-        data['capa_number'] = col1.text_input("CAPA Number", value=data.get('capa_number', 'CAPA-YYYYMMDD-001'))
+        data['capa_number'] = col1.text_input("CAPA Number", value=data.get('capa_number', f"CAPA-{date.today().strftime('%Y%m%d')}-001"))
         # Pre-fill product name from session state if available
         product_name_default = st.session_state.get('target_sku', '')
         data['product_name'] = col1.text_input("Product Name/Model", value=data.get('product_name', product_name_default))
@@ -84,7 +84,7 @@ def display_capa_form():
 
     # --- Validation ---
     st.divider()
-    if st.button("Validate CAPA Data", use_container_width=True, type="primary"):
+    if st.button("Validate CAPA Data", width='stretch', type="primary"):
         is_valid, errors, warnings = validate_capa_data(st.session_state.capa_data)
         if errors:
             for error in errors:

@@ -1,19 +1,21 @@
 # src/document_generator.py
 
-from typing import Dict, Optional, Any
+from typing import Dict, Any, List, Optional
 from io import BytesIO
 from datetime import date
 import pandas as pd
 from docx import Document
-from docx.shared import Inches
+from docx.shared import Inches, Pt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 class DocumentGenerator:
     """
-    Generates formal Word documents for CAPA Reports, SCARs, and combined reports.
+    Generates a single, comprehensive Word document summarizing a project,
+    allowing users to select which components to include.
     """
 
-    def _add_main_table_row(self, table, heading: str, content: str):
-        """Helper to add a formatted row to the main CAPA/SCAR table."""
+    def _add_main_table_row(self, table, heading: str, content: Any):
+        """Helper to add a formatted row to a two-column table."""
         row_cells = table.add_row().cells
         p = row_cells[0].paragraphs[0]
         p.add_run(heading).bold = True
@@ -21,76 +23,100 @@ class DocumentGenerator:
 
     def _add_df_as_table(self, doc, df: pd.DataFrame, title: str):
         """Helper to add a pandas DataFrame as a formatted table in the document."""
+        if df is None or df.empty:
+            return
         doc.add_page_break()
         doc.add_heading(title, level=2)
         
-        # Create a table with an extra row for headers
         table = doc.add_table(rows=1, cols=len(df.columns))
         table.style = 'Table Grid'
         
-        # Add the header row
         hdr_cells = table.rows[0].cells
         for i, col_name in enumerate(df.columns):
             hdr_cells[i].text = str(col_name)
             hdr_cells[i].paragraphs[0].runs[0].font.bold = True
 
-        # Add the data rows
-        for index, row in df.iterrows():
+        for _, row in df.iterrows():
             row_cells = table.add_row().cells
             for i, cell_value in enumerate(row):
                 row_cells[i].text = str(cell_value)
-    
-    def generate_capa_docx(self, capa_data: Dict[str, Any], fmea_df: Optional[pd.DataFrame] = None) -> BytesIO:
-        """Generates a formal CAPA report, now with an optional FMEA addendum."""
-        doc = Document()
-        doc.add_heading("Corrective and Preventive Action (CAPA) Report", level=1)
 
-        # --- Header Table ---
-        header_table = doc.add_table(rows=2, cols=2)
-        header_table.cell(0, 0).text = f"CAPA Number: {capa_data.get('capa_number', 'N/A')}"
-        initiation_date = capa_data.get('date', date.today())
-        header_table.cell(0, 1).text = f"Date: {initiation_date.strftime('%Y-%m-%d') if isinstance(initiation_date, date) else initiation_date}"
-        header_table.cell(1, 0).text = "To: [Name, Title, Organization]"
-        header_table.cell(1, 1).text = f"Prepared By: {capa_data.get('prepared_by', '[Name, Title, Organization]')}"
-        doc.add_paragraph()
-
-        # --- Main Content Table ---
-        main_table = doc.add_table(rows=1, cols=2)
-        main_table.style = 'Table Grid'
-        main_table.columns[0].width = Inches(1.5)
-        main_table.columns[1].width = Inches(6.0)
-        main_table.rows[0].cells[0].text = "Section"
-        main_table.rows[0].cells[1].text = "Details"
-
-        field_map = {
-            "Product Name / Model": capa_data.get('product_name', ''),
-            "Source of Issue": capa_data.get('source_of_issue', ''),
-            "Problem Description": capa_data.get('issue_description', ''),
-            "Immediate Containment Actions": capa_data.get('immediate_containment_actions', ''),
-            "Root Cause Analysis": capa_data.get('root_cause', ''),
-            "Corrective Action Plan": capa_data.get('corrective_action', ''),
-            "Preventive Action Plan": capa_data.get('preventive_action', ''),
-            "Effectiveness Verification Plan": capa_data.get('effectiveness_verification_plan', '')
-        }
-        for heading, content in field_map.items():
-            self._add_main_table_row(main_table, heading, str(content))
-        
-        # --- NEW: Add FMEA data if it exists ---
-        if fmea_df is not None and not fmea_df.empty:
-            self._add_df_as_table(doc, fmea_df, "FMEA Addendum")
-
-        # --- Closure & Signature Block ---
+    def _add_markdown_text(self, doc, text: str, title: str):
+        """Adds text, potentially in Markdown, as a new section."""
+        if not text:
+            return
         doc.add_page_break()
-        doc.add_heading("Verification & Closure", level=2)
+        doc.add_heading(title, level=2)
+        # Simple conversion: replace markdown bold/italics if needed, but for now, just add text
+        doc.add_paragraph(text)
         
-        closure_p = doc.add_paragraph()
-        closure_date = capa_data.get('closure_date')
-        closure_p.add_run(f"Verification Findings: ").bold = True
-        closure_p.add_run("\n\n")
-        closure_p.add_run(f"Closed By: ").bold = True
-        closure_p.add_run(f"{capa_data.get('closed_by', '______________________')}\n")
-        closure_p.add_run(f"Closure Date: ").bold = True
-        closure_p.add_run(f"{closure_date.strftime('%Y-%m-%d') if isinstance(closure_date, date) else '______________________'}")
+    def _generate_executive_summary(self, session_data: Dict[str, Any], ai_context_helper: Any) -> str:
+        """Uses AI to generate a high-level executive summary."""
+        if ai_context_helper:
+            prompt = (
+                "Based on the full application context, generate a concise, professional executive summary for a final project report. "
+                "The summary should briefly outline the problem, key findings from the analyses (like top risks from FMEA), and the planned corrective actions. "
+                "Conclude with a 'Recommendations' section suggesting the next logical steps."
+            )
+            try:
+                return ai_context_helper.generate_response(prompt)
+            except Exception:
+                return "Could not generate AI summary."
+        return "AI helper not available."
+
+    def generate_summary_docx(self, session_data: Dict[str, Any], selected_sections: List[str]) -> BytesIO:
+        """
+        Generates a single comprehensive report based on selected sections.
+        """
+        doc = Document()
+        doc.add_heading("Project Summary Report", level=1)
+        
+        # --- AI Executive Summary ---
+        summary_text = self._generate_executive_summary(session_data, session_data.get('ai_context_helper'))
+        doc.add_heading("Executive Summary", level=2)
+        doc.add_paragraph(summary_text)
+        
+        # --- CAPA Form Section ---
+        if "CAPA Form" in selected_sections and session_data.get('capa_data'):
+            capa_data = session_data['capa_data']
+            doc.add_page_break()
+            doc.add_heading("Corrective and Preventive Action (CAPA) Details", level=2)
+            
+            main_table = doc.add_table(rows=1, cols=2)
+            main_table.style = 'Table Grid'
+            main_table.columns[0].width = Inches(2.0)
+            main_table.columns[1].width = Inches(5.5)
+            main_table.rows[0].cells[0].text = "Section"
+            main_table.rows[0].cells[1].text = "Details"
+
+            field_map = {
+                "CAPA Number": capa_data.get('capa_number', 'N/A'),
+                "Product Name / Model": capa_data.get('product_name', 'N/A'),
+                "Initiation Date": capa_data.get('date', date.today()).strftime('%Y-%m-%d'),
+                "Problem Description": capa_data.get('issue_description', ''),
+                "Root Cause Analysis": capa_data.get('root_cause', ''),
+                "Corrective Action Plan": capa_data.get('corrective_action', ''),
+                "Preventive Action Plan": capa_data.get('preventive_action', ''),
+                "Effectiveness Verification Plan": capa_data.get('effectiveness_verification_plan', '')
+            }
+            for heading, content in field_map.items():
+                self._add_main_table_row(main_table, heading, content)
+
+        # --- FMEA Section ---
+        if "FMEA" in selected_sections and session_data.get('fmea_data') is not None:
+            self._add_df_as_table(doc, session_data['fmea_data'], "Failure Mode and Effects Analysis (FMEA)")
+
+        # --- ISO 14971 Assessment Section ---
+        if "ISO 14971 Assessment" in selected_sections and session_data.get('risk_assessment'):
+            self._add_markdown_text(doc, session_data['risk_assessment'], "ISO 14971 Risk Assessment")
+            
+        # --- URRA Section ---
+        if "URRA" in selected_sections and session_data.get('urra'):
+            self._add_markdown_text(doc, session_data['urra'], "Use-Related Risk Analysis (URRA)")
+
+        # --- Vendor Email Section ---
+        if "Vendor Email Draft" in selected_sections and session_data.get('vendor_email_draft'):
+            self._add_markdown_text(doc, session_data['vendor_email_draft'], "Vendor Communication Draft")
 
         buffer = BytesIO()
         doc.save(buffer)
@@ -98,7 +124,7 @@ class DocumentGenerator:
         return buffer
 
     def generate_scar_docx(self, capa_data: Dict[str, Any], vendor_name: str) -> BytesIO:
-        """Generates a formal Supplier Corrective Action Request (SCAR) document."""
+        """Generates a standalone Supplier Corrective Action Request (SCAR) document."""
         doc = Document()
         doc.add_heading("Supplier Corrective Action Request (SCAR)", level=1)
         
@@ -113,13 +139,9 @@ class DocumentGenerator:
 
         main_table = doc.add_table(rows=1, cols=2)
         main_table.style = 'Table Grid'
-        main_table.columns[0].width = Inches(2.0)
-        main_table.columns[1].width = Inches(5.5)
-        main_table.rows[0].cells[0].text = "Section"
-        main_table.rows[0].cells[1].text = "Details"
         
-        self._add_main_table_row(main_table, "Description of Non-conformance", str(capa_data.get('issue_description', '')))
-        self._add_main_table_row(main_table, "Our Initial Root Cause Analysis", str(capa_data.get('root_cause', '')))
+        self._add_main_table_row(main_table, "Description of Non-conformance", capa_data.get('issue_description', ''))
+        self._add_main_table_row(main_table, "Our Initial Root Cause Analysis", capa_data.get('root_cause', ''))
         self._add_main_table_row(main_table, "Action Required from Supplier", "Please investigate the non-conformance, perform a thorough root cause analysis, and provide a detailed corrective action plan to prevent recurrence.")
         self._add_main_table_row(main_table, "Response Due Date", f"A formal response is required within 15 business days.")
 

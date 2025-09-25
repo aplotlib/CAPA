@@ -23,7 +23,7 @@ class AIContextHelper:
         """Gathers all available data from session state to form a comprehensive context."""
         context_parts = []
         
-        context_parts.append("You are an AI assistant integrated into a Product Lifecycle & Quality Management application.")
+        context_parts.append("You are an AI assistant integrated into a Product Lifecycle & Quality Management application called A.Q.M.S.")
         context_parts.append("Your goal is to provide cohesive, context-aware answers by synthesizing information from different parts of the tool.")
         
         target_sku = st.session_state.get('target_sku', 'Not specified')
@@ -72,6 +72,13 @@ class AIContextHelper:
             context_parts.append("\n--- VENDOR COMMUNICATION DRAFT ---")
             context_parts.append("An email has been drafted to the vendor with the following content summary:")
             context_parts.append(st.session_state.vendor_email_draft[:300] + "...")
+
+        # Cost of Quality Context
+        if st.session_state.get('coq_results'):
+            context_parts.append("\n--- COST OF QUALITY (CoQ) ---")
+            coq_results = st.session_state.coq_results
+            for key, value in coq_results.items():
+                context_parts.append(f"{key}: ${value:,.2f}")
             
         return "\n".join(context_parts)
 
@@ -83,7 +90,7 @@ class AIContextHelper:
 
         full_context = self.get_full_context()
         
-        system_prompt = "You are a helpful AI assistant embedded in a quality management application. Use the provided context from the application's different tabs to answer the user's question. Be concise, helpful, and synthesize information where possible. If the user asks for something outside the context, use your general knowledge but specify that it is not from the application's data."
+        system_prompt = "You are a helpful AI assistant embedded in a quality management application called A.Q.M.S. Use the provided context from the application's different tabs to answer the user's question. Be concise, helpful, and synthesize information where possible. If the user asks for something outside the context, use your general knowledge but specify that it is not from the application's data."
 
         try:
             response = self.client.chat.completions.create(

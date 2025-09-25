@@ -45,7 +45,7 @@ class AICAPAHelper:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                max_tokens=2000,
+                max_tokens=2500,
                 response_format={"type": "json_object"}
             )
             return json.loads(response.choices[0].message.content)
@@ -90,20 +90,18 @@ class AIEmailDrafter:
             language_instruction = "Use clear and professional language, but avoid overly complex terminology."
         else:
             language_instruction = "Use standard professional business English."
-
+            
         system_prompt = f"""
         You are a quality assurance manager writing an email to a valued manufacturing partner, {vendor_name}.
         Your tone must be super reasonable, conservative, and collaborative, NOT demanding or accusatory.
         The goal is to start a productive, data-driven conversation to solve a problem together.
         Recipient's English Ability: {english_ability}/5. {language_instruction}
+
         Draft a professional email to {contact_name}.
-        - Start politely.
-        - Present key data concisely.
-        - Frame the issue as a mutual challenge.
-        - Ask for their perspective and suggestions for a joint investigation.
-        - Do not assign blame or demand specific actions.
-        - End with a collaborative closing statement.
-        Return only the full email text.
+        1.  **Suggest Realistic KPIs:** Propose 1-2 specific, measurable, and realistic Key Performance Indicators (KPIs) to track improvement (e.g., "reduce defect rate by 10%," "improve component tolerance").
+        2.  **Suggest a Timeline:** Propose a reasonable timeline for the vendor to report back (e.g., "provide an initial analysis within 15 days").
+        3.  **Structure:** Start politely, present key data concisely, frame it as a mutual challenge, ask for their perspective, suggest the KPIs and timeline, and end collaboratively.
+        4.  **Return only the full email text.**
         """
         user_prompt = f"**Email Goal:** {goal}\n\n**Data Context:**\n{context}"
 
@@ -114,7 +112,7 @@ class AIEmailDrafter:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                max_tokens=1500,
+                max_tokens=2000,
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -183,7 +181,7 @@ class RiskAssessmentGenerator:
                 print(f"Failed to initialize Risk Assessment Generator: {e}")
 
     @retry_with_backoff()
-    def generate_assessment(self, product_name: str, sku: str, product_description: str, assessment_type: str) -> str:
+    def generate_assessment(self, product_name: str, sku: str, product_description: str) -> str:
         """Generates a risk assessment report."""
         if not self.client:
             return "Error: AI client for Risk Assessment is not initialized."
@@ -202,7 +200,6 @@ class RiskAssessmentGenerator:
         - **Product Name:** {product_name}
         - **SKU:** {sku}
         - **Product Description & Intended Use:** {product_description}
-        - **Assessment Standard(s):** {assessment_type}
         """
         try:
             response = self.client.chat.completions.create(

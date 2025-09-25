@@ -8,7 +8,7 @@ from io import StringIO
 # --- Import custom modules ---
 from src.parsers import AIFileParser
 from src.data_processing import DataProcessor
-from src.analysis import run_full_analysis, calculate_cost_benefit
+from src.analysis import run_full_analysis
 from src.document_generator import DocumentGenerator
 from src.ai_capa_helper import (
     AICAPAHelper, AIEmailDrafter, MedicalDeviceClassifier,
@@ -20,24 +20,43 @@ from src.ai_context_helper import AIContextHelper
 from src.capa_form import display_capa_form
 
 # --- Page Configuration ---
-st.set_page_config(page_title="A.Q.M.S.", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="AQMS", page_icon="https://www.vivehealth.com/cdn/shop/files/vive-logo-1_2_250x.png?v=1613713028", layout="wide")
 
-# --- Fixed CSS ---
+# --- Enhanced CSS for a cleaner UI ---
 def load_css():
     st.markdown("""
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-        html, body, [class*="st-"] { font-family: 'Inter', sans-serif; }
-        .main-header { text-align: center; margin-bottom: 2rem; }
-        .main-header h1 { font-weight: 700; font-size: 2.5rem; color: #1a1a2e; margin-bottom: 0.5rem; }
-        .main-header p { color: #555; font-size: 1.1rem; }
-        .stMetric {
-            background-color: #FFFFFF; border-radius: 10px; padding: 1.5rem;
-            border: 1px solid #E0E0E0; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        
+        html, body, [class*="st-"], [class*="css-"] {
+            font-family: 'Inter', sans-serif;
         }
+
+        .main-header h1 {
+            font-weight: 700; font-size: 2.2rem; color: #1a1a2e; text-align: center;
+        }
+        .main-header p {
+            color: #4F4F4F; font-size: 1.1rem; text-align: center; margin-bottom: 2rem;
+        }
+        .stApp { background-color: #F9F9FB; }
+        .css-1d391kg { background-color: #FFFFFF; border-right: 1px solid #E0E0E0; }
+        .stTabs [data-baseweb="tab-list"] { gap: 12px; }
         .stTabs [data-baseweb="tab"] {
-            padding: 12px 16px;
+            height: 48px; background-color: #FFFFFF; border: 1px solid #E0E0E0;
+            border-radius: 8px; padding: 0px 20px; transition: all 0.2s ease-in-out;
         }
+        .stTabs [aria-selected="true"] {
+            background-color: #1a1a2e; color: white; border: 1px solid #1a1a2e;
+        }
+        .stMetric {
+            background-color: #FFFFFF; border-radius: 10px; padding: 2rem 1.5rem;
+            border: 1px solid #E0E0E0; box-shadow: 0 4px 6px rgba(0,0,0,0.04);
+        }
+        .st-expander {
+            border: 1px solid #E0E0E0 !important; border-radius: 10px !important;
+            box-shadow: none !important;
+        }
+        .stButton button { height: 40px; border-radius: 8px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -78,22 +97,16 @@ def initialize_components():
     st.session_state.components_initialized = True
 
 def check_password():
-    """Returns `True` if the user has the correct password."""
-    if st.session_state.get("logged_in", False):
-        return True
-
-    st.header("A.Q.M.S. Login")
-    password_input = st.text_input("Password", type="password", key="password_input")
-
+    if st.session_state.get("logged_in", False): return True
+    st.header("AQMS Login")
+    password_input = st.text_input("Password", type="password")
     if st.button("Login"):
         if password_input == st.secrets.get("APP_PASSWORD"):
             st.session_state.logged_in = True
             st.rerun()
         else:
             st.error("The password you entered is incorrect.")
-    
     return False
-
 
 def parse_manual_input(input_str: str, target_sku: str) -> pd.DataFrame:
     if not input_str.strip(): return pd.DataFrame()
@@ -104,69 +117,53 @@ def parse_manual_input(input_str: str, target_sku: str) -> pd.DataFrame:
             input_str = f"sku,quantity\n{target_sku},{input_str}"
         return pd.read_csv(StringIO(input_str))
     except Exception:
-        st.error("Could not parse manual data. Please enter a single number or a CSV with 'sku' and 'quantity' columns.")
+        st.error("Could not parse manual data.")
         return pd.DataFrame()
 
-# --- UI Sections ---
 def display_header():
-    st.markdown('<div class="main-header"><h1>🛡️ A.Q.M.S. - Automated Quality Management System</h1><p>Your AI-powered hub for proactive quality assurance, compliance, and vendor management.</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header"><h1>Automated Quality Management System (AQMS)</h1><p>Your AI-powered hub for proactive quality assurance, compliance, and vendor management.</p></div>', unsafe_allow_html=True)
 
 def display_sidebar():
     with st.sidebar:
         st.image("https://www.vivehealth.com/cdn/shop/files/vive-logo-1_2_250x.png?v=1613713028", width=150)
-        st.header("⚙️ Configuration")
-        st.session_state.target_sku = st.text_input("🎯 Target Product SKU", st.session_state.target_sku)
+        st.header("Configuration")
+        st.session_state.target_sku = st.text_input("Target Product SKU", st.session_state.target_sku)
         
-        date_range_options = ["Last 30 Days", "Last 7 Days", "Last 90 Days", "Year to Date", "Custom Range"]
-        selected_range = st.selectbox("🗓️ Select Date Range", options=date_range_options)
-
+        selected_range = st.selectbox("Select Date Range", ["Last 30 Days", "Last 7 Days", "Last 90 Days", "Year to Date", "Custom Range"])
         today = date.today()
-
         if selected_range == "Custom Range":
-            col1, col2 = st.columns(2)
-            custom_start_date = col1.date_input("Start Date", st.session_state.get('start_date', today - timedelta(days=30)))
-            custom_end_date = col2.date_input("End Date", st.session_state.get('end_date', today))
-            st.session_state.start_date = custom_start_date
-            st.session_state.end_date = custom_end_date
+            st.session_state.start_date, st.session_state.end_date = st.date_input("Select a date range", (today - timedelta(days=30), today))
         else:
-            if selected_range == "Last 7 Days":
-                st.session_state.start_date = today - timedelta(days=7)
-            elif selected_range == "Last 30 Days":
-                st.session_state.start_date = today - timedelta(days=30)
-            elif selected_range == "Last 90 Days":
-                st.session_state.start_date = today - timedelta(days=90)
-            elif selected_range == "Year to Date":
-                st.session_state.start_date = date(today.year, 1, 1)
+            if selected_range == "Last 7 Days": st.session_state.start_date = today - timedelta(days=7)
+            elif selected_range == "Last 30 Days": st.session_state.start_date = today - timedelta(days=30)
+            elif selected_range == "Last 90 Days": st.session_state.start_date = today - timedelta(days=90)
+            elif selected_range == "Year to Date": st.session_state.start_date = date(today.year, 1, 1)
             st.session_state.end_date = today
 
         st.info(f"Period: {st.session_state.start_date.strftime('%b %d, %Y')} to {st.session_state.end_date.strftime('%b %d, %Y')}")
         
-        st.header("➕ Add Data")
-        st.subheader("✍️ Manual Data Entry")
-        manual_sales = st.text_area("Sales Data for Period", placeholder=f"Total units sold for {st.session_state.target_sku} (e.g., 9502)", key="manual_sales")
-        manual_returns = st.text_area("Returns Data for Period", placeholder=f"Total units returned for {st.session_state.target_sku} (e.g., 150)", key="manual_returns")
+        st.header("Add Data")
+        st.subheader("Manual Data Entry")
+        manual_sales = st.text_area("Sales Data", placeholder=f"Total units sold for {st.session_state.target_sku} (e.g., 9502)")
+        manual_returns = st.text_area("Returns Data", placeholder=f"Total units returned for {st.session_state.target_sku} (e.g., 150)")
         if st.button("Process Manual Data", type="primary", width='stretch'):
             if not manual_sales:
                 st.warning("Sales data is required.")
             else:
-                sales_df = parse_manual_input(manual_sales, st.session_state.target_sku)
-                returns_df = parse_manual_input(manual_returns, st.session_state.target_sku)
-                process_data(sales_df, returns_df)
+                process_data(parse_manual_input(manual_sales, st.session_state.target_sku), parse_manual_input(manual_returns, st.session_state.target_sku))
 
-        with st.expander("📁 Or Upload Files"):
-            uploaded_files = st.file_uploader("Upload sales, returns, or other data", accept_multiple_files=True, type=['csv', 'xlsx', 'txt', 'tsv', 'png', 'jpg'])
+        with st.expander("Or Upload Files"):
+            uploaded_files = st.file_uploader("Upload data", accept_multiple_files=True, type=['csv', 'xlsx', 'txt', 'tsv', 'png', 'jpg'])
             if st.button("Process Uploaded Files", width='stretch'):
-                if not uploaded_files:
-                    st.warning("Please upload files to process.")
-                elif st.session_state.api_key_missing:
-                    st.error("Cannot process files without an OpenAI API key.")
-                else:
+                if uploaded_files:
                     process_uploaded_files(uploaded_files)
+                else:
+                    st.warning("Please upload files to process.")
 
 def display_dashboard():
-    st.header("📊 Quality Dashboard")
+    st.header("Quality Dashboard")
     if not st.session_state.analysis_results:
-        st.info('**Welcome!** Configure your product and add data in the sidebar to begin.')
+        st.info('Welcome! Configure your product and add data in the sidebar to begin.')
         return
     
     results = st.session_state.analysis_results
@@ -186,71 +183,102 @@ def display_dashboard():
     c3.metric("Total Sold", f"{int(summary_data['total_sold']):,}")
     c4.metric("Quality Score", f"{results['quality_metrics'].get('quality_score', 'N/A')}/100", delta=results['quality_metrics'].get('risk_level', ''), delta_color="inverse")
     
-    st.markdown(f"**🧠 AI Insights**: {results.get('insights', 'N/A')}")
+    st.subheader("AI Insights")
+    st.markdown(f"{results.get('insights', 'N/A')}")
 
 def display_risk_safety_tab():
-    st.header("🛡️ Risk & Safety Analysis Hub")
+    st.header("Risk & Safety Analysis Hub")
     if st.session_state.api_key_missing:
         st.error("AI features are disabled. Please configure your API key.")
         return
 
-    with st.expander("🔬 Failure Mode and Effects Analysis (FMEA)", expanded=True):
-        with st.expander("What is an FMEA and how does it work?"):
+    # --- Tool 1: FMEA ---
+    with st.container(border=True):
+        st.subheader("Failure Mode and Effects Analysis (FMEA)")
+        with st.expander("What is an FMEA?"):
             st.markdown("""
-            **Failure Mode and Effects Analysis (FMEA)** is a systematic, proactive method for evaluating a process to identify where and how it might fail and to assess the relative impact of different failures.
-
-            **How to use this table:**
-            1.  **Suggest with AI:** Use the AI button to generate potential failure modes based on your dashboard data.
-            2.  **Add Manually:** Add rows for any other failure modes you can think of.
-            3.  **Score S-O-D:** For each failure mode, use the dropdowns to score the following on a 1 to 5 scale:
-                - **Severity (S):** How severe is the *effect* of the failure on the user? (1 = Minor, 5 = Catastrophic)
-                - **Occurrence (O):** How frequently is the *cause* of the failure likely to occur? (1 = Rare, 5 = Frequent)
-                - **Detection (D):** How likely are you to *detect* the failure before it reaches the user? (1 = Very Likely, 5 = Very Unlikely)
-            
-            **Risk Priority Number (RPN):** The RPN is calculated automatically as **S × O × D**. A higher RPN indicates a higher-risk failure mode that should be prioritized for corrective action.
+            An FMEA is a proactive method to evaluate a process for potential failures and their impacts. Use this tool to identify and prioritize risks based on Severity, Occurrence, and Detection.
+            - **Severity (S):** Impact of the failure (1=Low, 5=High).
+            - **Occurrence (O):** Likelihood of the failure (1=Low, 5=High).
+            - **Detection (D):** How likely you are to detect the failure (1=High, 5=Low).
+            **RPN = S × O × D**. Higher RPNs are higher priorities.
             """)
 
         c1, c2 = st.columns(2)
-        if c1.button("🤖 Suggest Failure Modes with AI", width='stretch'):
+        if c1.button("Suggest Failure Modes with AI", width='stretch', key="fmea_ai"):
             if st.session_state.analysis_results:
                 with st.spinner("AI is suggesting failure modes..."):
-                    insights = st.session_state.analysis_results.get('insights', 'High return rate observed.')
                     suggestions = st.session_state.fmea_generator.suggest_failure_modes(insights, st.session_state.analysis_results)
-                    st.session_state.fmea_data = pd.DataFrame(suggestions)
+                    df = pd.DataFrame(suggestions)
+                    # Ensure score columns exist with default values after AI generation
+                    for col in ['Severity', 'Occurrence', 'Detection']:
+                        if col not in df.columns:
+                            df[col] = 1
+                    st.session_state.fmea_data = df
             else:
                 st.warning("Run an analysis on the dashboard first.")
         
-        if c2.button("➕ Add Manual FMEA Row", width='stretch'):
-            new_row = pd.DataFrame([{"Potential Failure Mode": "", "Potential Effect(s)": "", "Severity": 1, "Potential Cause(s)": "", "Occurrence": 1, "Current Controls": "", "Detection": 1, "RPN": 1}])
-            if 'fmea_data' not in st.session_state or st.session_state.fmea_data is None:
-                st.session_state.fmea_data = new_row
-            else:
-                st.session_state.fmea_data = pd.concat([st.session_state.fmea_data, new_row], ignore_index=True)
+        if c2.button("Add Manual FMEA Row", width='stretch', key="fmea_add"):
+            new_row = pd.DataFrame([{"Potential Failure Mode": "", "Potential Effect(s)": "", "Severity": 1, "Potential Cause(s)": "", "Occurrence": 1, "Current Controls": "", "Detection": 1, "RPN": 0}])
+            st.session_state.fmea_data = pd.concat([st.session_state.fmea_data, new_row], ignore_index=True) if st.session_state.get('fmea_data') is not None else new_row
 
-        if st.session_state.get('fmea_data') is not None:
-            edited_df = st.data_editor(
-                st.session_state.fmea_data,
-                column_config={
-                    "Severity": st.column_config.SelectboxColumn("S", help="Severity of effect (1-5)", options=list(range(1, 6)), required=True),
-                    "Occurrence": st.column_config.SelectboxColumn("O", help="Likelihood of cause occurring (1-5)", options=list(range(1, 6)), required=True),
-                    "Detection": st.column_config.SelectboxColumn("D", help="Likelihood of detecting failure (1-5)", options=list(range(1, 6)), required=True),
-                    "Potential Failure Mode": st.column_config.TextColumn(width="large"),
-                    "Potential Cause(s)": st.column_config.TextColumn(width="large"),
-                },
-                num_rows="dynamic",
-                key="fmea_editor"
-            )
+        if st.session_state.get('fmea_data') is not None and not st.session_state.fmea_data.empty:
+            edited_df = st.data_editor(st.session_state.fmea_data, column_config={
+                    "Severity": st.column_config.SelectboxColumn("S", options=list(range(1, 6)), required=True),
+                    "Occurrence": st.column_config.SelectboxColumn("O", options=list(range(1, 6)), required=True),
+                    "Detection": st.column_config.SelectboxColumn("D", options=list(range(1, 6)), required=True),
+                }, num_rows="dynamic", key="fmea_editor")
             
-            for col in ['Severity', 'Occurrence', 'Detection']:
-                if col not in edited_df.columns:
-                    edited_df[col] = 1
-                edited_df[col] = pd.to_numeric(edited_df[col], errors='coerce').fillna(1).astype(int)
-
-            edited_df['RPN'] = edited_df['Severity'] * edited_df['Occurrence'] * edited_df['Detection']
+            # Recalculate RPN based on edited values
+            edited_df['RPN'] = (
+                pd.to_numeric(edited_df['Severity'], errors='coerce').fillna(1) *
+                pd.to_numeric(edited_df['Occurrence'], errors='coerce').fillna(1) *
+                pd.to_numeric(edited_df['Detection'], errors='coerce').fillna(1)
+            ).astype(int)
             st.session_state.fmea_data = edited_df
+    
+    st.write("") 
+    
+    # --- Tool 2: ISO 14971 Risk Assessment ---
+    with st.container(border=True):
+        st.subheader("ISO 14971 Risk Assessment Generator")
+        with st.form("risk_assessment_form"):
+            st.info("Generates a formal risk assessment for a medical device according to ISO 14971.")
+            ra_product_name = st.text_input("Product Name", st.session_state.target_sku)
+            ra_product_desc = st.text_area("Product Description & Intended Use", height=100)
+            if st.form_submit_button("Generate Risk Assessment", type="primary", width='stretch'):
+                if ra_product_name and ra_product_desc:
+                    with st.spinner("AI is generating the ISO 14971 assessment..."):
+                        st.session_state.risk_assessment = st.session_state.risk_assessment_generator.generate_assessment(ra_product_name, st.session_state.target_sku, ra_product_desc)
+                else:
+                    st.warning("Please provide a product name and description.")
+        
+        if st.session_state.get('risk_assessment'):
+            st.markdown(st.session_state.risk_assessment)
+
+    st.write("") 
+
+    # --- Tool 3: Use-Related Risk Analysis (URRA) ---
+    with st.container(border=True):
+        st.subheader("Use-Related Risk Analysis (URRA) Generator")
+        with st.form("urra_form"):
+            st.info("Generates a URRA based on IEC 62366 to identify risks associated with product usability.")
+            urra_product_name = st.text_input("Product Name", st.session_state.target_sku, key="urra_name")
+            urra_product_desc = st.text_area("Product Description & Intended Use", height=100, key="urra_desc")
+            urra_user = st.text_input("Intended User Profile", placeholder="e.g., Elderly individuals with limited dexterity")
+            urra_env = st.text_input("Intended Use Environment", placeholder="e.g., Home healthcare setting")
+            if st.form_submit_button("Generate URRA", type="primary", width='stretch'):
+                if urra_product_name and urra_product_desc and urra_user and urra_env:
+                    with st.spinner("AI is generating the URRA..."):
+                        st.session_state.urra = st.session_state.urra_generator.generate_urra(urra_product_name, urra_product_desc, urra_user, urra_env)
+                else:
+                    st.warning("Please fill in all fields to generate the URRA.")
+
+        if st.session_state.get('urra'):
+            st.markdown(st.session_state.urra)
 
 def display_vendor_comm_tab():
-    st.header("✉️ Vendor Communications Center")
+    st.header("Vendor Communications Center")
     if st.session_state.api_key_missing: st.error("AI features are disabled."); return
     if not st.session_state.analysis_results: st.info("Run an analysis on the Dashboard tab first to activate this feature."); return
     
@@ -259,198 +287,161 @@ def display_vendor_comm_tab():
         c1, c2 = st.columns(2)
         vendor_name = c1.text_input("Vendor Name")
         contact_name = c2.text_input("Contact Name")
+        english_ability = st.slider("Recipient's English Proficiency", 1, 5, 3, help="1: Low, 5: High")
         
-        english_ability = st.slider("Recipient's English Proficiency", 1, 5, 3)
-        
-        submitted = st.form_submit_button("Draft Email", type="primary")
-        if submitted:
+        if st.form_submit_button("Draft Email", type="primary", width='stretch'):
             with st.spinner("AI is drafting email..."):
                 goal = f"Start a collaborative investigation into the recent return rate for SKU {st.session_state.target_sku}."
                 st.session_state.vendor_email_draft = st.session_state.ai_email_drafter.draft_vendor_email(
-                    goal,
-                    st.session_state.analysis_results, 
-                    st.session_state.target_sku,
-                    vendor_name, 
-                    contact_name, 
-                    english_ability
-                )
+                    goal, st.session_state.analysis_results, st.session_state.target_sku,
+                    vendor_name, contact_name, english_ability)
     
     if st.session_state.vendor_email_draft:
         st.text_area("Generated Draft", st.session_state.vendor_email_draft, height=300)
-        
         if st.button("Generate Formal SCAR Document"):
             with st.spinner("Generating SCAR document..."):
-                scar_buffer = st.session_state.doc_generator.generate_scar_docx(st.session_state.capa_data, vendor_name)
-                st.download_button(
-                    "📥 Download SCAR (.docx)", scar_buffer, 
+                st.download_button("Download SCAR (.docx)", 
+                    st.session_state.doc_generator.generate_scar_docx(st.session_state.capa_data, vendor_name),
                     f"SCAR_{st.session_state.target_sku}_{date.today()}.docx",
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
 def display_compliance_tab():
-    st.header("⚖️ Compliance Center")
+    st.header("Compliance Center")
     if st.session_state.api_key_missing: st.error("AI features are disabled."); return
 
-    with st.expander("Medical Device Classification (U.S. FDA)"):
+    col1, col2 = st.columns(2)
+    with col1, st.container(border=True):
+        st.subheader("Medical Device Classification")
         with st.form("classification_form"):
-            device_desc = st.text_area("Describe your device's intended use:", height=150, placeholder="e.g., A foam cushion intended to provide comfort and support in a wheelchair.")
-            if st.form_submit_button("Classify Device", type="primary"):
-                if not device_desc:
-                    st.warning("Please describe the device.")
-                else:
+            device_desc = st.text_area("Device's intended use:", height=150, placeholder="e.g., A foam cushion for comfort in a wheelchair.")
+            if st.form_submit_button("Classify Device", type="primary", width='stretch'):
+                if device_desc:
                     with st.spinner("AI is classifying..."):
                         st.session_state.medical_device_classification = st.session_state.medical_device_classifier.classify_device(device_desc)
-        if st.session_state.medical_device_classification:
+                else:
+                    st.warning("Please describe the device.")
+        if st.session_state.get('medical_device_classification'):
             res = st.session_state.medical_device_classification
-            if "error" in res:
-                st.error(res['error'])
+            if "error" in res: st.error(res['error'])
             else:
                 st.success(f"**Classification:** {res.get('classification', 'N/A')}")
                 st.markdown(f"**Rationale:** {res.get('rationale', 'N/A')}")
-                with st.container():
-                    st.subheader("Primary Risks")
-                    st.markdown(res.get('risks', 'N/A'))
-                    st.subheader("Regulatory Requirements")
-                    st.markdown(res.get('regulatory_requirements', 'N/A'))
-
-    with st.expander("Pre-Mortem Analysis"):
-        scenario = st.text_input("Define failure scenario:", "Our new product launch for a premium memory foam seat cushion failed.")
-        if st.button("Generate Pre-Mortem Questions"):
+    
+    with col2, st.container(border=True):
+        st.subheader("Pre-Mortem Analysis")
+        scenario = st.text_input("Define failure scenario:", "Our new product launch failed.")
+        if st.button("Generate Pre-Mortem Questions", width='stretch'):
             with st.spinner("AI is generating questions..."):
-                questions = st.session_state.pre_mortem_generator.generate_questions(scenario)
-                st.session_state.pre_mortem_questions = questions
+                st.session_state.pre_mortem_questions = st.session_state.pre_mortem_generator.generate_questions(scenario)
         
-        if 'pre_mortem_questions' in st.session_state and st.session_state.pre_mortem_questions:
-            answers = {}
-            st.subheader("Answer the Pre-Mortem Questions")
-            for q in st.session_state.pre_mortem_questions:
-                answers[q] = st.text_area(q, key=q)
-            if st.button("Summarize Pre-Mortem Analysis"):
+        if st.session_state.get('pre_mortem_questions'):
+            answers = {q: st.text_area(q, key=q, label_visibility="collapsed") for q in st.session_state.pre_mortem_questions}
+            if st.button("Summarize Pre-Mortem Analysis", width='stretch'):
                 qa_list = [{"question": q, "answer": a} for q, a in answers.items() if a]
-                if not qa_list:
-                    st.warning("Please answer at least one question before summarizing.")
-                else:
+                if qa_list:
                     with st.spinner("AI is summarizing..."):
-                        summary = st.session_state.pre_mortem_generator.summarize_answers(qa_list)
-                        st.session_state.pre_mortem_summary = summary
+                        st.session_state.pre_mortem_summary = st.session_state.pre_mortem_generator.summarize_answers(qa_list)
+                else:
+                    st.warning("Please answer at least one question.")
         
-        if 'pre_mortem_summary' in st.session_state and st.session_state.pre_mortem_summary:
-            st.subheader("Pre-Mortem Summary")
+        if st.session_state.get('pre_mortem_summary'):
             st.markdown(st.session_state.pre_mortem_summary)
 
 def display_cost_of_quality_tab():
-    st.header("💰 Cost of Quality (CoQ) Calculator")
+    st.header("Cost of Quality (CoQ) Calculator")
     st.info("Estimate the total cost of quality, broken down into prevention, appraisal, and failure costs.")
 
     with st.form("coq_form"):
-        st.subheader("Prevention Costs (Proactive)")
         c1, c2 = st.columns(2)
-        quality_planning = c1.number_input("Quality Planning ($)", min_value=0.0, step=100.0, help="Costs for creating quality plans, reliability engineering, etc.")
-        training = c2.number_input("Quality Training ($)", min_value=0.0, step=100.0, help="Costs for developing and conducting quality-related training.")
-        
-        st.subheader("Appraisal Costs (Detection)")
-        c1, c2 = st.columns(2)
-        inspection = c1.number_input("Inspection & Testing ($)", min_value=0.0, step=100.0, help="Costs for incoming material inspection, in-process, and final product testing.")
-        audits = c2.number_input("Quality Audits ($)", min_value=0.0, step=100.0, help="Costs to verify the quality system is functioning correctly.")
+        with c1:
+            st.subheader("Prevention Costs")
+            quality_planning = st.number_input("Quality Planning ($)", 0.0, step=100.0)
+            training = st.number_input("Quality Training ($)", 0.0, step=100.0)
+            st.subheader("Failure Costs")
+            scrap_rework = st.number_input("Internal Failures ($)", 0.0, step=100.0)
+            returns_warranty = st.number_input("External Failures ($)", 0.0, step=100.0)
+        with c2:
+            st.subheader("Appraisal Costs")
+            inspection = st.number_input("Inspection & Testing ($)", 0.0, step=100.0)
+            audits = st.number_input("Quality Audits ($)", 0.0, step=100.0)
 
-        st.subheader("Failure Costs (Reactive)")
-        c1, c2 = st.columns(2)
-        scrap_rework = c1.number_input("Internal Failures (Scrap, Rework) ($)", min_value=0.0, step=100.0)
-        returns_warranty = c2.number_input("External Failures (Returns, Warranty) ($)", min_value=0.0, step=100.0)
-
-        submitted = st.form_submit_button("Calculate Cost of Quality", type="primary")
-
-        if submitted:
+        if st.form_submit_button("Calculate Cost of Quality", type="primary", width='stretch'):
             total_prevention = quality_planning + training
             total_appraisal = inspection + audits
             total_failure = scrap_rework + returns_warranty
-            total_coq = total_prevention + total_appraisal + total_failure
-
             st.session_state.coq_results = {
-                "Prevention Costs": total_prevention,
-                "Appraisal Costs": total_appraisal,
-                "Failure Costs": total_failure,
-                "Total Cost of Quality": total_coq
+                "Prevention Costs": total_prevention, "Appraisal Costs": total_appraisal,
+                "Failure Costs": total_failure, "Total Cost of Quality": total_prevention + total_appraisal + total_failure
             }
 
-    if 'coq_results' in st.session_state and st.session_state.coq_results:
-        st.subheader("Cost of Quality Results")
+    if st.session_state.get('coq_results'):
         results = st.session_state.coq_results
+        st.subheader("Cost of Quality Results")
         st.metric("Total Cost of Quality", f"${results['Total Cost of Quality']:,.2f}")
-        
         c1, c2, c3 = st.columns(3)
         c1.metric("Prevention Costs", f"${results['Prevention Costs']:,.2f}")
         c2.metric("Appraisal Costs", f"${results['Appraisal Costs']:,.2f}")
         c3.metric("Failure Costs", f"${results['Failure Costs']:,.2f}")
-
         if results['Total Cost of Quality'] > 0:
-            st.progress(results['Failure Costs'] / results['Total Cost of Quality'], text=f"{results['Failure Costs']/results['Total Cost of Quality']:.1%} Failure Costs")
-
-        if st.button("🤖 Get AI Insights on CoQ"):
-            with st.spinner("AI is analyzing your Cost of Quality..."):
-                response = st.session_state.ai_context_helper.generate_response(
-                    f"Analyze the following Cost of Quality data: {results}. Provide actionable advice on how to shift spending from failure costs to prevention costs."
-                )
-                st.markdown(response)
+            st.progress(results['Failure Costs'] / results['Total Cost of Quality'], text=f"{(results['Failure Costs']/results['Total Cost of Quality']):.1%} Failure Costs")
+        if st.button("Get AI Insights on CoQ", width='stretch'):
+            with st.spinner("AI is analyzing..."):
+                st.markdown(st.session_state.ai_context_helper.generate_response(f"Analyze this CoQ data: {results}. Give advice on shifting spending from failure to prevention."))
 
 def display_exports_tab():
-    st.header("📄 Document Exports")
-    st.info("Generate formal reports based on your session data.")
+    st.header("Document Exports")
+    st.info("Generate a single, comprehensive project summary document.")
     
-    if st.button("Generate CAPA Report (.docx)", type="primary", width='stretch'):
-        if not st.session_state.capa_data.get('issue_description'):
-            st.warning("Please fill out the CAPA form before generating a report.")
+    export_options = st.multiselect(
+        "Select sections to include in the final report:",
+        ["CAPA Form", "FMEA", "ISO 14971 Assessment", "URRA", "Vendor Email Draft"],
+        default=["CAPA Form", "FMEA"]
+    )
+
+    if st.button("Generate Project Summary Report (.docx)", type="primary", width='stretch'):
+        if not st.session_state.capa_data.get('issue_description') and "CAPA Form" in export_options:
+            st.warning("Please fill out the CAPA form before generating a report that includes it.")
         else:
-            with st.spinner("Generating CAPA document..."):
-                fmea_data = st.session_state.get('fmea_data')
-                capa_buffer = st.session_state.doc_generator.generate_capa_docx(st.session_state.capa_data, fmea_data)
-                
+            with st.spinner("Generating comprehensive report..."):
+                doc_buffer = st.session_state.doc_generator.generate_summary_docx(st.session_state, export_options)
                 st.download_button(
-                    "📥 Download CAPA Report", capa_buffer,
-                    f"CAPA_{st.session_state.capa_data.get('capa_number', st.session_state.target_sku)}.docx",
+                    "Download Project Summary", doc_buffer,
+                    f"Project_Summary_{st.session_state.target_sku}_{date.today()}.docx",
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
 
-# --- Process Functions ---
-def process_data(sales_df: pd.DataFrame, returns_df: pd.DataFrame):
-    with st.spinner("Processing data and running analysis..."):
-        processor = st.session_state.data_processor
-        st.session_state.sales_data = processor.process_sales_data(sales_df)
-        st.session_state.returns_data = processor.process_returns_data(returns_df)
-        
+def process_data(sales_df, returns_df):
+    with st.spinner("Processing data..."):
+        st.session_state.sales_data = st.session_state.data_processor.process_sales_data(sales_df)
+        st.session_state.returns_data = st.session_state.data_processor.process_returns_data(returns_df)
         days = (st.session_state.end_date - st.session_state.start_date).days
         st.session_state.analysis_results = run_full_analysis(
             st.session_state.sales_data, st.session_state.returns_data,
-            days, st.session_state.unit_cost, st.session_state.sales_price
-        )
+            days, st.session_state.unit_cost, st.session_state.sales_price)
     st.success("Analysis complete!")
 
 def process_uploaded_files(uploaded_files):
     parser = st.session_state.file_parser
     sales_dfs, returns_dfs = [], []
-    with st.spinner("AI is analyzing uploaded files..."):
+    with st.spinner("AI is analyzing files..."):
         for file in uploaded_files:
             analysis = parser.analyze_file_structure(file, st.session_state.target_sku)
-            st.write(f"File: `{analysis.get('filename', 'N/A')}` → AI identified as: `{analysis.get('content_type', 'unknown')}`")
+            st.write(f"File: `{file.name}` → AI identified as: `{analysis.get('content_type', 'unknown')}`")
             df = parser.extract_data(file, analysis, st.session_state.target_sku)
             if df is not None:
                 if analysis.get('content_type') == 'sales': sales_dfs.append(df)
                 elif analysis.get('content_type') == 'returns': returns_dfs.append(df)
     
-    if not sales_dfs and not returns_dfs:
-        st.warning("AI could not identify any sales or returns data in the uploaded files. Please check the file contents or enter data manually.")
-        return
-
-    sales_df = pd.concat(sales_dfs, ignore_index=True) if sales_dfs else pd.DataFrame()
-    returns_df = pd.concat(returns_dfs, ignore_index=True) if returns_dfs else pd.DataFrame()
-    process_data(sales_df, returns_df)
+    if sales_dfs or returns_dfs:
+        process_data(pd.concat(sales_dfs) if sales_dfs else pd.DataFrame(), pd.concat(returns_dfs) if returns_dfs else pd.DataFrame())
+    else:
+        st.warning("AI could not identify sales or returns data in the files.")
 
 def display_main_app():
     display_header()
     display_sidebar()
 
-    tabs = st.tabs(["📊 Dashboard", "📝 CAPA", "🛡️ Risk & Safety", "✉️ Vendor Comms", "⚖️ Compliance", "💰 Cost of Quality", "📄 Exports"])
-    
+    tabs = st.tabs(["Dashboard", "CAPA", "Risk & Safety", "Vendor Comms", "Compliance", "Cost of Quality", "Exports"])
     with tabs[0]: display_dashboard()
     with tabs[1]: display_capa_form()
     with tabs[2]: display_risk_safety_tab()
@@ -459,48 +450,34 @@ def display_main_app():
     with tabs[5]: display_cost_of_quality_tab()
     with tabs[6]: display_exports_tab()
     
+    st.divider()
     if not st.session_state.api_key_missing:
-        with st.expander("🤖 AI Assistant (Context-Aware)"):
-            st.info("Ask the AI a question, and it will use data from all tabs to give you a comprehensive answer.")
-            user_query = st.text_input("What would you like to know?", key="ai_assistant_query")
+        with st.expander("AI Assistant (Context-Aware)"):
+            user_query = st.text_input("What would you like to know?")
             if user_query:
                 with st.spinner("AI is synthesizing an answer..."):
-                    response = st.session_state.ai_context_helper.generate_response(user_query)
-                    st.markdown(response)
+                    st.markdown(st.session_state.ai_context_helper.generate_response(user_query))
 
 def display_workflow_selection():
-    st.header("🎯 Select Your Goal")
+    st.header("Select Your Goal")
     st.write("Choose your primary objective to get started.")
     
-    workflow_options = [
-        "🔍 Analyze Product Quality & Start a CAPA",
-        "🔬 Perform a Risk Analysis (FMEA)",
-        "🚀 Conduct a Pre-Mortem for a New Product",
-        "📄 Just Analyze Customer Feedback Files",
-        " 자유롭게 사용 (Free Use Mode)"
-    ]
+    options = ["Analyze Product Quality & Start a CAPA", "Perform a Risk Analysis (FMEA)", "Conduct a Pre-Mortem for a New Product", "Analyze Customer Feedback Files", "Free Use Mode"]
+    selection = st.radio("What would you like to accomplish?", options)
     
-    selection = st.radio("What would you like to accomplish in this session?", options=workflow_options, key="workflow_selection")
-    
-    if st.button("Begin Workflow", type="primary", width="stretch"):
+    if st.button("Begin Workflow", type="primary", width='stretch'):
         st.session_state.workflow_mode = selection
         st.rerun()
 
-# --- Main App Flow ---
 def main():
-    load_css()
     initialize_session_state()
-    
-    if not check_password():
-        st.stop()
-
+    if not check_password(): st.stop()
+    load_css()
     initialize_components()
-
     if not st.session_state.workflow_mode:
         display_workflow_selection()
     else:
         display_main_app()
-
 
 if __name__ == "__main__":
     main()

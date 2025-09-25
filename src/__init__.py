@@ -6,7 +6,7 @@ from .parsers import AIFileParser
 from .data_processing import DataProcessor
 from .analysis import run_full_analysis
 from .compliance import validate_capa_data
-from .document_generator import CapaDocumentGenerator
+from .document_generator import DocumentGenerator  # Corrected this line
 from .ai_capa_helper import AICAPAHelper, AIEmailDrafter, MedicalDeviceClassifier, RiskAssessmentGenerator, UseRelatedRiskAnalyzer
 from .fmea import FMEA
 from .pre_mortem import PreMortem
@@ -22,7 +22,7 @@ __all__ = [
     'DataProcessor',
     'run_full_analysis',
     'validate_capa_data',
-    'CapaDocumentGenerator',
+    'DocumentGenerator',  # Corrected this line
     'AICAPAHelper',
     'AIEmailDrafter',
     'MedicalDeviceClassifier',

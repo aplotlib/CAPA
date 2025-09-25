@@ -51,7 +51,7 @@ def initialize_session_state():
         'analysis_results': None, 'capa_data': {}, 'fmea_data': None,
         'vendor_email_draft': None, 'risk_assessment': None, 'urra': None,
         'pre_mortem_summary': None, 'medical_device_classification': None,
-        'logged_in': False, 'workflow_mode': None # New state variables
+        'logged_in': False, 'workflow_mode': None
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -117,7 +117,6 @@ def display_sidebar():
         st.header("⚙️ Configuration")
         st.session_state.target_sku = st.text_input("🎯 Target Product SKU", st.session_state.target_sku)
         
-        # --- Date Range Selector ---
         date_range_options = ["Last 30 Days", "Last 7 Days", "Last 90 Days", "Year to Date", "Custom Range"]
         selected_range = st.selectbox("🗓️ Select Date Range", options=date_range_options)
 
@@ -191,9 +190,26 @@ def display_dashboard():
 
 def display_risk_safety_tab():
     st.header("🛡️ Risk & Safety Analysis Hub")
-    if st.session_state.api_key_missing: st.error("AI features are disabled. Please configure your API key."); return
+    if st.session_state.api_key_missing:
+        st.error("AI features are disabled. Please configure your API key.")
+        return
 
     with st.expander("🔬 Failure Mode and Effects Analysis (FMEA)", expanded=True):
+        with st.expander("What is an FMEA and how does it work?"):
+            st.markdown("""
+            **Failure Mode and Effects Analysis (FMEA)** is a systematic, proactive method for evaluating a process to identify where and how it might fail and to assess the relative impact of different failures.
+
+            **How to use this table:**
+            1.  **Suggest with AI:** Use the AI button to generate potential failure modes based on your dashboard data.
+            2.  **Add Manually:** Add rows for any other failure modes you can think of.
+            3.  **Score S-O-D:** For each failure mode, use the dropdowns to score the following on a 1 to 5 scale:
+                - **Severity (S):** How severe is the *effect* of the failure on the user? (1 = Minor, 5 = Catastrophic)
+                - **Occurrence (O):** How frequently is the *cause* of the failure likely to occur? (1 = Rare, 5 = Frequent)
+                - **Detection (D):** How likely are you to *detect* the failure before it reaches the user? (1 = Very Likely, 5 = Very Unlikely)
+            
+            **Risk Priority Number (RPN):** The RPN is calculated automatically as **S × O × D**. A higher RPN indicates a higher-risk failure mode that should be prioritized for corrective action.
+            """)
+
         c1, c2 = st.columns(2)
         if c1.button("🤖 Suggest Failure Modes with AI", width='stretch'):
             if st.session_state.analysis_results:
@@ -201,19 +217,33 @@ def display_risk_safety_tab():
                     insights = st.session_state.analysis_results.get('insights', 'High return rate observed.')
                     suggestions = st.session_state.fmea_generator.suggest_failure_modes(insights, st.session_state.analysis_results)
                     st.session_state.fmea_data = pd.DataFrame(suggestions)
-            else: st.warning("Run an analysis on the dashboard first.")
+            else:
+                st.warning("Run an analysis on the dashboard first.")
+        
         if c2.button("➕ Add Manual FMEA Row", width='stretch'):
             new_row = pd.DataFrame([{"Potential Failure Mode": "", "Potential Effect(s)": "", "Severity": 1, "Potential Cause(s)": "", "Occurrence": 1, "Current Controls": "", "Detection": 1, "RPN": 1}])
-            st.session_state.fmea_data = pd.concat([st.session_state.fmea_data, new_row], ignore_index=True) if st.session_state.fmea_data is not None else new_row
+            if 'fmea_data' not in st.session_state or st.session_state.fmea_data is None:
+                st.session_state.fmea_data = new_row
+            else:
+                st.session_state.fmea_data = pd.concat([st.session_state.fmea_data, new_row], ignore_index=True)
 
-        if st.session_state.fmea_data is not None:
-            st.info("You can edit the table below. Severity, Occurrence, and Detection should be on a 1-5 scale.")
-            edited_df = st.data_editor(st.session_state.fmea_data, num_rows="dynamic")
+        if st.session_state.get('fmea_data') is not None:
+            edited_df = st.data_editor(
+                st.session_state.fmea_data,
+                column_config={
+                    "Severity": st.column_config.SelectboxColumn("S", help="Severity of effect (1-5)", options=list(range(1, 6)), required=True),
+                    "Occurrence": st.column_config.SelectboxColumn("O", help="Likelihood of cause occurring (1-5)", options=list(range(1, 6)), required=True),
+                    "Detection": st.column_config.SelectboxColumn("D", help="Likelihood of detecting failure (1-5)", options=list(range(1, 6)), required=True),
+                    "Potential Failure Mode": st.column_config.TextColumn(width="large"),
+                    "Potential Cause(s)": st.column_config.TextColumn(width="large"),
+                },
+                num_rows="dynamic",
+                key="fmea_editor"
+            )
             
-            required_cols = ['Severity', 'Occurrence', 'Detection']
-            for col in required_cols:
+            for col in ['Severity', 'Occurrence', 'Detection']:
                 if col not in edited_df.columns:
-                    edited_df[col] = 1 
+                    edited_df[col] = 1
                 edited_df[col] = pd.to_numeric(edited_df[col], errors='coerce').fillna(1).astype(int)
 
             edited_df['RPN'] = edited_df['Severity'] * edited_df['Occurrence'] * edited_df['Detection']
@@ -312,7 +342,7 @@ def display_cost_of_quality_tab():
     st.header("💰 Cost of Quality (CoQ) Calculator")
     st.info("Estimate the total cost of quality, broken down into prevention, appraisal, and failure costs.")
 
-    with st.form("co_form"):
+    with st.form("coq_form"):
         st.subheader("Prevention Costs (Proactive)")
         c1, c2 = st.columns(2)
         quality_planning = c1.number_input("Quality Planning ($)", min_value=0.0, step=100.0, help="Costs for creating quality plans, reliability engineering, etc.")
@@ -372,7 +402,9 @@ def display_exports_tab():
             st.warning("Please fill out the CAPA form before generating a report.")
         else:
             with st.spinner("Generating CAPA document..."):
-                capa_buffer = st.session_state.doc_generator.generate_capa_docx(st.session_state.capa_data)
+                fmea_data = st.session_state.get('fmea_data')
+                capa_buffer = st.session_state.doc_generator.generate_capa_docx(st.session_state.capa_data, fmea_data)
+                
                 st.download_button(
                     "📥 Download CAPA Report", capa_buffer,
                     f"CAPA_{st.session_state.capa_data.get('capa_number', st.session_state.target_sku)}.docx",
@@ -381,7 +413,6 @@ def display_exports_tab():
 
 # --- Process Functions ---
 def process_data(sales_df: pd.DataFrame, returns_df: pd.DataFrame):
-    """Processes dataframes and runs the main analysis."""
     with st.spinner("Processing data and running analysis..."):
         processor = st.session_state.data_processor
         st.session_state.sales_data = processor.process_sales_data(sales_df)
@@ -395,12 +426,10 @@ def process_data(sales_df: pd.DataFrame, returns_df: pd.DataFrame):
     st.success("Analysis complete!")
 
 def process_uploaded_files(uploaded_files):
-    """Uses AI to parse uploaded files and runs analysis."""
     parser = st.session_state.file_parser
     sales_dfs, returns_dfs = [], []
     with st.spinner("AI is analyzing uploaded files..."):
         for file in uploaded_files:
-            file_bytes = file.getvalue()
             analysis = parser.analyze_file_structure(file, st.session_state.target_sku)
             st.write(f"File: `{analysis.get('filename', 'N/A')}` → AI identified as: `{analysis.get('content_type', 'unknown')}`")
             df = parser.extract_data(file, analysis, st.session_state.target_sku)
@@ -417,7 +446,6 @@ def process_uploaded_files(uploaded_files):
     process_data(sales_df, returns_df)
 
 def display_main_app():
-    """The main application UI, shown after login and workflow selection."""
     display_header()
     display_sidebar()
 
@@ -441,7 +469,6 @@ def display_main_app():
                     st.markdown(response)
 
 def display_workflow_selection():
-    """Displays the initial workflow selection menu."""
     st.header("🎯 Select Your Goal")
     st.write("Choose your primary objective to get started.")
     

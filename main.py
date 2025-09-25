@@ -67,7 +67,7 @@ def initialize_session_state():
         'target_sku': 'SKU-12345', 'unit_cost': 15.50, 'sales_price': 49.99,
         'start_date': date.today() - timedelta(days=30), 'end_date': date.today(),
         'sales_data': pd.DataFrame(), 'returns_data': pd.DataFrame(),
-        'analysis_results': None, 'capa_data': {}, 'fmea_data': None,
+        'analysis_results': None, 'capa_data': {}, 'fmea_data': pd.DataFrame(),
         'vendor_email_draft': None, 'risk_assessment': None, 'urra': None,
         'pre_mortem_summary': None, 'medical_device_classification': None,
         'logged_in': False, 'workflow_mode': None
@@ -208,9 +208,10 @@ def display_risk_safety_tab():
         if c1.button("Suggest Failure Modes with AI", width='stretch', key="fmea_ai"):
             if st.session_state.analysis_results:
                 with st.spinner("AI is suggesting failure modes..."):
+                    insights = st.session_state.analysis_results.get('insights', 'High return rate observed.')
                     suggestions = st.session_state.fmea_generator.suggest_failure_modes(insights, st.session_state.analysis_results)
                     df = pd.DataFrame(suggestions)
-                    # Ensure score columns exist with default values after AI generation
+                    # Ensure score columns exist with default values
                     for col in ['Severity', 'Occurrence', 'Detection']:
                         if col not in df.columns:
                             df[col] = 1
@@ -219,17 +220,16 @@ def display_risk_safety_tab():
                 st.warning("Run an analysis on the dashboard first.")
         
         if c2.button("Add Manual FMEA Row", width='stretch', key="fmea_add"):
-            new_row = pd.DataFrame([{"Potential Failure Mode": "", "Potential Effect(s)": "", "Severity": 1, "Potential Cause(s)": "", "Occurrence": 1, "Current Controls": "", "Detection": 1, "RPN": 0}])
-            st.session_state.fmea_data = pd.concat([st.session_state.fmea_data, new_row], ignore_index=True) if st.session_state.get('fmea_data') is not None else new_row
+            new_row = pd.DataFrame([{"Potential Failure Mode": "", "Potential Effect(s)": "", "Severity": 1, "Potential Cause(s)": "", "Occurrence": 1, "Current Controls": "", "Detection": 1, "RPN": 1}])
+            st.session_state.fmea_data = pd.concat([st.session_state.fmea_data, new_row], ignore_index=True)
 
-        if st.session_state.get('fmea_data') is not None and not st.session_state.fmea_data.empty:
+        if not st.session_state.fmea_data.empty:
             edited_df = st.data_editor(st.session_state.fmea_data, column_config={
                     "Severity": st.column_config.SelectboxColumn("S", options=list(range(1, 6)), required=True),
                     "Occurrence": st.column_config.SelectboxColumn("O", options=list(range(1, 6)), required=True),
                     "Detection": st.column_config.SelectboxColumn("D", options=list(range(1, 6)), required=True),
                 }, num_rows="dynamic", key="fmea_editor")
             
-            # Recalculate RPN based on edited values
             edited_df['RPN'] = (
                 pd.to_numeric(edited_df['Severity'], errors='coerce').fillna(1) *
                 pd.to_numeric(edited_df['Occurrence'], errors='coerce').fillna(1) *

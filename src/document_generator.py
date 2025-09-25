@@ -4,149 +4,112 @@ from typing import Dict, Optional, Any, List
 from io import BytesIO
 from datetime import datetime, date
 from docx import Document
-from docx.shared import Inches
+from docx.shared import Inches, Pt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 import pandas as pd
 
-class CapaDocumentGenerator:
-    """Generates formal, detailed Word document reports from structured data."""
+class DocumentGenerator:
+    """
+    Generates formal Word documents for CAPA Reports, SCARs, and combined reports.
+    """
 
-    def __init__(self):
-        """Initializes the document generator."""
-        pass
+    def _add_main_table_row(self, table, heading: str, content: str):
+        """Helper to add a formatted row to the main CAPA/SCAR table."""
+        row_cells = table.add_row().cells
+        p = row_cells[0].paragraphs[0]
+        p.add_run(heading).bold = True
+        row_cells[1].text = content if content is not None else ''
 
-    def _parse_markdown_table(self, markdown_text: str) -> (List[str], List[List[str]]):
-        """
-        Parses a Markdown table into a header and a list of rows.
-        Handles potential formatting errors gracefully.
-        """
-        if not isinstance(markdown_text, str) or not markdown_text.strip():
-            return [], []
+    def generate_capa_docx(self, capa_data: Dict[str, Any]) -> BytesIO:
+        """Generates a formal CAPA report matching the user-provided PDF template."""
+        doc = Document()
+        doc.add_heading("Corrective and Preventive Action (CAPA) Report", level=1)
 
-        lines = [line.strip() for line in markdown_text.strip().split('\n')]
-        lines = [line for line in lines if line]
+        # --- Header Table ---
+        header_table = doc.add_table(rows=2, cols=2)
+        header_table.cell(0, 0).text = f"CAPA Number: {capa_data.get('capa_number', 'N/A')}"
+        header_table.cell(0, 1).text = f"Date: {capa_data.get('date', date.today()).strftime('%Y-%m-%d')}"
+        header_table.cell(1, 0).text = "To: [Name, Title, Organization]"
+        header_table.cell(1, 1).text = f"Prepared By: {capa_data.get('prepared_by', '[Name, Title, Organization]')}"
+        doc.add_paragraph()
 
-        if len(lines) < 2:
-            return [], []
+        # --- Main Content Table ---
+        main_table = doc.add_table(rows=1, cols=2)
+        main_table.style = 'Table Grid'
+        main_table.columns[0].width = Inches(1.5)
+        main_table.columns[1].width = Inches(6.0)
+        main_table.rows[0].cells[0].text = "Section" # Hidden Header
+        main_table.rows[0].cells[1].text = "Details" # Hidden Header
 
-        header_line, separator_line, data_lines = None, None, []
-        for i, line in enumerate(lines):
-            if '|' in line and i + 1 < len(lines) and '---' in lines[i+1]:
-                header_line, separator_line, data_lines = lines[i], lines[i+1], lines[i+2:]
-                break
-        
-        if not header_line or not separator_line:
-            return [], []
-
-        header = [h.strip() for h in header_line.split('|') if h.strip()]
-        table_data = []
-        for line in data_lines:
-            if '|' in line:
-                row = [cell.strip() for cell in line.split('|')]
-                # Clean up empty cells from leading/trailing pipes
-                cleaned_row = row[1:-1] if len(row) > 2 and not row[0] and not row[-1] else row
-                if len(cleaned_row) == len(header):
-                    table_data.append(cleaned_row)
-        return header, table_data
-
-    def _add_df_to_doc(self, doc: Document, df: pd.DataFrame):
-        """Adds a Pandas DataFrame as a table to the Word document."""
-        if df is None or df.empty:
-            return
-        
-        table = doc.add_table(rows=1, cols=len(df.columns))
-        table.style = 'Table Grid'
-        
-        hdr_cells = table.rows[0].cells
-        for i, col_name in enumerate(df.columns):
-            hdr_cells[i].text = str(col_name)
-
-        for index, row in df.iterrows():
-            row_cells = table.add_row().cells
-            for i, value in enumerate(row):
-                row_cells[i].text = str(value)
-
-    def _add_markdown_table_to_doc(self, doc: Document, markdown_text: str):
-        """Parses a Markdown table and adds it to the Word document."""
-        if not markdown_text:
-            return
-        header, data = self._parse_markdown_table(markdown_text)
-        if not header or not data:
-            doc.add_paragraph(markdown_text)
-            return
-
-        table = doc.add_table(rows=1, cols=len(header))
-        table.style = 'Table Grid'
-
-        hdr_cells = table.rows[0].cells
-        for i, col_name in enumerate(header):
-            hdr_cells[i].text = col_name
-        
-        for row_data in data:
-            row_cells = table.add_row().cells
-            for i, cell_value in enumerate(row_data):
-                row_cells[i].text = cell_value
-    
-    def _add_capa_to_doc(self, doc: Document, capa_data: Dict[str, Any]):
-        """Adds the CAPA form data to the Word document in a structured table."""
-        if not capa_data:
-            return
-        doc.add_heading("Corrective and Preventive Action (CAPA) Report", level=2)
-        table = doc.add_table(rows=0, cols=2)
-        table.style = 'Table Grid'
-        
-        def add_row(field_name: str, value: Any):
-            row_cells = table.add_row().cells
-            row_cells[0].text = field_name
-            if isinstance(value, date):
-                value = value.strftime('%Y-%m-%d')
-            row_cells[1].text = str(value if value is not None else '')
-
+        # --- Populate Main Table ---
         field_map = {
-            'capa_number': "CAPA Number", 'date': "Initiation Date", 'product_name': "Product Name/Model",
-            'prepared_by': "Prepared By", 'source_of_issue': "Source of Issue", 'issue_description': "Description of Non-conformity",
-            'immediate_containment_actions': "Immediate Actions", 'risk_severity': "Risk Severity (1-5)",
-            'risk_probability': "Risk Probability (1-5)", 'root_cause': "Root Cause Analysis",
-            'corrective_action': "Corrective Action(s)", 'preventive_action': "Preventive Action(s)",
-            'effectiveness_verification_plan': "Verification Plan", 'closed_by': "Closed By", 'closure_date': "Closure Date"
+            "Issue": capa_data.get('issue_description', ''),
+            "Immediate Actions/Corrections": capa_data.get('immediate_containment_actions', ''),
+            "Root Cause": capa_data.get('root_cause', ''),
+            "Corrective Action": capa_data.get('corrective_action', ''),
+            "Implementation of Corrective Actions": capa_data.get('corrective_action_implementation', ''),
+            "Preventive Action": capa_data.get('preventive_action', ''),
+            "Implementation of Preventive Actions": capa_data.get('preventive_action_implementation', '')
         }
-        for key, name in field_map.items():
-            add_row(name, capa_data.get(key, ''))
+        for heading, content in field_map.items():
+            self._add_main_table_row(main_table, heading, str(content))
+        
         doc.add_page_break()
 
-    def export_all_to_docx(self, content: Dict[str, Any]) -> BytesIO:
-        """Exports a combined report of all analyses to a Word document."""
-        doc = Document()
-        doc.add_heading(f"Combined Quality Report for SKU: {content.get('sku', 'N/A')}", level=1)
-        p = doc.add_paragraph()
-        p.add_run(f"Report Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}").italic = True
+        # --- Effectiveness Check Section ---
+        doc.add_heading("Effectiveness Check", level=2)
+        eff_table = doc.add_table(rows=1, cols=2)
+        eff_table.style = 'Table Grid'
+        eff_table.columns[0].width = Inches(1.5)
+        eff_table.columns[1].width = Inches(6.0)
+        eff_table.rows[0].cells[0].text = "Section" # Hidden Header
+        eff_table.rows[0].cells[1].text = "Details" # Hidden Header
         
-        if content.get('dashboard'):
-            doc.add_heading("Dashboard Summary & AI Insights", level=2)
-            results = content['dashboard']
-            summary_df = results.get('return_summary')
-            if summary_df is not None and not summary_df.empty:
-                self._add_df_to_doc(doc, summary_df)
-            doc.add_heading("AI-Generated Insights", level=3)
-            doc.add_paragraph(results.get('insights', 'No insights were generated.'))
-            doc.add_page_break()
-            
-        if content.get('capa'):
-            self._add_capa_to_doc(doc, content['capa'])
+        self._add_main_table_row(eff_table, "Effectiveness Check Plan", str(capa_data.get('effectiveness_verification_plan', '')))
+        self._add_main_table_row(eff_table, "Effectiveness Check Findings", str(capa_data.get('effectiveness_check_findings', '')))
 
-        if content.get('fmea') is not None:
-            doc.add_heading("Failure Mode and Effects Analysis (FMEA)", level=2)
-            self._add_df_to_doc(doc, content['fmea'])
-            doc.add_page_break()
+        # --- Signature Block ---
+        doc.add_paragraph("\n\n")
+        sig_p = doc.add_paragraph()
+        sig_p.add_run("________________________________________\t\t\t").bold = False
+        sig_p.add_run("____________________").bold = False
+        
+        sig_p2 = doc.add_paragraph()
+        sig_p2.add_run("Signature, Quality Manager\t\t\t\t\t").bold = True
+        sig_p2.add_run("Date of Signature").bold = True
 
-        if content.get('risk_assessment'):
-            doc.add_heading("ISO 14971 Risk Assessment", level=2)
-            self._add_markdown_table_to_doc(doc, content['risk_assessment'])
-            doc.add_page_break()
+        buffer = BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+        return buffer
 
-        if content.get('urra'):
-            doc.add_heading("Use-Related Risk Analysis (URRA - IEC 62366)", level=2)
-            self._add_markdown_table_to_doc(doc, content['urra'])
-            doc.add_page_break()
+    def generate_scar_docx(self, capa_data: Dict[str, Any], vendor_name: str) -> BytesIO:
+        """Generates a formal Supplier Corrective Action Request (SCAR) document."""
+        doc = Document()
+        doc.add_heading("Supplier Corrective Action Request (SCAR)", level=1)
+
+        # --- Header Table ---
+        header_table = doc.add_table(rows=3, cols=2)
+        header_table.cell(0, 0).text = f"SCAR Number: {capa_data.get('capa_number', 'N/A').replace('CAPA', 'SCAR')}"
+        header_table.cell(0, 1).text = f"Date: {date.today().strftime('%Y-%m-%d')}"
+        header_table.cell(1, 0).text = f"To: {vendor_name}"
+        header_table.cell(1, 1).text = f"From: {capa_data.get('prepared_by', 'Quality Department')}"
+        header_table.cell(2, 0).merge(header_table.cell(2, 1))
+        header_table.cell(2, 0).text = f"Product/SKU Affected: {capa_data.get('product_name', 'N/A')}"
+        doc.add_paragraph()
+
+        # --- Main Content Table ---
+        main_table = doc.add_table(rows=1, cols=2)
+        main_table.style = 'Table Grid'
+        main_table.columns[0].width = Inches(2.0)
+        main_table.columns[1].width = Inches(5.5)
+        main_table.rows[0].cells[0].text = "Section"
+        main_table.rows[0].cells[1].text = "Details"
+        
+        self._add_main_table_row(main_table, "Description of Non-conformance", str(capa_data.get('issue_description', '')))
+        self._add_main_table_row(main_table, "Our Initial Root Cause Analysis", str(capa_data.get('root_cause', '')))
+        self._add_main_table_row(main_table, "Action Required from Supplier", "Please investigate the non-conformance, perform a thorough root cause analysis, and provide a detailed corrective action plan to prevent recurrence.")
+        self._add_main_table_row(main_table, "Response Due Date", f"A formal response is required within 15 business days, by {(date.today() + pd.Timedelta(days=21)).strftime('%Y-%m-%d')}.") # Approx 15 business days
 
         buffer = BytesIO()
         doc.save(buffer)

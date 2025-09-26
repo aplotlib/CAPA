@@ -23,7 +23,7 @@ def display_capa_tab():
         if not st.session_state.get('analysis_results'):
             st.warning("Run an analysis on the Dashboard tab to enable AI-powered suggestions.")
         else:
-            if st.button("🤖 Get AI Suggestions for CAPA Form", help="Click here to use AI to populate the fields below based on the analysis results."):
+            if st.button("🤖 Get AI Suggestions for CAPA Form", help="Click here to use AI to populate the fields below based on the analysis results.", use_container_width=True):
                 with st.spinner("AI is generating CAPA suggestions..."):
                     issue_summary = st.session_state.analysis_results.get('insights', 'No summary available.')
                     suggestions = st.session_state.ai_capa_helper.generate_capa_suggestions(
@@ -88,7 +88,7 @@ def display_capa_tab():
 
     # --- Validation ---
     st.divider()
-    if st.button("Validate CAPA Data", type="primary"):
+    if st.button("Validate CAPA Data", type="primary", use_container_width=True):
         is_valid, errors, warnings = validate_capa_data(st.session_state.capa_data)
         if errors:
             for error in errors:

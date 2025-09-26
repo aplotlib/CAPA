@@ -24,7 +24,7 @@ def display_capa_form():
         if not st.session_state.get('analysis_results'):
             st.warning("Run an analysis on the Dashboard tab to enable AI-powered suggestions.")
         else:
-            if st.button("🤖 Get AI Suggestions for CAPA Form", width='stretch'):
+            if st.button("🤖 Get AI Suggestions for CAPA Form", help="Click here to use AI to populate the fields below based on the analysis results."):
                 with st.spinner("AI is generating CAPA suggestions..."):
                     issue_summary = st.session_state.analysis_results.get('insights', 'No summary available.')
                     suggestions = st.session_state.ai_capa_helper.generate_capa_suggestions(
@@ -61,7 +61,7 @@ def display_capa_form():
 
     with st.expander("🔍 Step 2: Investigation & Root Cause Analysis"):
         st.markdown("##### **2.1 Immediate Actions**")
-        data['immediate_containment_actions'] = st.text_area("Immediate Containment Actions Taken", value=data.get('immediate_containment_actions', ''), height=100)
+        data['immediate_actions'] = st.text_area("Immediate Actions/Corrections", value=data.get('immediate_actions', ''), height=100, help="How will we correct the issue at hand? How will we 'stop the bleeding?'")
 
         st.markdown("##### **2.2 Risk Assessment**")
         r_col1, r_col2 = st.columns(2)
@@ -73,10 +73,18 @@ def display_capa_form():
 
     with st.expander("🛠️ Step 3: Corrective & Preventive Action Plan"):
         data['corrective_action'] = st.text_area("Corrective Action(s) to eliminate the root cause", value=data.get('corrective_action', ''), height=150)
+        data['implementation_of_corrective_actions'] = st.text_area("Implementation of Corrective Actions", value=data.get('implementation_of_corrective_actions', ''), height=100, help="Who will do what by when? Include responsibilities and due dates.")
+        
+        st.divider()
+        
         data['preventive_action'] = st.text_area("Preventive Action(s) to prevent recurrence", value=data.get('preventive_action', ''), height=150)
+        data['implementation_of_preventive_actions'] = st.text_area("Implementation of Preventive Actions", value=data.get('implementation_of_preventive_actions', ''), height=100, help="How will we determine all actions taken were effective?")
 
     with st.expander("✅ Step 4: Verification & Closure"):
-        data['effectiveness_verification_plan'] = st.text_area("Plan to Verify Effectiveness of Actions", value=data.get('effectiveness_verification_plan', ''), height=150)
+        data['effectiveness_verification_plan'] = st.text_area("Effectiveness Check Plan", value=data.get('effectiveness_verification_plan', ''), height=150, help="How will we determine all actions taken were effective?")
+        data['effectiveness_check_findings'] = st.text_area("Effectiveness Check Findings", value=data.get('effectiveness_check_findings', ''), height=150, help="Were the actions taken effective? What objective evidence is there to demonstrate so?")
+
+        st.divider()
         c_col1, c_col2 = st.columns(2)
         data['closed_by'] = c_col1.text_input("Closed By", value=data.get('closed_by', ''))
         # Ensure date input for closure can be None
@@ -84,7 +92,7 @@ def display_capa_form():
 
     # --- Validation ---
     st.divider()
-    if st.button("Validate CAPA Data", width='stretch', type="primary"):
+    if st.button("Validate CAPA Data", type="primary"):
         is_valid, errors, warnings = validate_capa_data(st.session_state.capa_data)
         if errors:
             for error in errors:

@@ -94,10 +94,14 @@ class DocumentGenerator:
                 "Product Name / Model": capa_data.get('product_name', 'N/A'),
                 "Initiation Date": capa_data.get('date', date.today()).strftime('%Y-%m-%d'),
                 "Problem Description": capa_data.get('issue_description', ''),
+                "Immediate Actions/Corrections": capa_data.get('immediate_actions', ''),
                 "Root Cause Analysis": capa_data.get('root_cause', ''),
                 "Corrective Action Plan": capa_data.get('corrective_action', ''),
+                "Implementation of Corrective Actions": capa_data.get('implementation_of_corrective_actions', ''),
                 "Preventive Action Plan": capa_data.get('preventive_action', ''),
-                "Effectiveness Verification Plan": capa_data.get('effectiveness_verification_plan', '')
+                "Implementation of Preventive Actions": capa_data.get('implementation_of_preventive_actions', ''),
+                "Effectiveness Check Plan": capa_data.get('effectiveness_verification_plan', ''),
+                "Effectiveness Check Findings": capa_data.get('effectiveness_check_findings', '')
             }
             for heading, content in field_map.items():
                 self._add_main_table_row(main_table, heading, content)
@@ -118,10 +122,35 @@ class DocumentGenerator:
         if "Vendor Email Draft" in selected_sections and session_data.get('vendor_email_draft'):
             self._add_markdown_text(doc, session_data['vendor_email_draft'], "Vendor Communication Draft")
 
+        # --- Human Factors Report Section ---
+        if "Human Factors Report" in selected_sections and session_data.get('human_factors_data'):
+            self._generate_human_factors_section(doc, session_data['human_factors_data'])
+
         buffer = BytesIO()
         doc.save(buffer)
         buffer.seek(0)
         return buffer
+
+    def _generate_human_factors_section(self, doc: Document, hf_data: Dict[str, Any]):
+        """Generates the Human Factors section of the report."""
+        doc.add_page_break()
+        doc.add_heading("Human Factors and Usability Engineering Report", level=2)
+
+        section_map = {
+            "Conclusion": "conclusion_statement",
+            "Descriptions of Intended Device Users, Uses, Use Environments, and Training": "descriptions",
+            "Description of Device User Interface": "device_interface",
+            "Summary of Known Use Problems": "known_problems",
+            "Analysis of Hazards and Risks Associated with Use of the Device": "hazards_analysis",
+            "Summary of Preliminary Analyses and Evaluations": "preliminary_analyses",
+            "Description and Categorization of Critical Tasks": "critical_tasks",
+            "Details of Human Factors Validation Testing": "validation_testing"
+        }
+
+        for title, key in section_map.items():
+            doc.add_heading(title, level=3)
+            content = hf_data.get(key, "No data provided for this section.")
+            doc.add_paragraph(str(content))
 
     def generate_scar_docx(self, capa_data: Dict[str, Any], vendor_name: str) -> BytesIO:
         """Generates a standalone Supplier Corrective Action Request (SCAR) document."""

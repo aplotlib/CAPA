@@ -33,21 +33,28 @@ def load_css():
     """Loads custom CSS for styling the Streamlit application."""
     st.markdown("""
     <style>
-        @import url('https://fonts.googleapis.comcom/css2?family=Inter:wght@400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         html, body, [class*="st-"], [class*="css-"] {
             font-family: 'Inter', sans-serif;
         }
+        .main-header {
+            text-align: center;
+            padding: 2rem 0;
+            background-color: #F8F9FA;
+            border-radius: 0.5rem;
+            margin-bottom: 2rem;
+        }
         .main-header h1 {
             font-weight: 700;
-            font-size: 2.2rem;
+            font-size: 2.5rem;
             color: #1a1a2e;
-            text-align: center;
         }
         .main-header p {
             color: #4F4F4F;
             font-size: 1.1rem;
-            text-align: center;
-            margin-bottom: 2rem;
+        }
+        .stTabs [data-baseweb="tab-list"] {
+        		gap: 24px;
         }
     </style>
     """, unsafe_allow_html=True)

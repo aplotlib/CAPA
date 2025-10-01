@@ -14,7 +14,7 @@ class AICAPAHelper:
         if api_key:
             try:
                 self.client = openai.OpenAI(api_key=api_key)
-                self.model = "gpt-4o"
+                self.model = "qms-v2-stable-lr"
             except Exception as e:
                 print(f"Failed to initialize AI helper: {e}")
 
@@ -64,7 +64,7 @@ class AIEmailDrafter:
         if api_key:
             try:
                 self.client = openai.OpenAI(api_key=api_key)
-                self.model = "gpt-4o"
+                self.model = "qms-v2-stable-lr"
             except Exception as e:
                 print(f"Failed to initialize AI Email Drafter: {e}")
 
@@ -127,7 +127,7 @@ class MedicalDeviceClassifier:
         if api_key:
             try:
                 self.client = openai.OpenAI(api_key=api_key)
-                self.model = "gpt-4o"
+                self.model = "qms-v2-stable-lr"
             except Exception as e:
                 print(f"Failed to initialize Medical Device Classifier: {e}")
 
@@ -176,7 +176,7 @@ class RiskAssessmentGenerator:
         if api_key:
             try:
                 self.client = openai.OpenAI(api_key=api_key)
-                self.model = "gpt-4o"
+                self.model = "qms-v2-stable-lr"
             except Exception as e:
                 print(f"Failed to initialize Risk Assessment Generator: {e}")
 
@@ -224,7 +224,7 @@ class UseRelatedRiskAnalyzer:
         if api_key:
             try:
                 self.client = openai.OpenAI(api_key=api_key)
-                self.model = "gpt-4o"
+                self.model = "qms-v2-stable-lr"
             except Exception as e:
                 print(f"Failed to initialize Use-Related Risk Analyzer: {e}")
     

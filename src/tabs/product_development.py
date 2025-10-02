@@ -6,28 +6,46 @@ import json
 def display_product_development_tab():
     """
     Displays the Product Development workflow, including Design Controls Triage,
-    Project Charter, R&D Hub, and Design Controls creation.
+    Project Charter, R&D Hub, and AI-powered Design Controls creation.
     """
-    st.header("🚀 Product Development Workflow")
-    st.info("A hyper-focused toolkit for documenting changes, conducting R&D, and managing design controls.")
+    st.header("🚀 Product Development Lifecycle Hub")
+    st.info("A comprehensive toolkit for developing new products, from initial concept and risk analysis to final design controls.")
 
     if 'product_dev_data' not in st.session_state:
         st.session_state.product_dev_data = {}
     data = st.session_state.product_dev_data
 
-    # --- Step 1: Design Controls Triage ---
+    # Auto-populate from sidebar
+    product_info = st.session_state.product_info
+
+    # --- Step 1: Project Charter & R&D Hub ---
     with st.container(border=True):
-        st.subheader("Step 1: Design Controls Triage (AI-Powered) 🧠")
-        st.markdown("Determine if your product requires formal design controls under FDA 21 CFR 820.30.")
+        st.subheader("Step 1: Project Charter & R&D Hub")
+        [cite_start]st.markdown("Define your project to prevent the 'dumpster fire' moment and centralize your research. [cite: 151, 245]")
+        
+        c1, c2 = st.columns(2)
+        data['project_name'] = c1.text_input("Project Name / Objective", value=product_info.get('name', ''), key="pd_proj_name")
+        data['team_members'] = c2.text_input("Team Members", key="pd_team")
+        [cite_start]data['scope'] = st.text_area("Scope", key="pd_scope", height=100, placeholder="What's in and what's out of the project? [cite: 288]")
+
+        st.divider()
+        st.subheader("Voice of the Customer (VOC) / Research Hub")
+        [cite_start]st.text_area("Paste raw user feedback, competitor analysis, research notes, etc. [cite: 265]", key="pd_voc_raw", height=200)
+
+    # --- Step 2: Design Controls Triage ---
+    with st.container(border=True):
+        st.subheader("Step 2: Design Controls Triage (AI-Powered) 🧠")
+        [cite_start]st.markdown("Determine if your product requires formal design controls under FDA 21 CFR 820.30. [cite: 13, 14, 24, 42, 83, 125]")
         
         with st.form("triage_form"):
             device_desc = st.text_area(
                 "**Describe your product and its intended use:**",
                 height=150,
-                placeholder="e.g., A battery-powered, handheld massager intended for temporary relief of minor muscle aches and pains."
+                value=product_info.get('ifu', ''),
+                key="pd_triage_desc"
             )
             submitted = st.form_submit_button("Analyze Requirement", type="primary", use_container_width=True)
-            if submitted:
+            if submitted and not st.session_state.api_key_missing:
                 if device_desc:
                     with st.spinner("AI is analyzing FDA regulations..."):
                         triage_result = st.session_state.ai_design_controls_triager.triage_device(device_desc)
@@ -45,30 +63,43 @@ def display_product_development_tab():
                 st.markdown(f"**Rationale:** {result.get('rationale')}")
                 st.markdown(f"**Next Steps:** {result.get('next_steps')}")
 
-    # --- Step 2: Project Charter & R&D Hub ---
-    with st.expander("📝 Step 2: Project Charter & R&D Hub"):
-        st.markdown("Define your project to prevent the 'dumpster fire' moment and centralize your research.")
-        
-        st.text_input("Project Name / Objective", key="pd_project_name")
-        st.text_area("Scope", key="pd_scope", height=100)
-        st.text_input("Team Members", key="pd_team")
+    # --- Step 3: AI-Powered Design Controls Generation ---
+    with st.container(border=True):
+        st.subheader("Step 3: Generate Design Controls with AI ✍️")
+        st.info("Answer a few key questions to generate a comprehensive draft of your design controls documentation.")
+        with st.form("ai_dc_form"):
+            user_needs = st.text_area("What are the core user needs the device must meet?", 
+                                      placeholder="e.g., The user needs to easily and accurately measure their blood pressure at home without assistance. The device must be comfortable and provide a clear, easy-to-read result.")
+            tech_reqs = st.text_area("What are the key technical requirements or specifications?",
+                                     placeholder="e.g., Must comply with AAMI standards for accuracy. Cuff must fit arm circumferences from 9-17 inches. Battery must last for at least 200 measurements.")
+            risks = st.text_area("What are the most significant known risks or failure modes?",
+                                 placeholder="e.g., Risk of inaccurate readings leading to improper medical decisions. Risk of cuff over-inflation causing discomfort. Risk of software malfunction.")
+            
+            submitted_dc = st.form_submit_button("Generate Full Design Controls Draft", use_container_width=True, type="primary")
+            if submitted_dc and not st.session_state.api_key_missing:
+                if all([user_needs, tech_reqs, risks]):
+                    with st.spinner("AI is drafting the Design Controls documentation..."):
+                        dc_draft = st.session_state.ai_design_controls_triager.generate_design_controls(
+                            product_info.get('name'), product_info.get('ifu'), user_needs, tech_reqs, risks
+                        )
+                        if dc_draft and "error" not in dc_draft:
+                            data['design_controls'] = dc_draft
+                            st.success("✅ AI draft generated! Review and edit in Step 4.")
+                        else:
+                            st.error(f"Failed to generate draft: {dc_draft.get('error', 'Unknown error')}")
+                else:
+                    st.warning("Please fill out all fields to generate the draft.")
 
-        st.divider()
-        st.subheader("R&D Hub / Voice of the Customer (VOC)")
-        st.text_area("Paste raw user feedback, competitor analysis, research notes, etc.", key="pd_voc_raw", height=200)
-
-    # --- Step 3: Risk Assessment (FMEA) ---
-    with st.expander("⚠️ Step 3: Risk Assessment (FMEA)"):
-        st.info("Proactively identify and mitigate risks. This section is linked to the main Risk & Safety tab.")
-        from .risk_safety import display_risk_safety_tab # Import locally to avoid circularity
-        display_risk_safety_tab()
-
-    # --- Step 4: Create Design Controls ---
-    with st.expander("🛠️ Step 4: Create Design Controls"):
-        st.warning("Based on your triage, you can begin documenting design controls here.")
-        
-        st.text_area("Design & Development Plan", key="dc_plan", height=150)
-        st.text_area("Design Inputs (User Needs, Requirements)", key="dc_inputs", height=150)
-        st.text_area("Design Outputs (Specifications, Drawings)", key="dc_outputs", height=150)
-        st.text_area("Design Verification Plan ('Did we build the product right?')", key="dc_verification", height=150)
-        st.text_area("Design Validation Plan ('Did we build the right product?')", key="dc_validation", height=150)
+    # --- Step 4: Review & Edit Design Controls ---
+    with st.expander("🛠️ Step 4: Review & Edit Design Controls Document", expanded=True):
+        if 'design_controls' in data:
+            dc_data = data['design_controls']
+            st.text_area("Design & Development Plan", value=dc_data.get('plan', ''), height=150, key="dc_plan")
+            st.text_area("Design Inputs (User Needs, Requirements)", value=dc_data.get('inputs', ''), height=150, key="dc_inputs")
+            st.text_area("Design Outputs (Specifications, Drawings)", value=dc_data.get('outputs', ''), height=150, key="dc_outputs")
+            [cite_start]st.text_area("Design Verification Plan ('Did we build the product right?') [cite: 842]", value=dc_data.get('verification', ''), height=150, key="dc_verification")
+            [cite_start]st.text_area("Design Validation Plan ('Did we build the right product?') [cite: 847]", value=dc_data.get('validation', ''), height=150, key="dc_validation")
+            st.text_area("Design Transfer Plan", value=dc_data.get('transfer', ''), height=150, key="dc_transfer")
+            st.text_area("Design History File (DHF) Summary", value=dc_data.get('dhf', ''), height=150, key="dc_dhf")
+        else:
+            st.info("Generate the AI draft in Step 3 to populate this section, or fill it in manually.")

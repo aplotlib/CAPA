@@ -22,7 +22,7 @@ def display_exports_tab():
                     doc_buffer = st.session_state.doc_generator.generate_summary_docx(st.session_state, export_options)
                     st.download_button(
                         "📥 Download Project Summary", doc_buffer,
-                        f"Project_Summary_{st.session_state.target_sku}_{date.today()}.docx",
+                        f"Project_Summary_{st.session_state.product_info['sku']}_{date.today()}.docx",
                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         use_container_width=True
                     )

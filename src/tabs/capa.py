@@ -86,16 +86,34 @@ def display_capa_tab():
         data['closed_by'] = c_col1.text_input("Closed By", value=data.get('closed_by', ''))
         data['closure_date'] = c_col2.date_input("Closure Date", value=None if 'closure_date' not in data else data['closure_date'])
 
-    # --- Validation ---
+    # --- Validation and Next Steps ---
     st.divider()
-    if st.button("Validate CAPA Data", type="primary", use_container_width=True):
-        is_valid, errors, warnings = validate_capa_data(st.session_state.capa_data)
-        if errors:
-            for error in errors:
-                st.error(f"**Missing Field:** {error}")
-        else:
-            st.success("✅ **Validation Successful!** All required fields are present.")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("✔️ Validate CAPA Data", use_container_width=True):
+            is_valid, errors, warnings = validate_capa_data(st.session_state.capa_data)
+            if errors:
+                for error in errors:
+                    st.error(f"**Missing Field:** {error}")
+            else:
+                st.success("✅ **Validation Successful!** All required fields are present.")
 
-        if warnings:
-            for warning in warnings:
-                st.warning(f"**Suggestion:** {warning}")
+            if warnings:
+                for warning in warnings:
+                    st.warning(f"**Suggestion:** {warning}")
+    
+    with c2:
+        if st.button("🚀 Proceed to Effectiveness Check", type="primary", use_container_width=True, help="Load this CAPA's data into the CAPA Closure tab to track effectiveness."):
+            is_valid, errors, _ = validate_capa_data(st.session_state.capa_data)
+            if not is_valid:
+                st.error("Please ensure all required CAPA fields are filled before proceeding.")
+                for error in errors:
+                    st.error(f"**Missing Field:** {error}")
+            elif not st.session_state.get('analysis_results'):
+                st.error("Please process data on the sidebar to get initial metrics before proceeding.")
+            else:
+                st.session_state.capa_closure_data = {
+                    'original_capa': st.session_state.capa_data.copy(),
+                    'original_metrics': st.session_state.analysis_results.copy()
+                }
+                st.success("✅ CAPA data loaded! Please navigate to the 'CAPA Closure' tab now.")

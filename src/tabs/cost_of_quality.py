@@ -33,7 +33,7 @@ def display_cost_of_quality_tab():
             }
 
     if st.session_state.get('coq_results'):
-        results = st.session_state.co_results
+        results = st.session_state.coq_results
         total_coq = results.get('Total Cost of Quality', 0)
         
         st.subheader("Cost of Quality Results")

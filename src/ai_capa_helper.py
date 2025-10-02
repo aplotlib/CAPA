@@ -245,7 +245,8 @@ class AIDesignControlsTriager:
         You are a senior Quality/R&D manager drafting a comprehensive Design Controls document based on 21 CFR 820.30.
         A user has provided high-level answers to key questions. Your task is to expand these into a detailed, professionally worded draft for a full Design Controls document.
         Extrapolate from the user's answers to create plausible, detailed content for each section.
-        Return ONLY a valid JSON object with keys for each section: "plan", "inputs", "outputs", "verification", "validation", "transfer", and "dhf".
+        The "dhf" (Design History File) section should be a concise summary, not a list of documents.
+        Return ONLY a valid, human-readable JSON object with keys for each section: "plan", "inputs", "outputs", "verification", "validation", "transfer", and "dhf".
         """
         user_prompt = f"""
         **Product Name:** {product_name}
@@ -265,7 +266,58 @@ class AIDesignControlsTriager:
                 max_tokens=4000,
                 response_format={"type": "json_object"}
             )
-            return json.loads(response.choices[0].message.content)
+            # FIX: Add a try-except block to handle potential JSON decoding errors
+            try:
+                return json.loads(response.choices[0].message.content)
+            except json.JSONDecodeError:
+                return {"error": "AI returned incomplete or invalid JSON. Please try again."}
         except Exception as e:
             print(f"Error generating design controls draft: {e}")
             return {"error": f"Failed to generate design controls draft: {e}"}
+
+class ProductManualWriter:
+    """AI assistant for generating a product user manual."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.client = None
+        if api_key:
+            try:
+                self.client = openai.OpenAI(api_key=api_key)
+                self.model = "gpt-4o"
+            except Exception as e:
+                print(f"Failed to initialize ProductManualWriter: {e}")
+
+    @retry_with_backoff()
+    def generate_manual_section(self, section_title: str, product_name: str, product_ifu: str, user_inputs: Dict, target_language: str = "English") -> str:
+        """Generates a specific section of the user manual."""
+        if not self.client:
+            return "AI client is not initialized."
+
+        system_prompt = f"""
+        You are an expert technical writer creating a user manual for the product '{product_name}'.
+        Your task is to write the '{section_title}' section of the manual.
+        The manual should be clear, concise, and easy for a layperson to understand.
+        The target language for the output is {target_language}.
+        Use Markdown for formatting (e.g., headings, bullet points, bold text).
+        """
+        user_prompt = f"""
+        **Product Name:** {product_name}
+        **Intended For Use:** {product_ifu}
+
+        **User-Provided Information:**
+        - **Key Features:** {user_inputs.get('features', 'Not provided.')}
+        - **Step-by-Step Instructions:** {user_inputs.get('instructions', 'Not provided.')}
+        - **Safety Warnings:** {user_inputs.get('warnings', 'Not provided.')}
+
+        Please write the content for the '{section_title}' section now.
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+                max_tokens=3000
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"Error generating manual section '{section_title}': {e}")
+            return f"Failed to generate section: {e}"

@@ -67,10 +67,15 @@ def display_risk_safety_tab():
             if st.button("🤖 Suggest Additional Failure Modes with AI", use_container_width=True, type="primary"):
                 if 'fmea_generator' in st.session_state:
                     with st.spinner("AI is brainstorming other risks..."):
-                        insights = st.session_state.get('analysis_results', {}).get('insights', 'High return rate observed.')
+                        # FIX: Check if analysis_results exists before accessing it
+                        analysis_results = st.session_state.get('analysis_results')
+                        insights = "High return rate observed."
+                        if analysis_results:
+                            insights = analysis_results.get('insights', insights)
+
                         suggestions = st.session_state.fmea_generator.suggest_failure_modes(
                             st.session_state.product_info.get('ifu', insights), 
-                            st.session_state.get('analysis_results'), 
+                            analysis_results, 
                             st.session_state.fmea_rows
                         )
                         for suggestion in suggestions:

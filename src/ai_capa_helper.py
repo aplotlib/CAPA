@@ -156,13 +156,15 @@ class AIHumanFactorsHelper:
         """Generates a full HFE report draft from answers to broad questions."""
         if not self.client:
             return {"error": "AI client is not initialized."}
-
+        
+        # FIX: Added more robust instructions to ensure valid JSON output
         system_prompt = """
         You are a Human Factors Engineering (HFE) expert drafting a report that aligns with FDA guidance.
         A user has provided high-level answers to key questions. Your task is to expand these answers into a comprehensive, professionally worded draft for all sections of an HFE report.
         Extrapolate from the user's answers, product name, and description to create detailed, plausible content for each section.
         
-        Return ONLY a single, valid, and complete JSON object with keys for each section: "conclusion_statement",
+        IMPORTANT: Your final output must be a single, valid, and complete JSON object. Ensure that all property names and string values are enclosed in double quotes. Do not include any text or formatting outside of the main JSON object.
+        The JSON object must have keys for each section: "conclusion_statement",
         "descriptions", "device_interface", "known_problems", "hazards_analysis", 
         "preliminary_analyses", "critical_tasks", and "validation_testing". Ensure the JSON is not truncated.
         """
@@ -175,7 +177,7 @@ class AIHumanFactorsHelper:
         2. **Critical Tasks:** {user_answers.get('critical_tasks')}
         3. **Potential Harms from Errors:** {user_answers.get('potential_harms')}
 
-        Now, generate the full HFE report draft based on this information.
+        Now, generate the full HFE report draft.
         """
         try:
             response = self.client.chat.completions.create(

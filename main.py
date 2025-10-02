@@ -20,7 +20,8 @@ from src.analysis import run_full_analysis
 from src.document_generator import DocumentGenerator
 from src.ai_capa_helper import (
     AICAPAHelper, AIEmailDrafter, MedicalDeviceClassifier,
-    RiskAssessmentGenerator, UseRelatedRiskAnalyzer, AIHumanFactorsHelper
+    RiskAssessmentGenerator, UseRelatedRiskAnalyzer, AIHumanFactorsHelper,
+    AIDesignControlsTriager
 )
 from src.fmea import FMEA
 from src.pre_mortem import PreMortem
@@ -36,6 +37,7 @@ from src.tabs.cost_of_quality import display_cost_of_quality_tab
 from src.tabs.human_factors import display_human_factors_tab
 from src.tabs.exports import display_exports_tab
 from src.tabs.capa_closure import display_capa_closure_tab
+from src.tabs.product_development import display_product_development_tab
 
 
 def load_css():
@@ -199,7 +201,8 @@ def initialize_session_state():
         'analysis_results': None, 'capa_data': {}, 'fmea_data': pd.DataFrame(),
         'vendor_email_draft': None, 'risk_assessment': None, 'urra': None,
         'pre_mortem_summary': None, 'medical_device_classification': None,
-        'human_factors_data': {}, 'logged_in': False, 'workflow_mode': 'CAPA Management'
+        'human_factors_data': {}, 'logged_in': False, 'workflow_mode': 'CAPA Management',
+        'product_dev_data': {}
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -233,6 +236,8 @@ def initialize_components():
         st.session_state.file_parser = AIFileParser(api_key)
         st.session_state.ai_context_helper = AIContextHelper(api_key)
         st.session_state.ai_hf_helper = AIHumanFactorsHelper(api_key)
+        st.session_state.ai_design_controls_triager = AIDesignControlsTriager(api_key)
+
 
     st.session_state.components_initialized = True
 
@@ -293,7 +298,7 @@ def display_sidebar():
         
         st.session_state.workflow_mode = st.selectbox(
             "Workflow Mode",
-            ["CAPA Management", "New Product Introduction", "Post-Market Surveillance"]
+            ["CAPA Management", "Product Development"]
         )
         
         with st.expander("📝 Product Information", expanded=True):
@@ -379,25 +384,33 @@ def display_main_app():
     """Displays the main application interface, including header, sidebar, and tabs."""
     st.markdown(
         '<div class="main-header"><h1>Automated Quality Management System</h1>'
-        '<p>Your AI-powered hub for proactive quality assurance, compliance, and vendor management.</p></div>',
+        f'<p>Your AI-powered hub for proactive quality assurance. Current Mode: <strong>{st.session_state.workflow_mode}</strong></p></div>',
         unsafe_allow_html=True
     )
     display_sidebar()
-    tab_list = ["Dashboard", "CAPA", "CAPA Closure", "Risk & Safety", "Human Factors", "Vendor Comms", "Compliance", "Cost of Quality", "Exports"]
-    
-    icons = ["📈", "📝", "✅", "⚠️", "👥", "📬", "⚖️", "💲", "📄"]
-    tabs = st.tabs([f"{icon} {name}" for icon, name in zip(icons, tab_list)])
 
-    with tabs[0]: display_dashboard()
-    with tabs[1]: display_capa_tab()
-    with tabs[2]: display_capa_closure_tab()
-    with tabs[3]: display_risk_safety_tab()
-    with tabs[4]: display_human_factors_tab()
-    with tabs[5]: display_vendor_comm_tab()
-    with tabs[6]: display_compliance_tab()
-    with tabs[7]: display_cost_of_quality_tab()
-    with tabs[8]: display_exports_tab()
-    
+    if st.session_state.workflow_mode == "CAPA Management":
+        tab_list = ["Dashboard", "CAPA", "CAPA Closure", "Risk & Safety", "Human Factors", "Vendor Comms", "Compliance", "Cost of Quality", "Exports"]
+        icons = ["📈", "📝", "✅", "⚠️", "👥", "📬", "⚖️", "💲", "📄"]
+        tabs = st.tabs([f"{icon} {name}" for icon, name in zip(icons, tab_list)])
+        with tabs[0]: display_dashboard()
+        with tabs[1]: display_capa_tab()
+        with tabs[2]: display_capa_closure_tab()
+        with tabs[3]: display_risk_safety_tab()
+        with tabs[4]: display_human_factors_tab()
+        with tabs[5]: display_vendor_comm_tab()
+        with tabs[6]: display_compliance_tab()
+        with tabs[7]: display_cost_of_quality_tab()
+        with tabs[8]: display_exports_tab()
+
+    elif st.session_state.workflow_mode == "Product Development":
+        tab_list = ["🚀 Product Development", "Dashboard", "Exports"]
+        icons = ["🚀", "📈", "📄"]
+        tabs = st.tabs([f"{icon} {name}" for icon, name in zip(icons, tab_list)])
+        with tabs[0]: display_product_development_tab()
+        with tabs[1]: display_dashboard()
+        with tabs[2]: display_exports_tab()
+
     if not st.session_state.api_key_missing:
         with st.expander("💬 AI Assistant (Context-Aware)"):
             if user_query := st.chat_input("Ask the AI about your current analysis..."):

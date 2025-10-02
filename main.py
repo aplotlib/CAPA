@@ -202,7 +202,7 @@ def initialize_session_state():
         'analysis_results': None, 'capa_data': {}, 'fmea_data': pd.DataFrame(),
         'vendor_email_draft': None, 'risk_assessment': None, 'urra': None,
         'pre_mortem_summary': None, 'medical_device_classification': None,
-        'human_factors_data': {}, 'logged_in': False, 'workflow_mode': 'CAPA Management',
+        'human_factors_data': {}, 'logged_in': False, 'workflow_mode': 'Product Development',
         'product_dev_data': {}, 'final_review_summary': None
     }
     for key, value in defaults.items():
@@ -225,6 +225,7 @@ def initialize_components():
     st.session_state.doc_generator = DocumentGenerator()
     st.session_state.data_processor = DataProcessor()
 
+    # Initialize AI components if API key is present
     if not st.session_state.api_key_missing:
         st.session_state.openai_api_key = api_key
         st.session_state.ai_capa_helper = AICAPAHelper(api_key)
@@ -238,7 +239,6 @@ def initialize_components():
         st.session_state.ai_context_helper = AIContextHelper(api_key)
         st.session_state.ai_hf_helper = AIHumanFactorsHelper(api_key)
         st.session_state.ai_design_controls_triager = AIDesignControlsTriager(api_key)
-
 
     st.session_state.components_initialized = True
 
@@ -308,17 +308,18 @@ def display_sidebar():
             product_info['name'] = st.text_input("Product Name", product_info.get('name', ''), key="sidebar_name")
             product_info['ifu'] = st.text_area("Intended for Use (IFU)", product_info.get('ifu', ''), height=100, key="sidebar_ifu")
 
-        with st.expander("💰 Financials"):
+        with st.expander("💰 Financials (Optional)"):
             st.session_state.unit_cost = st.number_input("Unit Cost ($)", value=st.session_state.get('unit_cost', 0.0), step=1.0, format="%.2f")
             st.session_state.sales_price = st.number_input("Sales Price ($)", value=st.session_state.get('sales_price', 0.0), step=1.0, format="%.2f")
 
-        with st.expander("🗓️ Reporting Period (for CAPA)"):
+        st.header("Post-Market Data Input")
+        st.caption("For CAPA Management & Kaizen")
+
+        with st.expander("🗓️ Reporting Period"):
             st.session_state.start_date, st.session_state.end_date = st.date_input(
                     "Select a date range", (st.session_state.start_date, st.session_state.end_date)
                 )
-            st.caption(f"Period: {st.session_state.start_date.strftime('%b %d, %Y')} to {st.session_state.end_date.strftime('%b %d, %Y')}")
 
-        st.header("Data Input (for CAPA)")
         target_sku = st.session_state.product_info['sku']
         
         input_tabs = st.tabs(["Manual Entry", "File Upload"])
@@ -369,12 +370,11 @@ def process_uploaded_files(uploaded_files: list):
     target_sku = st.session_state.product_info['sku']
     
     with st.spinner("AI is analyzing file structures..."):
-        file_analyses = []
         for file in uploaded_files:
             analysis = parser.analyze_file_structure(file, target_sku)
             st.caption(f"`{file.name}` → AI identified as: `{analysis.get('content_type', 'unknown')}`")
             df = parser.extract_data(file, analysis, target_sku)
-            if df is not None:
+            if df is not None and not df.empty:
                 content_type = analysis.get('content_type')
                 if content_type == 'sales': sales_dfs.append(df)
                 elif content_type == 'returns': returns_dfs.append(df)

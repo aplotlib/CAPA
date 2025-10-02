@@ -9,73 +9,79 @@ def display_risk_safety_tab():
         st.error("AI features are disabled. Please configure your API key.")
         return
 
-    # --- Tool 1: FMEA ---
+    # Initialize session state keys for FMEA if they don't exist
+    if 'fmea_rows' not in st.session_state:
+        st.session_state.fmea_rows = []
+
+    # --- Tool 1: FMEA (NEW & IMPROVED UI) ---
     with st.container(border=True):
         st.subheader("Failure Mode and Effects Analysis (FMEA)")
-        with st.expander("What is an FMEA?"):
+        with st.expander("What is an FMEA?", expanded=False):
             st.markdown("""
-            An FMEA is a proactive method to evaluate a process for potential failures and their impacts. Use this tool to identify and prioritize risks based on Severity, Occurrence, and Detection.
-            - **Severity (S):** Impact of the failure (1=Low, 5=High).
-            - **Occurrence (O):** Likelihood of the failure (1=Low, 5=High).
-            - **Detection (D):** How likely you are to detect the failure (1=High, 5=Low).
+            An FMEA is a proactive method to evaluate a process for potential failures. Use this tool to identify and prioritize risks.
+            - **Severity (S):** Impact of the failure (1=Low, 10=High).
+            - **Occurrence (O):** Likelihood of the failure (1=Low, 10=High).
+            - **Detection (D):** How likely you are to detect the failure (1=High, 10=Low).
             **RPN = S × O × D**. Higher RPNs are higher priorities.
             """)
 
-        c1, c2 = st.columns(2)
-        if c1.button("Suggest Failure Modes with AI", use_container_width=True, key="fmea_ai", type="primary"):
-            if st.session_state.analysis_results:
-                with st.spinner("AI is suggesting failure modes..."):
-                    insights = st.session_state.analysis_results.get('insights', 'High return rate observed.')
-                    suggestions = st.session_state.fmea_generator.suggest_failure_modes(insights, st.session_state.analysis_results)
-                    df = pd.DataFrame(suggestions)
-                    # Ensure score columns exist with default values
-                    for col in ['Severity', 'Occurrence', 'Detection']:
-                        if col not in df.columns:
-                            df[col] = 1
-                    st.session_state.fmea_data = df
-            else:
-                st.warning("Run an analysis on the dashboard first.")
-        
-        if c2.button("Add Manual FMEA Row", use_container_width=True, key="fmea_add"):
-            new_row = pd.DataFrame([{"Potential Failure Mode": "", "Potential Effect(s)": "", "Severity": 1, "Potential Cause(s)": "", "Occurrence": 1, "Current Controls": "", "Detection": 1, "RPN": 1}])
-            st.session_state.fmea_data = pd.concat([st.session_state.fmea_data, new_row], ignore_index=True)
-
-        if 'fmea_data' in st.session_state and not st.session_state.fmea_data.empty:
-            edited_df = st.data_editor(st.session_state.fmea_data, column_config={
-                    "Severity": st.column_config.SelectboxColumn("S", options=list(range(1, 6)), required=True),
-                    "Occurrence": st.column_config.SelectboxColumn("O", options=list(range(1, 6)), required=True),
-                    "Detection": st.column_config.SelectboxColumn("D", options=list(range(1, 6)), required=True),
-                }, num_rows="dynamic", key="fmea_editor")
-            
-            edited_df['RPN'] = (
-                pd.to_numeric(edited_df['Severity'], errors='coerce').fillna(1) *
-                pd.to_numeric(edited_df['Occurrence'], errors='coerce').fillna(1) *
-                pd.to_numeric(edited_df['Detection'], errors='coerce').fillna(1)
-            ).astype(int)
-            st.session_state.fmea_data = edited_df
-    
-    st.write("") 
-    
-    # --- Tool 2: ISO 14971 Risk Assessment ---
-    with st.container(border=True):
-        st.subheader("ISO 14971 Risk Assessment Generator")
-        with st.form("risk_assessment_form"):
-            st.info("Generates a formal risk assessment for a medical device according to ISO 14971.")
-            ra_product_name = st.text_input("Product Name", st.session_state.product_info['name'])
-            ra_product_desc = st.text_area("Product Description & Intended Use", value=st.session_state.product_info['ifu'], height=100)
-            if st.form_submit_button("Generate Risk Assessment", type="primary", use_container_width=True):
-                if ra_product_name and ra_product_desc:
-                    with st.spinner("AI is generating the ISO 14971 assessment..."):
-                        st.session_state.risk_assessment = st.session_state.risk_assessment_generator.generate_assessment(ra_product_name, st.session_state.product_info['sku'], ra_product_desc)
+        st.markdown("##### Step 1: Manually Enter 1-3 Initial Failure Modes")
+        with st.form("manual_fmea_form"):
+            failure_mode = st.text_input("Potential Failure Mode")
+            effect = st.text_area("Potential Effect(s)", height=100)
+            cause = st.text_area("Potential Cause(s)", height=100)
+            if st.form_submit_button("Add Failure Mode", use_container_width=True):
+                if failure_mode:
+                    st.session_state.fmea_rows.append({
+                        "Potential Failure Mode": failure_mode,
+                        "Potential Effect(s)": effect,
+                        "Potential Cause(s)": cause,
+                        "Severity": 5, "Occurrence": 5, "Detection": 5, "RPN": 125
+                    })
                 else:
-                    st.warning("Please provide a product name and description.")
+                    st.warning("Potential Failure Mode is a required field.")
+
+        if st.session_state.fmea_rows:
+            st.markdown("---")
+            st.markdown("##### Current FMEA Entries")
+            for i, row in enumerate(st.session_state.fmea_rows):
+                with st.container(border=True):
+                    c1, c2, c3 = st.columns(3)
+                    row["Potential Failure Mode"] = c1.text_input("Failure Mode", value=row["Potential Failure Mode"], key=f"fm_{i}")
+                    row["Potential Effect(s)"] = c2.text_area("Effect(s)", value=row["Potential Effect(s)"], key=f"eff_{i}", height=150)
+                    row["Potential Cause(s)"] = c3.text_area("Cause(s)", value=row["Potential Cause(s)"], key=f"cause_{i}", height=150)
+                    
+                    sc1, sc2, sc3 = st.columns(3)
+                    row["Severity"] = sc1.slider("Severity", 1, 10, row["Severity"], key=f"s_{i}")
+                    row["Occurrence"] = sc2.slider("Occurrence", 1, 10, row["Occurrence"], key=f"o_{i}")
+                    row["Detection"] = sc3.slider("Detection", 1, 10, row["Detection"], key=f"d_{i}")
+                    row["RPN"] = row["Severity"] * row["Occurrence"] * row["Detection"]
+                    st.metric("Risk Priority Number (RPN)", row["RPN"])
+            
+            st.markdown("---")
+            st.markdown("##### Step 2: Use AI to Expand Your Analysis")
+            if st.button("🤖 Suggest Additional Failure Modes with AI", use_container_width=True, type="primary"):
+                if st.session_state.get('analysis_results'):
+                    with st.spinner("AI is brainstorming other risks..."):
+                        insights = st.session_state.analysis_results.get('insights', 'High return rate observed.')
+                        suggestions = st.session_state.fmea_generator.expand_failure_modes(
+                            insights, st.session_state.analysis_results, st.session_state.fmea_rows
+                        )
+                        for suggestion in suggestions:
+                            suggestion.update({"Severity": 5, "Occurrence": 5, "Detection": 5, "RPN": 125})
+                            st.session_state.fmea_rows.append(suggestion)
+                        st.success("AI has added new failure modes for your review.")
+                        st.rerun()
+                else:
+                    st.warning("Run an analysis on the dashboard first.")
         
-        if st.session_state.get('risk_assessment'):
-            st.markdown(st.session_state.risk_assessment)
-
+        # Update fmea_data for export
+        if st.session_state.fmea_rows:
+            st.session_state.fmea_data = pd.DataFrame(st.session_state.fmea_rows)
+    
     st.write("") 
-
-    # --- Tool 3: Use-Related Risk Analysis (URRA) ---
+    
+    # --- Tool 2: Use-Related Risk Analysis (URRA) (IMPROVED UI) ---
     with st.container(border=True):
         st.subheader("Use-Related Risk Analysis (URRA) Generator")
         with st.form("urra_form"):
@@ -83,9 +89,19 @@ def display_risk_safety_tab():
             urra_product_name = st.text_input("Product Name", st.session_state.product_info['name'], key="urra_name")
             urra_product_desc = st.text_area("Product Description & Intended Use", value=st.session_state.product_info['ifu'], height=100, key="urra_desc")
             urra_user = st.text_input("Intended User Profile", placeholder="e.g., Elderly individuals with limited dexterity")
-            urra_env = st.text_input("Intended Use Environment", placeholder="e.g., Home healthcare setting")
+            
+            # NEW: Dropdown for environment
+            use_environments = ["Home Healthcare Setting", "Hospital/Clinical Setting", "Long-Term Care Facility", "Outpatient Clinic", "Public Spaces/Transport", "Other (Specify)"]
+            urra_env_selection = st.selectbox("Intended Use Environment", use_environments)
+
+            if urra_env_selection == "Other (Specify)":
+                urra_env_other = st.text_input("Please specify the use environment:", key="urra_env_other")
+                urra_env = urra_env_other
+            else:
+                urra_env = urra_env_selection
+
             if st.form_submit_button("Generate URRA", type="primary", use_container_width=True):
-                if urra_product_name and urra_product_desc and urra_user and urra_env:
+                if all([urra_product_name, urra_product_desc, urra_user, urra_env]):
                     with st.spinner("AI is generating the URRA..."):
                         st.session_state.urra = st.session_state.urra_generator.generate_urra(urra_product_name, urra_product_desc, urra_user, urra_env)
                 else:

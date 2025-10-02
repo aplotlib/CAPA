@@ -13,7 +13,6 @@ def display_capa_closure_tab():
     # Check if data has been loaded from the main CAPA tab
     if 'capa_closure_data' not in st.session_state or not st.session_state.capa_closure_data.get('original_capa'):
         st.warning("⬅️ To begin, please complete the form on the **CAPA** tab and click **'🚀 Proceed to Effectiveness Check'**.", icon="👈")
-        st.image("https://i.imgur.com/g8e5gG3.png", caption="Click the 'Proceed to Effectiveness Check' button on the CAPA tab first.")
         return # Stop rendering the rest of the page
 
     data = st.session_state.capa_closure_data
@@ -63,8 +62,8 @@ def display_capa_closure_tab():
                     from main import parse_manual_input
                     from src.analysis import run_full_analysis
                     
-                    sales_df = parse_manual_input(new_sales, st.session_state.target_sku)
-                    returns_df = parse_manual_input(new_returns, st.session_state.target_sku)
+                    sales_df = parse_manual_input(new_sales, st.session_state.product_info['sku'])
+                    returns_df = parse_manual_input(new_returns, st.session_state.product_info['sku'])
                     
                     with st.spinner("Analyzing new data..."):
                         report_days = (st.session_state.end_date - st.session_state.start_date).days
@@ -90,7 +89,7 @@ def display_capa_closure_tab():
             c1.metric("Initial Return Rate", f"{original_rate:.2f}%")
             c2.metric("New Return Rate", f"{new_rate:.2f}%", delta=f"{-improvement:.2f}%", delta_color="inverse")
             
-            if st.button("🤖 Generate AI Effectiveness Summary", use_container_width=True):
+            if st.button("🤖 Generate AI Effectiveness Summary", use_container_width=True, type="primary"):
                 with st.spinner("AI is generating the summary..."):
                     prompt = f"""
                     Analyze the effectiveness of a CAPA implementation based on the following data:

@@ -5,6 +5,9 @@ from typing import Dict, Optional
 import openai
 from .utils import retry_with_backoff
 
+# Define the new model name as a constant
+FINE_TUNED_MODEL = "ft:gpt-4o-2024-08-06:vive-health-quality-department:qms-v2-stable-lr:CM1nuhta"
+
 class AICAPAHelper:
     """AI assistant for generating CAPA form suggestions using OpenAI."""
 
@@ -14,7 +17,7 @@ class AICAPAHelper:
         if api_key:
             try:
                 self.client = openai.OpenAI(api_key=api_key)
-                self.model = "qms-v2-stable-lr"
+                self.model = FINE_TUNED_MODEL
             except Exception as e:
                 print(f"Failed to initialize AI helper: {e}")
 
@@ -64,7 +67,7 @@ class AIEmailDrafter:
         if api_key:
             try:
                 self.client = openai.OpenAI(api_key=api_key)
-                self.model = "qms-v2-stable-lr"
+                self.model = FINE_TUNED_MODEL
             except Exception as e:
                 print(f"Failed to initialize AI Email Drafter: {e}")
 
@@ -127,7 +130,7 @@ class MedicalDeviceClassifier:
         if api_key:
             try:
                 self.client = openai.OpenAI(api_key=api_key)
-                self.model = "qms-v2-stable-lr"
+                self.model = FINE_TUNED_MODEL
             except Exception as e:
                 print(f"Failed to initialize Medical Device Classifier: {e}")
 
@@ -176,7 +179,7 @@ class RiskAssessmentGenerator:
         if api_key:
             try:
                 self.client = openai.OpenAI(api_key=api_key)
-                self.model = "qms-v2-stable-lr"
+                self.model = FINE_TUNED_MODEL
             except Exception as e:
                 print(f"Failed to initialize Risk Assessment Generator: {e}")
 
@@ -224,7 +227,7 @@ class UseRelatedRiskAnalyzer:
         if api_key:
             try:
                 self.client = openai.OpenAI(api_key=api_key)
-                self.model = "qms-v2-stable-lr"
+                self.model = FINE_TUNED_MODEL
             except Exception as e:
                 print(f"Failed to initialize Use-Related Risk Analyzer: {e}")
     
@@ -264,3 +267,43 @@ class UseRelatedRiskAnalyzer:
         except Exception as e:
             print(f"Error generating URRA: {e}")
             return f"An error occurred while generating the URRA report: {e}"
+
+# New class for Human Factors AI suggestions
+class AIHumanFactorsHelper:
+    """AI assistant for generating Human Factors report content."""
+    def __init__(self, api_key: Optional[str] = None):
+        self.client = None
+        if api_key:
+            try:
+                self.client = openai.OpenAI(api_key=api_key)
+                self.model = FINE_TUNED_MODEL
+            except Exception as e:
+                print(f"Failed to initialize AIHumanFactorsHelper: {e}")
+
+    @retry_with_backoff()
+    def generate_hf_suggestions(self, product_name: str, product_desc: str) -> Dict[str, str]:
+        if not self.client:
+            return {"error": "AI client is not initialized."}
+
+        system_prompt = """
+        You are a Human Factors Engineering (HFE) expert. Based on the product name and description,
+        generate concise, professional suggestions for each section of an HFE report.
+        The content should align with FDA guidance on HFE submissions.
+        Return ONLY a valid JSON object with keys for each section: "conclusion_statement",
+        "descriptions", "device_interface", "known_problems", "hazards_analysis", "critical_tasks".
+        """
+        user_prompt = f"""
+        **Product Name:** {product_name}
+        **Product Description:** {product_desc}
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+                max_tokens=2500,
+                response_format={"type": "json_object"}
+            )
+            return json.loads(response.choices[0].message.content)
+        except Exception as e:
+            print(f"Error generating HF suggestions: {e}")
+            return {"error": f"Failed to generate HF suggestions: {e}"}

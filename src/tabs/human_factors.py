@@ -4,101 +4,68 @@ import streamlit as st
 
 def display_human_factors_tab():
     """
-    Displays the Human Factors and Usability Engineering form with AI assistance.
+    Displays the Human Factors and Usability Engineering form with an improved, AI-first workflow.
     """
     st.header("Human Factors & Usability Engineering")
-    st.info("This workflow is based on the FDA's guidance for Human Factors and Usability Engineering reports, enhanced with AI assistance.")
+    st.info("This AI-powered workflow helps you generate a comprehensive HFE report draft based on a few key questions.")
 
     if 'human_factors_data' not in st.session_state:
         st.session_state.human_factors_data = {}
     data = st.session_state.human_factors_data
 
-    # --- AI Assistance Section ---
+    # --- NEW: AI-first workflow ---
     with st.container(border=True):
-        st.subheader("🤖 AI Assistance")
-        st.markdown("Provide some basic product details to get AI-generated suggestions for the sections below.")
-        
-        product_name = st.session_state.product_info['name']
-        product_desc = st.session_state.product_info['ifu']
-        
-        if st.button("✍️ Generate AI Suggestions for HFE Report", use_container_width=True, type="primary"):
-            if product_name and product_desc:
-                with st.spinner("AI is generating HFE suggestions..."):
-                    suggestions = st.session_state.ai_hf_helper.generate_hf_suggestions(product_name, product_desc)
-                    if suggestions and "error" not in suggestions:
-                        for key, value in suggestions.items():
-                            data[key] = value
-                        st.success("✅ AI suggestions have been populated in the form below.")
-                    else:
-                        st.error(f"Could not retrieve AI suggestions: {suggestions.get('error', 'Unknown error')}")
-            else:
-                st.warning("Please provide a product name and description for the AI.")
+        st.subheader("Step 1: Answer a Few Broad Questions")
+        with st.form("hf_questions_form"):
+            q1 = st.text_area(
+                "**1. Who is the primary user of this device, and in what environment will they use it?**",
+                placeholder="e.g., An elderly person with arthritis, using it in their home without assistance."
+            )
+            q2 = st.text_area(
+                "**2. What are the 1-3 most critical steps a user must perform for the device to work correctly and safely?**",
+                placeholder="e.g., 1. Correctly attaching the cuff. 2. Pressing the start button once. 3. Reading the final measurement."
+            )
+            q3 = st.text_area(
+                "**3. What are the most severe potential harms if a user makes a mistake during one of these critical steps?**",
+                placeholder="e.g., Incorrect attachment leads to a misdiagnosis of hypertension, resulting in improper medical treatment."
+            )
+            
+            submitted = st.form_submit_button("✍️ Generate Full HFE Report with AI", use_container_width=True, type="primary")
+            if submitted:
+                if q1 and q2 and q3:
+                    with st.spinner("AI is drafting the HFE report..."):
+                        user_answers = {"user_profile": q1, "critical_tasks": q2, "potential_harms": q3}
+                        suggestions = st.session_state.ai_hf_helper.generate_hf_report_from_answers(
+                            st.session_state.product_info['name'],
+                            st.session_state.product_info['ifu'],
+                            user_answers
+                        )
+                        if suggestions and "error" not in suggestions:
+                            st.session_state.human_factors_data = suggestions
+                            st.success("✅ AI has generated the HFE report sections below for your review.")
+                        else:
+                            st.error(f"Could not retrieve AI suggestions: {suggestions.get('error', 'Unknown error')}")
+                else:
+                    st.warning("Please answer all three questions to generate the report.")
     
     st.divider()
 
-    # --- HFE Report Form Sections ---
-    st.subheader("HFE Report Sections")
-
-    with st.expander("Section 1: Conclusion", expanded=True, icon="🏁"):
-        data['conclusion_statement'] = st.text_area(
-            "**Conclusion Statement**",
-            value=data.get('conclusion_statement', ''),
-            height=150,
-            help="Provide a conclusion statement that your medical device has been found to be safe and effective for the intended users, uses, and use environments."
-        )
-
-    with st.expander("Section 2: Descriptions", icon="👥"):
-        data['descriptions'] = st.text_area(
-            "**Descriptions of Intended Users, Uses, and Environments**",
-            value=data.get('descriptions', ''),
-            height=200,
-            help="Describe the intended user population(s), intended use and operational contexts, use environments, and training intended for users."
-        )
-
-    with st.expander("Section 3: Device User Interface", icon="📱"):
-        data['device_interface'] = st.text_area(
-            "**Device User Interface**",
-            value=data.get('device_interface', ''),
-            height=200,
-            help="Provide a description of the device's user interface, including graphical representations and an overview of the operational sequence."
-        )
-
-    with st.expander("Section 4: Summary of Known Use Problems", icon="❗"):
-        data['known_problems'] = st.text_area(
-            "**Known Use Problems**",
-            value=data.get('known_problems', ''),
-            height=150,
-            help="Summarize any known use problems with previous models of the device or similar devices."
-        )
-
-    with st.expander("Section 5: Analysis of Hazards and Risks", icon="⚠️"):
-        data['hazards_analysis'] = st.text_area(
-            "**Hazards and Risks Analysis**",
-            value=data.get('hazards_analysis', ''),
-            height=200,
-            help="Analyze potential use errors, the potential harm and severity of harm, and the risk management measures implemented."
-        )
-
-    with st.expander("Section 6: Preliminary Analyses", icon="🧪"):
-        data['preliminary_analyses'] = st.text_area(
-            "**Summary of Preliminary Analyses and Evaluations**",
-            value=data.get('preliminary_analyses', ''),
-            height=200,
-            help="Summarize the evaluation methods used, key results, design modifications, and key findings that informed the validation test protocol."
-        )
-
-    with st.expander("Section 7: Critical Tasks", icon="🎯"):
-        data['critical_tasks'] = st.text_area(
-            "**Description and Categorization of Critical Tasks**",
-            value=data.get('critical_tasks', ''),
-            height=200,
-            help="Describe the process used to identify critical tasks, list and describe the critical tasks, and categorize them by severity of potential harm."
-        )
-
-    with st.expander("Section 8: Validation Testing", icon="📋"):
-        data['validation_testing'] = st.text_area(
-            "**Details of Human Factors Validation Testing**",
-            value=data.get('validation_testing', ''),
-            height=300,
-            help="Provide details of the human factors validation testing, including the rationale for the test type, the test environment, the number and type of participants, the training provided, and the test results."
-        )
+    # --- HFE Report Form Sections (now for review/editing) ---
+    if data:
+        st.subheader("Step 2: Review and Edit the AI-Generated Report")
+        with st.expander("Section 1: Conclusion", expanded=True):
+            data['conclusion_statement'] = st.text_area("**Conclusion Statement**", value=data.get('conclusion_statement', ''), height=150)
+        with st.expander("Section 2: Descriptions"):
+            data['descriptions'] = st.text_area("**Descriptions of Intended Users, Uses, and Environments**", value=data.get('descriptions', ''), height=200)
+        with st.expander("Section 3: Device User Interface"):
+            data['device_interface'] = st.text_area("**Device User Interface**", value=data.get('device_interface', ''), height=200)
+        with st.expander("Section 4: Summary of Known Use Problems"):
+            data['known_problems'] = st.text_area("**Known Use Problems**", value=data.get('known_problems', ''), height=150)
+        with st.expander("Section 5: Analysis of Hazards and Risks"):
+            data['hazards_analysis'] = st.text_area("**Hazards and Risks Analysis**", value=data.get('hazards_analysis', ''), height=200)
+        with st.expander("Section 6: Preliminary Analyses"):
+            data['preliminary_analyses'] = st.text_area("**Summary of Preliminary Analyses and Evaluations**", value=data.get('preliminary_analyses', ''), height=200)
+        with st.expander("Section 7: Critical Tasks"):
+            data['critical_tasks'] = st.text_area("**Description and Categorization of Critical Tasks**", value=data.get('critical_tasks', ''), height=200)
+        with st.expander("Section 8: Validation Testing"):
+            data['validation_testing'] = st.text_area("**Details of Human Factors Validation Testing**", value=data.get('validation_testing', ''), height=300)

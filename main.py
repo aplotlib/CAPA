@@ -3,8 +3,9 @@
 import sys
 import os
 
-# Add the project root to the Python path to resolve KeyErrors
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
+# Get the absolute path of the directory containing main.py
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, APP_DIR)
 
 import streamlit as st
 import pandas as pd
@@ -164,8 +165,9 @@ def load_css():
 
 def get_local_image_as_base64(path):
     """Helper function to embed a local image reliably."""
+    abs_path = os.path.join(APP_DIR, path)
     try:
-        with open(path, "rb") as image_file:
+        with open(abs_path, "rb") as image_file:
             return base64.b64encode(image_file.read()).decode()
     except FileNotFoundError:
         return None
@@ -238,7 +240,7 @@ def check_password():
         submitted = st.form_submit_button("Login", use_container_width=True, type="primary")
 
         if submitted:
-            if password_input == st.secrets.get("APP_PASSWORD", "admin"): # Added a default password for easy testing
+            if password_input == st.secrets.get("APP_PASSWORD", "admin"):
                 st.session_state.logged_in = True
                 st.rerun()
             else:
@@ -383,13 +385,18 @@ def display_main_app():
 
 def main():
     """Main function to configure and run the Streamlit application."""
-    st.set_page_config(page_title="AQMS", layout="wide", page_icon="logo.png")
+    page_icon_path = os.path.join(APP_DIR, "logo.png")
+    st.set_page_config(page_title="AQMS", layout="wide", page_icon=page_icon_path if os.path.exists(page_icon_path) else "✅")
+    
     initialize_session_state()
     load_css()
+
     if not check_password():
         st.stop()
+
     initialize_components()
     display_main_app()
+
 
 if __name__ == "__main__":
     main()

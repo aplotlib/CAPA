@@ -10,31 +10,28 @@ def display_capa_closure_tab():
     st.header("✅ CAPA Effectiveness Check & Closure")
     st.info("A critical step in the CAPA process is to verify that the actions taken were effective and did not introduce any new risks.")
 
-    # Check if data has been loaded from the main CAPA tab
     if 'capa_closure_data' not in st.session_state or not st.session_state.capa_closure_data.get('original_capa'):
         st.warning("⬅️ To begin, please complete the form on the **CAPA** tab and click **'🚀 Proceed to Effectiveness Check'**.", icon="👈")
-        return # Stop rendering the rest of the page
+        return
 
     data = st.session_state.capa_closure_data
     original_capa = data['original_capa']
     original_metrics = data['original_metrics']
 
-    # --- Step 1: Review Initial CAPA Data ---
     with st.container(border=True):
         st.subheader("Step 1: Review Original CAPA")
         
         c1, c2 = st.columns(2)
-        c1.text_input("CAPA Number", value=original_capa.get('capa_number'), disabled=True)
-        c2.text_input("Product SKU", value=original_capa.get('product_name'), disabled=True)
+        c1.text_input("CAPA Number", value=original_capa.get('capa_number'), disabled=True, key="closure_capa_num_display")
+        c2.text_input("Product SKU", value=original_capa.get('product_name'), disabled=True, key="closure_sku_display")
 
-        st.text_area("Problem Description", value=original_capa.get('issue_description'), disabled=True, height=100)
-        st.text_area("Root Cause Analysis", value=original_capa.get('root_cause'), disabled=True, height=100)
+        st.text_area("Problem Description", value=original_capa.get('issue_description'), disabled=True, height=100, key="closure_desc_display")
+        st.text_area("Root Cause Analysis", value=original_capa.get('root_cause'), disabled=True, height=100, key="closure_root_cause_display")
         
         if original_metrics and original_metrics.get('return_summary') is not None:
             original_rate = original_metrics['return_summary'].iloc[0]['return_rate']
             st.metric("Initial Performance Metric (Return Rate)", f"{original_rate:.2f}%", help="This was the return rate when the CAPA was initiated.")
 
-    # --- Step 2: Document Action Implementation ---
     with st.container(border=True):
         st.subheader("Step 2: Document Implementation")
         
@@ -43,10 +40,9 @@ def display_capa_closure_tab():
         data['implementation_date'] = c2.date_input("Implementation Completion Date", key="impl_date")
         
         data['implementation_details'] = st.text_area("Implementation Details & Evidence", 
-            placeholder="Summarize how the corrective/preventive actions were implemented. Reference any change orders, new SOPs, or training records.",
+            placeholder="Summarize how the corrective/preventive actions were implemented...",
             key="impl_details_area")
 
-    # --- Step 3: Analyze Effectiveness ---
     with st.container(border=True):
         st.subheader("Step 3: Analyze Post-Implementation Performance")
         st.markdown("Enter new data for a similar time period *after* the implementation date to measure the change.")
@@ -75,7 +71,6 @@ def display_capa_closure_tab():
                 else:
                     st.warning("New sales data is required to check effectiveness.")
 
-    # --- Step 4: Review Results & Close CAPA ---
     if data.get('new_metrics'):
         with st.container(border=True):
             st.subheader("Step 4: Review Results & Conclude")
@@ -85,7 +80,7 @@ def display_capa_closure_tab():
             improvement = original_rate - new_rate
 
             st.write("#### Performance Comparison")
-            c1, c2, c3 = st.columns(3)
+            c1, c2, _ = st.columns(3)
             c1.metric("Initial Return Rate", f"{original_rate:.2f}%")
             c2.metric("New Return Rate", f"{new_rate:.2f}%", delta=f"{-improvement:.2f}%", delta_color="inverse")
             
@@ -101,12 +96,11 @@ def display_capa_closure_tab():
                     Write a concise summary for the 'Effectiveness Check Findings' section of a CAPA form.
                     1. State clearly whether the implemented actions were effective.
                     2. Quantify the improvement (e.g., reduction in return rate).
-                    3. Conclude with a definitive recommendation: either "The CAPA can be formally closed" or "The actions were not fully effective; further investigation is required."
+                    3. Conclude with a definitive recommendation.
                     """
                     data['effectiveness_summary'] = st.session_state.ai_context_helper.generate_response(prompt)
 
-            if data.get('effectiveness_summary'):
-                st.text_area("AI-Generated Effectiveness Summary", value=data['effectiveness_summary'], height=200, key="eff_summary")
+            data['effectiveness_summary'] = st.text_area("Effectiveness Summary", value=data.get('effectiveness_summary', ''), height=200, key="eff_summary")
 
             st.divider()
             
@@ -116,7 +110,7 @@ def display_capa_closure_tab():
             data['closure_date'] = c2.date_input("Closure Date", value=date.today(), key="closure_date")
             
             if st.button("✔️ Formally Close CAPA", type="primary", use_container_width=True):
-                st.session_state.capa_data['effectiveness_check_findings'] = data.get('effectiveness_summary', 'Effectiveness confirmed by metric improvement.')
+                st.session_state.capa_data['effectiveness_check_findings'] = data.get('effectiveness_summary', 'Effectiveness confirmed.')
                 st.session_state.capa_data['closed_by'] = data.get('closed_by')
                 st.session_state.capa_data['closure_date'] = data.get('closure_date')
                 st.success(f"CAPA {original_capa.get('capa_number')} has been formally closed on {data['closure_date']}.")

@@ -188,3 +188,49 @@ class AIHumanFactorsHelper:
         except Exception as e:
             print(f"Error generating HF report from answers: {e}")
             return {"error": f"Failed to generate HF report from answers: {e}"}
+
+class AIDesignControlsTriager:
+    """AI assistant for determining the need for design controls."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.client = None
+        if api_key:
+            try:
+                self.client = openai.OpenAI(api_key=api_key)
+                self.model = "gpt-4o"
+            except Exception as e:
+                print(f"Failed to initialize AIDesignControlsTriager: {e}")
+
+    @retry_with_backoff()
+    def triage_device(self, device_description: str) -> Dict[str, str]:
+        """Analyzes a device description to recommend if design controls are needed."""
+        if not self.client:
+            return {"error": "AI client is not initialized."}
+
+        system_prompt = """
+        You are an FDA compliance expert specializing in 21 CFR 820.30 (Design Controls).
+        Your task is to analyze a product description and determine if design controls are legally required, recommended as a best practice, or not required.
+
+        - **Legally Required**: All Class II and Class III devices. Also, specific Class I devices listed in the regulation (tracheobronchial suction catheters, surgeon's gloves, protective restraints, devices with computer software, manual radionuclide applicator systems, radionuclide teletherapy sources).
+        - **Recommended**: Most other Class I devices or products with moderate risk where formal controls would significantly improve safety and effectiveness, even if not strictly mandated.
+        - **Not Required**: Very low-risk consumer goods that are not considered medical devices.
+
+        Analyze the user's description and provide a clear recommendation.
+        Return ONLY a valid JSON object with three keys: "recommendation" (one of "🔴 Design Controls Legally Required", "🟡 Design Controls Recommended", "🟢 Design Controls Not Required"), "rationale" (a clear, concise explanation for your decision, citing the device class if applicable), and "next_steps" (suggested next actions for the user).
+        """
+        user_prompt = f"**Product Description:**\n{device_description}"
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                max_tokens=1500,
+                response_format={"type": "json_object"}
+            )
+            return json.loads(response.choices[0].message.content)
+        except Exception as e:
+            print(f"Error in design controls triage: {e}")
+            return {"error": f"Failed to generate triage recommendation: {e}"}

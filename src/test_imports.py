@@ -53,7 +53,7 @@ except Exception as e:
 
 # Test document_generator
 try:
-    from src.document_generator import CapaDocumentGenerator
+    from src.document_generator import DocumentGenerator
     print("✓ Successfully imported from document_generator.py")
 except Exception as e:
     print(f"✗ Failed to import from document_generator.py: {e}")

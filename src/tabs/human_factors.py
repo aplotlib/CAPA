@@ -1,10 +1,10 @@
-# src/tabs/human_factors.py
+# src/tabs/human_factors.py (MODIFIED)
 
 import streamlit as st
 
 def display_human_factors_tab():
     """
-    Displays the Human Factors and Usability Engineering form.
+    Displays the Human Factors and Usability Engineering form with AI assistance.
     """
     st.header("Human Factors & Usability Engineering")
     st.info("This workflow is based on the FDA's guidance for Human Factors and Usability Engineering reports.")
@@ -12,6 +12,28 @@ def display_human_factors_tab():
     if 'human_factors_data' not in st.session_state:
         st.session_state.human_factors_data = {}
     data = st.session_state.human_factors_data
+
+    # --- AI Suggestions Button ---
+    if not st.session_state.get('api_key_missing', True):
+        st.subheader("AI Assistance")
+        product_name = st.text_input("Product Name for AI Analysis", st.session_state.get('target_sku', ''))
+        product_desc = st.text_area("Brief Product Description for AI", height=100, placeholder="e.g., A handheld digital thermometer for home use.")
+        
+        if st.button("🤖 Generate AI Suggestions for HFE Report", use_container_width=True):
+            if product_name and product_desc:
+                with st.spinner("AI is generating HFE suggestions..."):
+                    suggestions = st.session_state.ai_hf_helper.generate_hf_suggestions(product_name, product_desc)
+                    if suggestions and "error" not in suggestions:
+                        # Populate form fields with AI suggestions
+                        for key, value in suggestions.items():
+                            data[key] = value
+                        st.success("✅ AI suggestions have been populated below.")
+                    else:
+                        st.error("Could not retrieve AI suggestions. Please try again.")
+            else:
+                st.warning("Please provide a product name and description for the AI.")
+    
+    st.divider()
 
     with st.expander("Section 1: Conclusion", expanded=True):
         data['conclusion_statement'] = st.text_area(

@@ -41,7 +41,7 @@ def display_capa_tab():
                         st.error("Could not retrieve AI suggestions. Please try again.")
 
     # --- CAPA Form Sections ---
-    with st.expander("📂 Step 1: Initiation & Problem Description", expanded=True):
+    with st.expander("📂 Step 1: Initiation & Problem Description", expanded=True, icon="📂"):
         st.markdown("##### **1.1 Identification**")
         col1, col2 = st.columns(2)
         data['capa_number'] = col1.text_input("CAPA Number", value=data.get('capa_number', f"CAPA-{date.today().strftime('%Y%m%d')}-001"))
@@ -56,7 +56,7 @@ def display_capa_tab():
         data['source_of_issue'] = st.selectbox("Source of Issue", source_options, index=current_source_index)
         data['issue_description'] = st.text_area("Detailed Description of Non-conformity", value=data.get('issue_description', ''), height=150)
 
-    with st.expander("🔍 Step 2: Investigation & Root Cause Analysis"):
+    with st.expander("🔍 Step 2: Investigation & Root Cause Analysis", icon="🔍"):
         st.markdown("##### **2.1 Immediate Actions**")
         data['immediate_actions'] = st.text_area("Immediate Actions/Corrections", value=data.get('immediate_actions', ''), height=100, help="How will we correct the issue at hand? How will we 'stop the bleeding?'")
 
@@ -68,7 +68,7 @@ def display_capa_tab():
         st.markdown("##### **2.3 Root Cause Analysis**")
         data['root_cause'] = st.text_area("Root Cause(s) Identified (e.g., using 5 Whys, Fishbone)", value=data.get('root_cause', ''), height=150)
 
-    with st.expander("🛠️ Step 3: Corrective & Preventive Action Plan"):
+    with st.expander("🛠️ Step 3: Corrective & Preventive Action Plan", icon="🛠️"):
         data['corrective_action'] = st.text_area("Corrective Action(s) to eliminate the root cause", value=data.get('corrective_action', ''), height=150)
         data['implementation_of_corrective_actions'] = st.text_area("Implementation of Corrective Actions", value=data.get('implementation_of_corrective_actions', ''), height=100, help="Who will do what by when? Include responsibilities and due dates.")
         
@@ -77,7 +77,7 @@ def display_capa_tab():
         data['preventive_action'] = st.text_area("Preventive Action(s) to prevent recurrence", value=data.get('preventive_action', ''), height=150)
         data['implementation_of_preventive_actions'] = st.text_area("Implementation of Preventive Actions", value=data.get('implementation_of_preventive_actions', ''), height=100, help="How will we determine all actions taken were effective?")
 
-    with st.expander("✅ Step 4: Verification & Closure"):
+    with st.expander("✅ Step 4: Verification & Closure", icon="✅"):
         data['effectiveness_verification_plan'] = st.text_area("Effectiveness Check Plan", value=data.get('effectiveness_verification_plan', ''), height=150, help="How will we determine all actions taken were effective?")
         data['effectiveness_check_findings'] = st.text_area("Effectiveness Check Findings", value=data.get('effectiveness_check_findings', ''), height=150, help="Were the actions taken effective? What objective evidence is there to demonstrate so?")
 

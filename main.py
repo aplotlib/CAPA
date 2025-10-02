@@ -40,27 +40,39 @@ def load_css():
     """Loads a custom CSS stylesheet to improve the application's appearance."""
     st.markdown("""
     <style>
+        /* --- CSS Variables for Theming --- */
+        :root {
+            --primary-color: #0068C9;
+            --primary-color-light: #E6F0F9;
+            --primary-bg: #FFFFFF;
+            --secondary-bg: #F0F2F6;
+            --text-color: #0B1A3D;
+            --secondary-text-color: #475569;
+            --border-color: #DEE2E6;
+        }
+
         /* --- Base Styles --- */
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
         
         html, body, [class*="st-"], [class*="css-"] {
             font-family: 'Inter', sans-serif;
+            color: var(--text-color);
         }
 
         .main {
-            background-color: #F0F2F6; /* Light grey background */
+            background-color: var(--secondary-bg);
         }
 
         /* --- Sidebar --- */
         [data-testid="stSidebar"] {
-            background-color: #FFFFFF;
-            border-right: 1px solid #E0E0E0;
+            background-color: var(--primary-bg);
+            border-right: 1px solid var(--border-color);
         }
 
         /* --- Main Header --- */
         .main-header {
-            background-color: #FFFFFF;
-            border: 1px solid #E0E0E0;
+            background-color: var(--primary-bg);
+            border: 1px solid var(--border-color);
             border-radius: 10px;
             padding: 1.5rem;
             margin-bottom: 2rem;
@@ -68,11 +80,11 @@ def load_css():
         }
         .main-header h1 {
             font-weight: 700;
-            color: #1E293B; /* Darker blue-grey */
+            color: var(--text-color);
             font-size: 2.25rem;
         }
         .main-header p {
-            color: #475569; /* Slate grey */
+            color: var(--secondary-text-color);
             font-size: 1.1rem;
         }
 
@@ -81,47 +93,72 @@ def load_css():
             border-radius: 8px;
             font-weight: 600;
             padding: 0.5rem 1rem;
+            border: 1px solid var(--primary-color);
+            background-color: var(--primary-bg);
+            color: var(--primary-color);
+        }
+        [data-testid="stButton"] button:hover {
+            border-color: var(--primary-color);
+            background-color: var(--primary-color-light);
+            color: var(--primary-color);
+        }
+        /* Primary Button Style */
+        [data-testid="stButton"] button.st-emotion-cache-19n6bnc {
+             background-color: var(--primary-color);
+             color: white;
+        }
+        [data-testid="stButton"] button.st-emotion-cache-19n6bnc:hover {
+             opacity: 0.9;
+             color: white;
         }
 
         /* --- Containers & Expanders --- */
         [data-testid="stExpander"] {
-            border: 1px solid #E0E0E0;
+            border: 1px solid var(--border-color);
             border-radius: 10px;
-            background-color: #FFFFFF;
+            background-color: var(--primary-bg);
         }
         
         [data-testid="stExpander"] summary {
             font-weight: 600;
-            color: #1E293B;
+            color: var(--text-color);
             font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
         }
 
-        /* This targets containers with border=True to add shadow and better styling */
         .st-emotion-cache-12w0qpk { 
             border-radius: 10px;
-            border: 1px solid #E0E0E0;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            border: 1px solid var(--border-color);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.04);
         }
         
         /* --- Tabs --- */
         .stTabs [data-baseweb="tab-list"] {
             gap: 2px;
-            border-bottom: 2px solid #E0E0E0;
+            border-bottom: 2px solid var(--border-color);
         }
         .stTabs [data-baseweb="tab"] {
             background-color: #F8F9FA;
             border-radius: 8px 8px 0 0;
-            border: 1px solid #E0E0E0;
+            border: 1px solid var(--border-color);
             margin-bottom: -1px;
             padding: 0.75rem 1.25rem;
             font-weight: 600;
-            color: #475569;
+            color: var(--secondary-text-color);
         }
         .stTabs [aria-selected="true"] {
-            background-color: #FFFFFF;
-            border-bottom-color: #FFFFFF !important;
-            color: #0068C9;
+            background-color: var(--primary-bg);
+            border-bottom-color: var(--primary-bg) !important;
+            color: var(--primary-color);
         }
+        
+        /* --- Info/Warning Boxes --- */
+        [data-testid="stAlert"] {
+            border-radius: 8px;
+        }
+
     </style>
     """, unsafe_allow_html=True)
 

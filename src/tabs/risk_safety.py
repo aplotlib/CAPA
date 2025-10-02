@@ -4,7 +4,10 @@ import streamlit as st
 import pandas as pd
 
 def display_risk_safety_tab():
-    st.header("Risk & Safety Analysis Hub")
+    """
+    Displays the Risk & Safety Analysis Hub, including FMEA and URRA tools.
+    """
+    st.header("⚠️ Risk & Safety Analysis Hub")
     if st.session_state.api_key_missing:
         st.error("AI features are disabled. Please configure your API key.")
         return
@@ -15,21 +18,21 @@ def display_risk_safety_tab():
 
     # --- Tool 1: FMEA (NEW & IMPROVED UI) ---
     with st.container(border=True):
-        [cite_start]st.subheader("Failure Mode and Effects Analysis (FMEA) [cite: 558]")
+        st.subheader("Failure Mode and Effects Analysis (FMEA)")
         with st.expander("What is an FMEA?", expanded=False):
             st.markdown("""
-            [cite_start]An FMEA is a proactive method to evaluate a process for potential problems before they happen. [cite: 558] Use this tool to identify and prioritize risks.
-            - [cite_start]**Severity (S):** Impact of the failure (1=Low, 10=High). [cite: 565]
-            - [cite_start]**Occurrence (O):** Likelihood of the failure (1=Low, 10=High). [cite: 566]
-            - [cite_start]**Detection (D):** How likely you are to detect the failure (1=High, 10=Low). [cite: 566]
-            **RPN = S × O × D**. [cite_start]Higher RPNs are higher priorities. [cite: 568]
+            An FMEA is a proactive method to evaluate a process for potential problems before they happen. Use this tool to identify and prioritize risks.
+            - **Severity (S):** Impact of the failure (1=Low, 10=High).
+            - **Occurrence (O):** Likelihood of the failure (1=Low, 10=High).
+            - **Detection (D):** How likely you are to detect the failure (1=High, 10=Low).
+            **RPN = S × O × D**. Higher RPNs are higher priorities.
             """)
 
         st.markdown("##### Step 1: Manually Enter 1-3 Initial Failure Modes")
         with st.form("manual_fmea_form"):
-            [cite_start]failure_mode = st.text_input("Potential Failure Mode [cite: 559]")
-            [cite_start]effect = st.text_area("Potential Effect(s) [cite: 558]", height=100)
-            [cite_start]cause = st.text_area("Potential Cause(s) [cite: 449]", height=100)
+            failure_mode = st.text_input("Potential Failure Mode")
+            effect = st.text_area("Potential Effect(s)", height=100)
+            cause = st.text_area("Potential Cause(s)", height=100)
             if st.form_submit_button("Add Failure Mode", use_container_width=True):
                 if failure_mode:
                     st.session_state.fmea_rows.append({
@@ -53,27 +56,30 @@ def display_risk_safety_tab():
                     row["Potential Cause(s)"] = c3.text_area("Cause(s)", value=row["Potential Cause(s)"], key=f"cause_{i}", height=150)
                     
                     sc1, sc2, sc3 = st.columns(3)
-                    row["Severity"] = sc1.slider("Severity", 1, 10, int(row["Severity"]), key=f"s_{i}")
-                    row["Occurrence"] = sc2.slider("Occurrence", 1, 10, int(row["Occurrence"]), key=f"o_{i}")
-                    row["Detection"] = sc3.slider("Detection", 1, 10, int(row["Detection"]), key=f"d_{i}")
+                    row["Severity"] = sc1.slider("Severity", 1, 10, int(row.get("Severity", 5)), key=f"s_{i}")
+                    row["Occurrence"] = sc2.slider("Occurrence", 1, 10, int(row.get("Occurrence", 5)), key=f"o_{i}")
+                    row["Detection"] = sc3.slider("Detection", 1, 10, int(row.get("Detection", 5)), key=f"d_{i}")
                     row["RPN"] = row["Severity"] * row["Occurrence"] * row["Detection"]
                     st.metric("Risk Priority Number (RPN)", row["RPN"])
             
             st.markdown("---")
             st.markdown("##### Step 2: Use AI to Expand Your Analysis")
             if st.button("🤖 Suggest Additional Failure Modes with AI", use_container_width=True, type="primary"):
-                with st.spinner("AI is brainstorming other risks..."):
-                    insights = st.session_state.get('analysis_results', {}).get('insights', 'No specific insights. Consider general product risks.')
-                    suggestions = st.session_state.fmea_generator.suggest_failure_modes(
-                        insights, 
-                        st.session_state.get('analysis_results'), 
-                        st.session_state.fmea_rows
-                    )
-                    for suggestion in suggestions:
-                        suggestion.update({"Severity": 5, "Occurrence": 5, "Detection": 5, "RPN": 125})
-                        st.session_state.fmea_rows.append(suggestion)
-                    st.success("AI has added new failure modes for your review.")
-                    st.rerun()
+                if 'fmea_generator' in st.session_state:
+                    with st.spinner("AI is brainstorming other risks..."):
+                        insights = st.session_state.get('analysis_results', {}).get('insights', 'High return rate observed.')
+                        suggestions = st.session_state.fmea_generator.suggest_failure_modes(
+                            st.session_state.product_info.get('ifu', insights), 
+                            st.session_state.get('analysis_results'), 
+                            st.session_state.fmea_rows
+                        )
+                        for suggestion in suggestions:
+                            suggestion.update({"Severity": 5, "Occurrence": 5, "Detection": 5, "RPN": 125})
+                            st.session_state.fmea_rows.append(suggestion)
+                        st.success("AI has added new failure modes for your review.")
+                        st.rerun()
+                else:
+                    st.warning("AI features are not available. Check your API key.")
         
         # Update fmea_data for export
         if st.session_state.fmea_rows:
@@ -99,17 +105,23 @@ def display_risk_safety_tab():
                 urra_env_other = st.text_input("Please specify the 'Other' environment:", key="urra_env_other_text")
 
             if st.form_submit_button("Generate URRA", type="primary", use_container_width=True):
-                final_environments = urra_env_selection
-                if "Other" in final_environments and urra_env_other:
-                    final_environments.remove("Other")
-                    final_environments.append(urra_env_other)
+                if 'urra_generator' in st.session_state:
+                    final_environments = list(urra_env_selection)
+                    if "Other" in final_environments:
+                        final_environments.remove("Other")
+                        if urra_env_other:
+                            final_environments.append(urra_env_other)
+                    
+                    env_string = ", ".join(final_environments)
 
-                if all([urra_product_name, urra_product_desc, urra_user, final_environments]):
-                    with st.spinner("AI is generating the URRA..."):
-                        st.session_state.urra = st.session_state.urra_generator.generate_urra(urra_product_name, urra_product_desc, urra_user, ", ".join(final_environments))
+                    if all([urra_product_name, urra_product_desc, urra_user, env_string]):
+                        with st.spinner("AI is generating the URRA..."):
+                            st.session_state.urra = st.session_state.urra_generator.generate_urra(urra_product_name, urra_product_desc, urra_user, env_string)
+                    else:
+                        st.warning("Please fill in all fields to generate the URRA.")
                 else:
-                    st.warning("Please fill in all fields to generate the URRA.")
+                    st.error("URRA Generator is not available. Check API key.")
 
         if st.session_state.get('urra'):
             st.markdown("### Use-Related Risk Analysis Results")
-            st.markdown(st.session_state.urra)
+            st.markdown(st.session_state.urra, unsafe_allow_html=True)

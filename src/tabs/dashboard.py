@@ -2,13 +2,23 @@
 
 import streamlit as st
 import pandas as pd
+import os
 
 def display_dashboard():
     """Renders the main dashboard tab with key metrics and AI insights."""
 
     if not st.session_state.analysis_results:
         st.info("👋 Welcome to the Automated QMS! Please add product and data in the sidebar to begin your analysis.")
-        st.image("logo.png", width=200) # Assuming you have a logo.png file
+        
+        # Safely handle the logo path
+        # This assumes dashboard.py is in src/tabs/ and logo.png is in the root project directory
+        # This is a robust way to construct the path regardless of where the script is run from.
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        logo_path = os.path.join(project_root, "logo.png")
+        
+        if os.path.exists(logo_path):
+            st.image(logo_path, width=200)
+        
         return
 
     results = st.session_state.analysis_results

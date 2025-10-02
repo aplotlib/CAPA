@@ -1,4 +1,4 @@
-# main.py (MODIFIED)
+# main.py
 
 import streamlit as st
 import pandas as pd
@@ -27,34 +27,94 @@ from src.tabs.compliance import display_compliance_tab
 from src.tabs.cost_of_quality import display_cost_of_quality_tab
 from src.tabs.human_factors import display_human_factors_tab
 from src.tabs.exports import display_exports_tab
-from src.tabs.capa_closure import display_capa_closure_tab # New import
+from src.tabs.capa_closure import display_capa_closure_tab
+
 
 def load_css():
-    """Loads custom CSS for styling the Streamlit application."""
+    """Loads a custom CSS stylesheet to improve the application's appearance."""
     st.markdown("""
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        /* --- Base Styles --- */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        
         html, body, [class*="st-"], [class*="css-"] {
             font-family: 'Inter', sans-serif;
         }
+
+        .main {
+            background-color: #F0F2F6; /* Light grey background */
+        }
+
+        /* --- Sidebar --- */
+        [data-testid="stSidebar"] {
+            background-color: #FFFFFF;
+            border-right: 1px solid #E0E0E0;
+        }
+
+        /* --- Main Header --- */
         .main-header {
-            text-align: center;
-            padding: 2rem 0;
-            background-color: #F8F9FA;
-            border-radius: 0.5rem;
+            background-color: #FFFFFF;
+            border: 1px solid #E0E0E0;
+            border-radius: 10px;
+            padding: 1.5rem;
             margin-bottom: 2rem;
+            text-align: center;
         }
         .main-header h1 {
             font-weight: 700;
-            font-size: 2.5rem;
-            color: #1a1a2e;
+            color: #1E293B; /* Darker blue-grey */
+            font-size: 2.25rem;
         }
         .main-header p {
-            color: #4F4F4F;
+            color: #475569; /* Slate grey */
             font-size: 1.1rem;
         }
+
+        /* --- Buttons --- */
+        [data-testid="stButton"] button {
+            border-radius: 8px;
+            font-weight: 600;
+            padding: 0.5rem 1rem;
+        }
+
+        /* --- Containers & Expanders --- */
+        [data-testid="stExpander"] {
+            border: 1px solid #E0E0E0;
+            border-radius: 10px;
+            background-color: #FFFFFF;
+        }
+        
+        [data-testid="stExpander"] summary {
+            font-weight: 600;
+            color: #1E293B;
+            font-size: 1.1rem;
+        }
+
+        /* This targets containers with border=True to add shadow and better styling */
+        .st-emotion-cache-12w0qpk { 
+            border-radius: 10px;
+            border: 1px solid #E0E0E0;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+        
+        /* --- Tabs --- */
         .stTabs [data-baseweb="tab-list"] {
-        		gap: 24px;
+            gap: 2px;
+            border-bottom: 2px solid #E0E0E0;
+        }
+        .stTabs [data-baseweb="tab"] {
+            background-color: #F8F9FA;
+            border-radius: 8px 8px 0 0;
+            border: 1px solid #E0E0E0;
+            margin-bottom: -1px;
+            padding: 0.75rem 1.25rem;
+            font-weight: 600;
+            color: #475569;
+        }
+        .stTabs [aria-selected="true"] {
+            background-color: #FFFFFF;
+            border-bottom-color: #FFFFFF !important;
+            color: #0068C9;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -101,7 +161,7 @@ def initialize_components():
         st.session_state.doc_generator = DocumentGenerator()
         st.session_state.data_processor = DataProcessor()
         st.session_state.ai_context_helper = AIContextHelper(api_key)
-        st.session_state.ai_hf_helper = AIHumanFactorsHelper(api_key) # New component
+        st.session_state.ai_hf_helper = AIHumanFactorsHelper(api_key)
 
     st.session_state.components_initialized = True
 
@@ -248,12 +308,12 @@ def display_main_app():
 
     display_sidebar()
 
-    tab_list = ["Dashboard", "CAPA", "CAPA Closure", "Risk & Safety", "Human Factors", "Vendor Comms", "Compliance", "Cost of Quality", "Exports"] # New Tab Added
+    tab_list = ["Dashboard", "CAPA", "CAPA Closure", "Risk & Safety", "Human Factors", "Vendor Comms", "Compliance", "Cost of Quality", "Exports"]
     tabs = st.tabs(tab_list)
 
     with tabs[0]: display_dashboard()
     with tabs[1]: display_capa_tab()
-    with tabs[2]: display_capa_closure_tab() # New Tab display
+    with tabs[2]: display_capa_closure_tab()
     with tabs[3]: display_risk_safety_tab()
     with tabs[4]: display_human_factors_tab()
     with tabs[5]: display_vendor_comm_tab()
@@ -263,7 +323,7 @@ def display_main_app():
 
     if not st.session_state.api_key_missing:
         st.divider()
-        with st.expander("AI Assistant (Context-Aware)"):
+        with st.expander("💬 AI Assistant (Context-Aware)"):
             user_query = st.text_input("Ask the AI about your current analysis:")
             if user_query:
                 with st.spinner("AI is synthesizing an answer..."):

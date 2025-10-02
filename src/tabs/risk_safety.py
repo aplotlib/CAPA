@@ -38,6 +38,7 @@ def display_risk_safety_tab():
                         "Potential Cause(s)": cause,
                         "Severity": 5, "Occurrence": 5, "Detection": 5, "RPN": 125
                     })
+                    st.rerun()
                 else:
                     st.warning("Potential Failure Mode is a required field.")
 
@@ -52,9 +53,9 @@ def display_risk_safety_tab():
                     row["Potential Cause(s)"] = c3.text_area("Cause(s)", value=row["Potential Cause(s)"], key=f"cause_{i}", height=150)
                     
                     sc1, sc2, sc3 = st.columns(3)
-                    row["Severity"] = sc1.slider("Severity", 1, 10, row["Severity"], key=f"s_{i}")
-                    row["Occurrence"] = sc2.slider("Occurrence", 1, 10, row["Occurrence"], key=f"o_{i}")
-                    row["Detection"] = sc3.slider("Detection", 1, 10, row["Detection"], key=f"d_{i}")
+                    row["Severity"] = sc1.slider("Severity", 1, 10, int(row["Severity"]), key=f"s_{i}")
+                    row["Occurrence"] = sc2.slider("Occurrence", 1, 10, int(row["Occurrence"]), key=f"o_{i}")
+                    row["Detection"] = sc3.slider("Detection", 1, 10, int(row["Detection"]), key=f"d_{i}")
                     row["RPN"] = row["Severity"] * row["Occurrence"] * row["Detection"]
                     st.metric("Risk Priority Number (RPN)", row["RPN"])
             
@@ -64,8 +65,11 @@ def display_risk_safety_tab():
                 if st.session_state.get('analysis_results'):
                     with st.spinner("AI is brainstorming other risks..."):
                         insights = st.session_state.analysis_results.get('insights', 'High return rate observed.')
-                        suggestions = st.session_state.fmea_generator.expand_failure_modes(
-                            insights, st.session_state.analysis_results, st.session_state.fmea_rows
+                        # FIX: Call the correct, existing method name
+                        suggestions = st.session_state.fmea_generator.suggest_failure_modes(
+                            insights, 
+                            st.session_state.analysis_results, 
+                            st.session_state.fmea_rows
                         )
                         for suggestion in suggestions:
                             suggestion.update({"Severity": 5, "Occurrence": 5, "Detection": 5, "RPN": 125})
@@ -81,7 +85,7 @@ def display_risk_safety_tab():
     
     st.write("") 
     
-    # --- Tool 2: Use-Related Risk Analysis (URRA) (IMPROVED UI) ---
+    # --- Tool 2: Use-Related Risk Analysis (URRA) ---
     with st.container(border=True):
         st.subheader("Use-Related Risk Analysis (URRA) Generator")
         with st.form("urra_form"):
@@ -90,13 +94,11 @@ def display_risk_safety_tab():
             urra_product_desc = st.text_area("Product Description & Intended Use", value=st.session_state.product_info['ifu'], height=100, key="urra_desc")
             urra_user = st.text_input("Intended User Profile", placeholder="e.g., Elderly individuals with limited dexterity")
             
-            # NEW: Dropdown for environment
             use_environments = ["Home Healthcare Setting", "Hospital/Clinical Setting", "Long-Term Care Facility", "Outpatient Clinic", "Public Spaces/Transport", "Other (Specify)"]
             urra_env_selection = st.selectbox("Intended Use Environment", use_environments)
 
             if urra_env_selection == "Other (Specify)":
-                urra_env_other = st.text_input("Please specify the use environment:", key="urra_env_other")
-                urra_env = urra_env_other
+                urra_env = st.text_input("Please specify the use environment:", key="urra_env_other")
             else:
                 urra_env = urra_env_selection
 

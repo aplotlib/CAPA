@@ -22,7 +22,7 @@ def display_risk_safety_tab():
             """)
 
         c1, c2 = st.columns(2)
-        if c1.button("Suggest Failure Modes with AI", width='stretch', key="fmea_ai"):
+        if c1.button("Suggest Failure Modes with AI", use_container_width=True, key="fmea_ai", type="primary"):
             if st.session_state.analysis_results:
                 with st.spinner("AI is suggesting failure modes..."):
                     insights = st.session_state.analysis_results.get('insights', 'High return rate observed.')
@@ -36,7 +36,7 @@ def display_risk_safety_tab():
             else:
                 st.warning("Run an analysis on the dashboard first.")
         
-        if c2.button("Add Manual FMEA Row", width='stretch', key="fmea_add"):
+        if c2.button("Add Manual FMEA Row", use_container_width=True, key="fmea_add"):
             new_row = pd.DataFrame([{"Potential Failure Mode": "", "Potential Effect(s)": "", "Severity": 1, "Potential Cause(s)": "", "Occurrence": 1, "Current Controls": "", "Detection": 1, "RPN": 1}])
             st.session_state.fmea_data = pd.concat([st.session_state.fmea_data, new_row], ignore_index=True)
 
@@ -61,12 +61,12 @@ def display_risk_safety_tab():
         st.subheader("ISO 14971 Risk Assessment Generator")
         with st.form("risk_assessment_form"):
             st.info("Generates a formal risk assessment for a medical device according to ISO 14971.")
-            ra_product_name = st.text_input("Product Name", st.session_state.target_sku)
-            ra_product_desc = st.text_area("Product Description & Intended Use", height=100)
-            if st.form_submit_button("Generate Risk Assessment", type="primary", width='stretch'):
+            ra_product_name = st.text_input("Product Name", st.session_state.product_info['name'])
+            ra_product_desc = st.text_area("Product Description & Intended Use", value=st.session_state.product_info['ifu'], height=100)
+            if st.form_submit_button("Generate Risk Assessment", type="primary", use_container_width=True):
                 if ra_product_name and ra_product_desc:
                     with st.spinner("AI is generating the ISO 14971 assessment..."):
-                        st.session_state.risk_assessment = st.session_state.risk_assessment_generator.generate_assessment(ra_product_name, st.session_state.target_sku, ra_product_desc)
+                        st.session_state.risk_assessment = st.session_state.risk_assessment_generator.generate_assessment(ra_product_name, st.session_state.product_info['sku'], ra_product_desc)
                 else:
                     st.warning("Please provide a product name and description.")
         
@@ -80,11 +80,11 @@ def display_risk_safety_tab():
         st.subheader("Use-Related Risk Analysis (URRA) Generator")
         with st.form("urra_form"):
             st.info("Generates a URRA based on IEC 62366 to identify risks associated with product usability.")
-            urra_product_name = st.text_input("Product Name", st.session_state.target_sku, key="urra_name")
-            urra_product_desc = st.text_area("Product Description & Intended Use", height=100, key="urra_desc")
+            urra_product_name = st.text_input("Product Name", st.session_state.product_info['name'], key="urra_name")
+            urra_product_desc = st.text_area("Product Description & Intended Use", value=st.session_state.product_info['ifu'], height=100, key="urra_desc")
             urra_user = st.text_input("Intended User Profile", placeholder="e.g., Elderly individuals with limited dexterity")
             urra_env = st.text_input("Intended Use Environment", placeholder="e.g., Home healthcare setting")
-            if st.form_submit_button("Generate URRA", type="primary", width='stretch'):
+            if st.form_submit_button("Generate URRA", type="primary", use_container_width=True):
                 if urra_product_name and urra_product_desc and urra_user and urra_env:
                     with st.spinner("AI is generating the URRA..."):
                         st.session_state.urra = st.session_state.urra_generator.generate_urra(urra_product_name, urra_product_desc, urra_user, urra_env)

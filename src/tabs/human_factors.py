@@ -18,9 +18,8 @@ def display_human_factors_tab():
         st.subheader("🤖 AI Assistance")
         st.markdown("Provide some basic product details to get AI-generated suggestions for the sections below.")
         
-        c1, c2 = st.columns(2)
-        product_name = c1.text_input("Product Name for AI Analysis", st.session_state.get('target_sku', ''))
-        product_desc = c2.text_area("Brief Product Description for AI", height=100, placeholder="e.g., A handheld digital thermometer for home use.")
+        product_name = st.session_state.product_info['name']
+        product_desc = st.session_state.product_info['ifu']
         
         if st.button("✍️ Generate AI Suggestions for HFE Report", use_container_width=True, type="primary"):
             if product_name and product_desc:

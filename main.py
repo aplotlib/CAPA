@@ -10,6 +10,7 @@ import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
 from io import StringIO
+import base64
 
 # --- Import custom application modules ---
 from src.parsers import AIFileParser
@@ -61,6 +62,12 @@ def load_css():
 
         .main {
             background-color: var(--secondary-bg);
+        }
+        
+        h3 {
+            font-size: 1.75rem;
+            color: var(--text-color);
+            font-weight: 700;
         }
 
         /* --- Sidebar --- */
@@ -163,6 +170,12 @@ def load_css():
     """, unsafe_allow_html=True)
 
 
+def get_image_as_base64(path):
+    """Helper function to embed a local image."""
+    with open(path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode()
+
+
 def initialize_session_state():
     """Initializes all required keys in Streamlit's session state with default values."""
     defaults = {
@@ -246,7 +259,16 @@ def parse_manual_input(input_str: str, target_sku: str) -> pd.DataFrame:
 def display_sidebar():
     """Renders all configuration and data input widgets in the sidebar."""
     with st.sidebar:
-        st.image("https://www.vivehealth.com/cdn/shop/files/vive-logo-1_2_250x.png?v=1613713028", width=150)
+        # Replaced URL with an embedded SVG for reliability
+        logo_svg = """
+        <svg width="150" height="40" viewBox="0 0 250 66" xmlns="http://www.w3.org/2000/svg">
+        <path d="M65.882 23.366c0-13.01-10.55-23.56-23.56-23.56-13.01 0-23.56 10.55-23.56 23.56 0 13.01 10.55 23.56 23.56 23.56 13.01 0 23.56-10.55 23.56-23.56zm-38.35 0c0-8.167 6.623-14.79 14.79-14.79s14.79 6.623 14.79 14.79-6.623 14.79-14.79 14.79-14.79-6.623-14.79-14.79z" fill="#000"/>
+        <path d="M96.65 11.536V46.92h-8.825V11.536h8.825zM128.508 11.536l-8.43 14.59-8.423-14.59h-9.74l13.29 22.99v12.394h8.824V34.526l13.29-22.99h-9.81zM161.417 11.536V46.92h-8.825V11.536h8.825z" fill="#000"/>
+        <path d="M211.503 24.38c0-5.32-4.31-9.63-9.63-9.63s-9.63 4.31-9.63 9.63 4.31 9.63 9.63 9.63 9.63-4.31 9.63-9.63zm-27.483 22.54h-8.825V11.536h8.825v7.2c1.94-2.85 5.2-4.73 8.94-4.73 7.93 0 14.36 6.43 14.36 14.36s-6.43 14.36-14.36 14.36c-3.74 0-7-1.88-8.94-4.73v11.12h0zM249.03 24.38c0-5.32-4.31-9.63-9.63-9.63s-9.63 4.31-9.63 9.63 4.31 9.63 9.63 9.63 9.63-4.31 9.63-9.63zm-27.483 22.54h-8.825V11.536h8.825v7.2c1.94-2.85 5.2-4.73 8.94-4.73 7.93 0 14.36 6.43 14.36 14.36s-6.43 14.36-14.36 14.36c-3.74 0-7-1.88-8.94-4.73v11.12h0z" fill="#000"/>
+        </svg>
+        """
+        st.markdown(f'<div style="margin-bottom: 2rem;">{logo_svg}</div>', unsafe_allow_html=True)
+        
         st.header("Configuration")
         st.session_state.target_sku = st.text_input("Target Product SKU", st.session_state.target_sku)
 
@@ -274,7 +296,7 @@ def display_sidebar():
         st.info(f"Period: {st.session_state.start_date.strftime('%b %d, %Y')} to {st.session_state.end_date.strftime('%b %d, %Y')}")
 
         st.header("Add Data")
-        with st.expander("Manual Data Entry"):
+        with st.expander("Manual Data Entry", icon="✍️"):
             manual_sales = st.text_area("Sales Data", placeholder=f"Total units sold for {st.session_state.target_sku} (e.g., 9502)")
             manual_returns = st.text_area("Returns Data", placeholder=f"Total units returned for {st.session_state.target_sku} (e.g., 150)")
             if st.button("Process Manual Data"):
@@ -285,7 +307,7 @@ def display_sidebar():
                     returns_df = parse_manual_input(manual_returns, st.session_state.target_sku)
                     process_data(sales_df, returns_df)
 
-        with st.expander("Or Upload Files"):
+        with st.expander("Or Upload Files", icon="📄"):
             uploaded_files = st.file_uploader(
                 "Upload sales, returns, or other data files",
                 accept_multiple_files=True,
@@ -366,7 +388,7 @@ def display_main_app():
 
     if not st.session_state.api_key_missing:
         st.divider()
-        with st.expander("💬 AI Assistant (Context-Aware)"):
+        with st.expander("AI Assistant (Context-Aware)", icon="💬"):
             user_query = st.text_input("Ask the AI about your current analysis:")
             if user_query:
                 with st.spinner("AI is synthesizing an answer..."):

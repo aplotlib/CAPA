@@ -6,7 +6,7 @@ import streamlit as st
 from datetime import date, timedelta
 import base64
 
-# Get the absolute path of the directory containing main.py
+# Get the absolute path of a directory containing main.py
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, APP_DIR)
 
@@ -229,7 +229,8 @@ def initialize_session_state():
         'final_review_summary': None,
         'capa_closure_data': {},
         'coq_results': None,
-        'fmea_rows': []
+        'fmea_rows': [],
+        'manual_content': {}
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -295,6 +296,7 @@ def initialize_product_dev_components(api_key):
     UseRelatedRiskAnalyzer = lazy_import('src.ai_capa_helper', 'UseRelatedRiskAnalyzer')
     AIDesignControlsTriager = lazy_import('src.ai_capa_helper', 'AIDesignControlsTriager')
     AIHumanFactorsHelper = lazy_import('src.ai_capa_helper', 'AIHumanFactorsHelper')
+    ProductManualWriter = lazy_import('src.ai_capa_helper', 'ProductManualWriter') # NEW
     FMEA = lazy_import('src.fmea', 'FMEA')
     PreMortem = lazy_import('src.pre_mortem', 'PreMortem')
     
@@ -303,6 +305,7 @@ def initialize_product_dev_components(api_key):
     st.session_state.urra_generator = UseRelatedRiskAnalyzer(api_key)
     st.session_state.ai_design_controls_triager = AIDesignControlsTriager(api_key)
     st.session_state.ai_hf_helper = AIHumanFactorsHelper(api_key)
+    st.session_state.manual_writer = ProductManualWriter(api_key) # NEW
     st.session_state.fmea_generator = FMEA(api_key)
     st.session_state.pre_mortem_generator = PreMortem(api_key)
 
@@ -565,8 +568,8 @@ def display_capa_workflow():
 
 def display_product_dev_workflow():
     """Display Product Development workflow tabs"""
-    tab_list = ["Product Development", "Risk & Safety", "Human Factors", "Compliance", "Final Review", "Exports"]
-    icons = ["🚀", "⚠️", "👥", "⚖️", "🔍", "📄"]
+    tab_list = ["Product Development", "Risk & Safety", "Human Factors", "Manual Writer", "Compliance", "Final Review", "Exports"]
+    icons = ["🚀", "⚠️", "👥", "✍️", "⚖️", "🔍", "📄"]
     
     tabs = st.tabs([f"{icon} {name}" for icon, name in zip(icons, tab_list)])
     
@@ -580,14 +583,17 @@ def display_product_dev_workflow():
     with tabs[2]: 
         display_human_factors_tab = lazy_import('src.tabs.human_factors', 'display_human_factors_tab')
         display_human_factors_tab()
-    with tabs[3]: 
+    with tabs[3]: # NEW
+        display_manual_writer_tab = lazy_import('src.tabs.manual_writer', 'display_manual_writer_tab')
+        display_manual_writer_tab()
+    with tabs[4]: 
         ensure_component_loaded('pre_mortem_generator')
         display_compliance_tab = lazy_import('src.tabs.compliance', 'display_compliance_tab')
         display_compliance_tab()
-    with tabs[4]: 
+    with tabs[5]: 
         display_final_review_tab = lazy_import('src.tabs.final_review', 'display_final_review_tab')
         display_final_review_tab()
-    with tabs[5]: 
+    with tabs[6]: 
         display_exports_tab = lazy_import('src.tabs.exports', 'display_exports_tab')
         display_exports_tab()
 

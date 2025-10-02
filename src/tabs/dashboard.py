@@ -4,7 +4,7 @@ import streamlit as st
 
 def display_dashboard():
     """Renders the main dashboard tab with key metrics and AI insights."""
-    st.header("📈 Quality Dashboard")
+    st.markdown("<h3>📈 Quality Dashboard</h3>", unsafe_allow_html=True)
 
     if not st.session_state.analysis_results:
         st.info("👋 Welcome! Please configure your product and add data in the sidebar to begin.")

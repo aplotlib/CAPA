@@ -21,9 +21,9 @@ def display_dashboard():
         return
 
     # Filter summary data for the specific target SKU
-    sku_summary = summary_df[summary_df['sku'] == st.session_state.target_sku]
+    sku_summary = summary_df[summary_df['sku'] == st.session_state.product_info['sku']]
     if sku_summary.empty:
-        st.warning(f"No summary data could be calculated for SKU: {st.session_state.target_sku}")
+        st.warning(f"No summary data could be calculated for SKU: {st.session_state.product_info['sku']}")
         return
 
     summary_data = sku_summary.iloc[0]

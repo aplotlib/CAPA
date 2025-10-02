@@ -15,21 +15,21 @@ def display_risk_safety_tab():
 
     # --- Tool 1: FMEA (NEW & IMPROVED UI) ---
     with st.container(border=True):
-        st.subheader("Failure Mode and Effects Analysis (FMEA)")
+        [cite_start]st.subheader("Failure Mode and Effects Analysis (FMEA) [cite: 558]")
         with st.expander("What is an FMEA?", expanded=False):
             st.markdown("""
-            An FMEA is a proactive method to evaluate a process for potential failures. Use this tool to identify and prioritize risks.
-            - **Severity (S):** Impact of the failure (1=Low, 10=High).
-            - **Occurrence (O):** Likelihood of the failure (1=Low, 10=High).
-            - **Detection (D):** How likely you are to detect the failure (1=High, 10=Low).
-            **RPN = S × O × D**. Higher RPNs are higher priorities.
+            [cite_start]An FMEA is a proactive method to evaluate a process for potential problems before they happen. [cite: 558] Use this tool to identify and prioritize risks.
+            - [cite_start]**Severity (S):** Impact of the failure (1=Low, 10=High). [cite: 565]
+            - [cite_start]**Occurrence (O):** Likelihood of the failure (1=Low, 10=High). [cite: 566]
+            - [cite_start]**Detection (D):** How likely you are to detect the failure (1=High, 10=Low). [cite: 566]
+            **RPN = S × O × D**. [cite_start]Higher RPNs are higher priorities. [cite: 568]
             """)
 
         st.markdown("##### Step 1: Manually Enter 1-3 Initial Failure Modes")
         with st.form("manual_fmea_form"):
-            failure_mode = st.text_input("Potential Failure Mode")
-            effect = st.text_area("Potential Effect(s)", height=100)
-            cause = st.text_area("Potential Cause(s)", height=100)
+            [cite_start]failure_mode = st.text_input("Potential Failure Mode [cite: 559]")
+            [cite_start]effect = st.text_area("Potential Effect(s) [cite: 558]", height=100)
+            [cite_start]cause = st.text_area("Potential Cause(s) [cite: 449]", height=100)
             if st.form_submit_button("Add Failure Mode", use_container_width=True):
                 if failure_mode:
                     st.session_state.fmea_rows.append({
@@ -62,22 +62,18 @@ def display_risk_safety_tab():
             st.markdown("---")
             st.markdown("##### Step 2: Use AI to Expand Your Analysis")
             if st.button("🤖 Suggest Additional Failure Modes with AI", use_container_width=True, type="primary"):
-                if st.session_state.get('analysis_results'):
-                    with st.spinner("AI is brainstorming other risks..."):
-                        insights = st.session_state.analysis_results.get('insights', 'High return rate observed.')
-                        # FIX: Call the correct, existing method name
-                        suggestions = st.session_state.fmea_generator.suggest_failure_modes(
-                            insights, 
-                            st.session_state.analysis_results, 
-                            st.session_state.fmea_rows
-                        )
-                        for suggestion in suggestions:
-                            suggestion.update({"Severity": 5, "Occurrence": 5, "Detection": 5, "RPN": 125})
-                            st.session_state.fmea_rows.append(suggestion)
-                        st.success("AI has added new failure modes for your review.")
-                        st.rerun()
-                else:
-                    st.warning("Run an analysis on the dashboard first.")
+                with st.spinner("AI is brainstorming other risks..."):
+                    insights = st.session_state.get('analysis_results', {}).get('insights', 'No specific insights. Consider general product risks.')
+                    suggestions = st.session_state.fmea_generator.suggest_failure_modes(
+                        insights, 
+                        st.session_state.get('analysis_results'), 
+                        st.session_state.fmea_rows
+                    )
+                    for suggestion in suggestions:
+                        suggestion.update({"Severity": 5, "Occurrence": 5, "Detection": 5, "RPN": 125})
+                        st.session_state.fmea_rows.append(suggestion)
+                    st.success("AI has added new failure modes for your review.")
+                    st.rerun()
         
         # Update fmea_data for export
         if st.session_state.fmea_rows:
@@ -90,24 +86,30 @@ def display_risk_safety_tab():
         st.subheader("Use-Related Risk Analysis (URRA) Generator")
         with st.form("urra_form"):
             st.info("Generates a URRA based on IEC 62366 to identify risks associated with product usability.")
-            urra_product_name = st.text_input("Product Name", st.session_state.product_info['name'], key="urra_name")
-            urra_product_desc = st.text_area("Product Description & Intended Use", value=st.session_state.product_info['ifu'], height=100, key="urra_desc")
-            urra_user = st.text_input("Intended User Profile", placeholder="e.g., Elderly individuals with limited dexterity")
+            product_info = st.session_state.product_info
+            urra_product_name = st.text_input("Product Name", product_info.get('name', ''), key="urra_name")
+            urra_product_desc = st.text_area("Product Description & Intended Use", value=product_info.get('ifu', ''), height=100, key="urra_desc")
+            urra_user = st.text_input("Intended User Profile", placeholder="e.g., Elderly individuals with limited dexterity", key="urra_user")
             
-            use_environments = ["Home Healthcare Setting", "Hospital/Clinical Setting", "Long-Term Care Facility", "Outpatient Clinic", "Public Spaces/Transport", "Other (Specify)"]
-            urra_env_selection = st.selectbox("Intended Use Environment", use_environments)
+            use_environments_options = ["Home Healthcare Setting", "Hospital/Clinical Setting", "Long-Term Care Facility", "Outpatient Clinic", "Public Spaces/Transport", "Other"]
+            urra_env_selection = st.multiselect("Intended Use Environment(s)", use_environments_options, key="urra_env_multi")
 
-            if urra_env_selection == "Other (Specify)":
-                urra_env = st.text_input("Please specify the use environment:", key="urra_env_other")
-            else:
-                urra_env = urra_env_selection
+            urra_env_other = ""
+            if "Other" in urra_env_selection:
+                urra_env_other = st.text_input("Please specify the 'Other' environment:", key="urra_env_other_text")
 
             if st.form_submit_button("Generate URRA", type="primary", use_container_width=True):
-                if all([urra_product_name, urra_product_desc, urra_user, urra_env]):
+                final_environments = urra_env_selection
+                if "Other" in final_environments and urra_env_other:
+                    final_environments.remove("Other")
+                    final_environments.append(urra_env_other)
+
+                if all([urra_product_name, urra_product_desc, urra_user, final_environments]):
                     with st.spinner("AI is generating the URRA..."):
-                        st.session_state.urra = st.session_state.urra_generator.generate_urra(urra_product_name, urra_product_desc, urra_user, urra_env)
+                        st.session_state.urra = st.session_state.urra_generator.generate_urra(urra_product_name, urra_product_desc, urra_user, ", ".join(final_environments))
                 else:
                     st.warning("Please fill in all fields to generate the URRA.")
 
         if st.session_state.get('urra'):
+            st.markdown("### Use-Related Risk Analysis Results")
             st.markdown(st.session_state.urra)

@@ -21,21 +21,21 @@ def display_product_development_tab():
     # --- Step 1: Project Charter & R&D Hub ---
     with st.container(border=True):
         st.subheader("Step 1: Project Charter & R&D Hub")
-        [cite_start]st.markdown("Define your project to prevent the 'dumpster fire' moment and centralize your research. [cite: 151, 245]")
+        st.markdown("Define your project to prevent the 'dumpster fire' moment and centralize your research.")
         
         c1, c2 = st.columns(2)
         data['project_name'] = c1.text_input("Project Name / Objective", value=product_info.get('name', ''), key="pd_proj_name")
         data['team_members'] = c2.text_input("Team Members", key="pd_team")
-        [cite_start]data['scope'] = st.text_area("Scope", key="pd_scope", height=100, placeholder="What's in and what's out of the project? [cite: 288]")
+        data['scope'] = st.text_area("Scope", key="pd_scope", height=100, placeholder="What's in and what's out of the project?")
 
         st.divider()
         st.subheader("Voice of the Customer (VOC) / Research Hub")
-        [cite_start]st.text_area("Paste raw user feedback, competitor analysis, research notes, etc. [cite: 265]", key="pd_voc_raw", height=200)
+        st.text_area("Paste raw user feedback, competitor analysis, research notes, etc.", key="pd_voc_raw", height=200)
 
     # --- Step 2: Design Controls Triage ---
     with st.container(border=True):
         st.subheader("Step 2: Design Controls Triage (AI-Powered) 🧠")
-        [cite_start]st.markdown("Determine if your product requires formal design controls under FDA 21 CFR 820.30. [cite: 13, 14, 24, 42, 83, 125]")
+        st.markdown("Determine if your product requires formal design controls under FDA 21 CFR 820.30.")
         
         with st.form("triage_form"):
             device_desc = st.text_area(
@@ -92,14 +92,19 @@ def display_product_development_tab():
 
     # --- Step 4: Review & Edit Design Controls ---
     with st.expander("🛠️ Step 4: Review & Edit Design Controls Document", expanded=True):
-        if 'design_controls' in data:
+        if 'design_controls' in data and data['design_controls']:
             dc_data = data['design_controls']
             st.text_area("Design & Development Plan", value=dc_data.get('plan', ''), height=150, key="dc_plan")
             st.text_area("Design Inputs (User Needs, Requirements)", value=dc_data.get('inputs', ''), height=150, key="dc_inputs")
             st.text_area("Design Outputs (Specifications, Drawings)", value=dc_data.get('outputs', ''), height=150, key="dc_outputs")
-            [cite_start]st.text_area("Design Verification Plan ('Did we build the product right?') [cite: 842]", value=dc_data.get('verification', ''), height=150, key="dc_verification")
-            [cite_start]st.text_area("Design Validation Plan ('Did we build the right product?') [cite: 847]", value=dc_data.get('validation', ''), height=150, key="dc_validation")
+            st.text_area("Design Verification Plan ('Did we build the product right?')", value=dc_data.get('verification', ''), height=150, key="dc_verification")
+            st.text_area("Design Validation Plan ('Did we build the right product?')", value=dc_data.get('validation', ''), height=150, key="dc_validation")
             st.text_area("Design Transfer Plan", value=dc_data.get('transfer', ''), height=150, key="dc_transfer")
             st.text_area("Design History File (DHF) Summary", value=dc_data.get('dhf', ''), height=150, key="dc_dhf")
         else:
             st.info("Generate the AI draft in Step 3 to populate this section, or fill it in manually.")
+            st.text_area("Design & Development Plan", key="dc_plan_manual", height=150)
+            st.text_area("Design Inputs (User Needs, Requirements)", key="dc_inputs_manual", height=150)
+            st.text_area("Design Outputs (Specifications, Drawings)", key="dc_outputs_manual", height=150)
+            st.text_area("Design Verification Plan ('Did we build the product right?')", key="dc_verification_manual", height=150)
+            st.text_area("Design Validation Plan ('Did we build the right product?')", key="dc_validation_manual", height=150)

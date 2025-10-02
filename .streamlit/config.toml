@@ -1,0 +1,23 @@
+# .streamlit/config.toml
+
+[server]
+# Reduce resource usage
+maxUploadSize = 200
+maxMessageSize = 200
+
+[runner]
+# Optimize caching and performance
+fastReruns = true
+enforceSerializableSessionState = false
+
+[browser]
+# Better UX
+gatherUsageStats = false
+
+[theme]
+# Professional medical device industry theme
+primaryColor = "#2E7D32"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F7F8"
+textColor = "#263238"
+font = "sans serif"

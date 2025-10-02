@@ -162,9 +162,9 @@ class AIHumanFactorsHelper:
         A user has provided high-level answers to key questions. Your task is to expand these answers into a comprehensive, professionally worded draft for all sections of an HFE report.
         Extrapolate from the user's answers, product name, and description to create detailed, plausible content for each section.
         
-        Return ONLY a valid JSON object with keys for each section: "conclusion_statement",
+        Return ONLY a single, valid, and complete JSON object with keys for each section: "conclusion_statement",
         "descriptions", "device_interface", "known_problems", "hazards_analysis", 
-        "preliminary_analyses", "critical_tasks", and "validation_testing".
+        "preliminary_analyses", "critical_tasks", and "validation_testing". Ensure the JSON is not truncated.
         """
         user_prompt = f"""
         **Product Name:** {product_name}
@@ -190,7 +190,7 @@ class AIHumanFactorsHelper:
             return {"error": f"Failed to generate HF report from answers: {e}"}
 
 class AIDesignControlsTriager:
-    """AI assistant for determining the need for design controls."""
+    """AI assistant for determining the need for design controls and generating them."""
 
     def __init__(self, api_key: Optional[str] = None):
         self.client = None
@@ -234,3 +234,38 @@ class AIDesignControlsTriager:
         except Exception as e:
             print(f"Error in design controls triage: {e}")
             return {"error": f"Failed to generate triage recommendation: {e}"}
+
+    @retry_with_backoff()
+    def generate_design_controls(self, product_name: str, product_ifu: str, user_needs: str, tech_reqs: str, risks: str) -> Dict[str, str]:
+        """Generates a full design controls document draft from user answers."""
+        if not self.client:
+            return {"error": "AI client is not initialized."}
+
+        system_prompt = """
+        You are a senior Quality/R&D manager drafting a comprehensive Design Controls document based on 21 CFR 820.30.
+        A user has provided high-level answers to key questions. Your task is to expand these into a detailed, professionally worded draft for a full Design Controls document.
+        Extrapolate from the user's answers to create plausible, detailed content for each section.
+        Return ONLY a valid JSON object with keys for each section: "plan", "inputs", "outputs", "verification", "validation", "transfer", and "dhf".
+        """
+        user_prompt = f"""
+        **Product Name:** {product_name}
+        **Product Intended For Use:** {product_ifu}
+
+        **User's High-Level Answers:**
+        1. **Core User Needs:** {user_needs}
+        2. **Key Technical Requirements:** {tech_reqs}
+        3. **Significant Known Risks:** {risks}
+
+        Now, generate the full Design Controls document draft based on this information.
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+                max_tokens=4000,
+                response_format={"type": "json_object"}
+            )
+            return json.loads(response.choices[0].message.content)
+        except Exception as e:
+            print(f"Error generating design controls draft: {e}")
+            return {"error": f"Failed to generate design controls draft: {e}"}

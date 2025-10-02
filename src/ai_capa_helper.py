@@ -241,12 +241,21 @@ class AIDesignControlsTriager:
         if not self.client:
             return {"error": "AI client is not initialized."}
 
+        # NEW: Enhanced prompt for higher quality and traceability matrix
         system_prompt = """
-        You are a senior Quality/R&D manager drafting a comprehensive Design Controls document based on 21 CFR 820.30.
-        A user has provided high-level answers to key questions. Your task is to expand these into a detailed, professionally worded draft for a full Design Controls document.
-        Extrapolate from the user's answers to create plausible, detailed content for each section.
-        The "dhf" (Design History File) section should be a concise summary, not a list of documents.
-        Return ONLY a valid, human-readable JSON object with keys for each section: "plan", "inputs", "outputs", "verification", "validation", "transfer", and "dhf".
+        You are a Senior R&D Engineer and Regulatory Affairs Specialist, an expert in FDA 21 CFR 820.30 and ISO 13485.
+        Your task is to draft a comprehensive Design Controls document for a new medical device based on high-level user inputs.
+        Structure your output as a single, valid JSON object. For each key, provide detailed, professional content formatted with Markdown.
+
+        The JSON object must contain these exact keys: "inputs", "outputs", "verification", "validation", "plan", "transfer", "dhf", and "traceability_matrix".
+
+        For the "traceability_matrix", generate a Markdown table that links User Needs to Design Inputs, Outputs, Verification, and Validation activities.
+        Example Traceability Matrix Row:
+        | User Need | Design Input | Design Output | Verification | Validation |
+        |---|---|---|---|---|
+        | Patient needs to track ROM at home | The device shall measure knee flexion with +/- 1 degree accuracy | Firmware implements a Kalman filter for the 9-axis IMU | Protocol VT-001: Bench test confirms accuracy against a goniometer | Protocol VL-002: Usability study with 15 post-op patients confirms they can track ROM |
+        
+        Generate professional, plausible content for all sections.
         """
         user_prompt = f"""
         **Product Name:** {product_name}
@@ -257,7 +266,7 @@ class AIDesignControlsTriager:
         2. **Key Technical Requirements:** {tech_reqs}
         3. **Significant Known Risks:** {risks}
 
-        Now, generate the full Design Controls document draft based on this information.
+        Now, generate the full Design Controls document draft.
         """
         try:
             response = self.client.chat.completions.create(
@@ -266,7 +275,6 @@ class AIDesignControlsTriager:
                 max_tokens=4000,
                 response_format={"type": "json_object"}
             )
-            # FIX: Add a try-except block to handle potential JSON decoding errors
             try:
                 return json.loads(response.choices[0].message.content)
             except json.JSONDecodeError:
@@ -294,9 +302,9 @@ class ProductManualWriter:
             return "AI client is not initialized."
 
         system_prompt = f"""
-        You are an expert technical writer creating a user manual for the product '{product_name}'.
+        You are an expert technical writer creating a user manual for the medical device '{product_name}'.
         Your task is to write the '{section_title}' section of the manual.
-        The manual should be clear, concise, and easy for a layperson to understand.
+        The manual should be clear, concise, and easy for a layperson to understand, adhering to medical device documentation standards.
         The target language for the output is {target_language}.
         Use Markdown for formatting (e.g., headings, bullet points, bold text).
         """

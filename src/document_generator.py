@@ -70,12 +70,10 @@ class DocumentGenerator:
         doc = Document()
         doc.add_heading("Project Summary Report", level=1)
         
-        # --- AI Executive Summary ---
         summary_text = self._generate_executive_summary(session_data, session_data.get('ai_context_helper'))
         doc.add_heading("Executive Summary", level=2)
         doc.add_paragraph(summary_text)
         
-        # --- CAPA Form Section ---
         if "CAPA Form" in selected_sections and session_data.get('capa_data'):
             capa_data = session_data['capa_data']
             doc.add_page_break()
@@ -104,27 +102,21 @@ class DocumentGenerator:
             for heading, content in field_map.items():
                 self._add_main_table_row(main_table, heading, content)
 
-        # --- CAPA Closure Section ---
         if "CAPA Closure" in selected_sections and session_data.get('capa_closure_data'):
             self._generate_capa_closure_section(doc, session_data['capa_closure_data'])
 
-        # --- FMEA Section ---
         if "FMEA" in selected_sections and session_data.get('fmea_data') is not None:
             self._add_df_as_table(doc, session_data['fmea_data'], "Failure Mode and Effects Analysis (FMEA)")
 
-        # --- ISO 14971 Assessment Section ---
         if "ISO 14971 Assessment" in selected_sections and session_data.get('risk_assessment'):
             self._add_markdown_text(doc, session_data['risk_assessment'], "ISO 14971 Risk Assessment")
             
-        # --- URRA Section ---
         if "URRA" in selected_sections and session_data.get('urra'):
             self._add_markdown_text(doc, session_data['urra'], "Use-Related Risk Analysis (URRA)")
 
-        # --- Vendor Email Section ---
         if "Vendor Email Draft" in selected_sections and session_data.get('vendor_email_draft'):
             self._add_markdown_text(doc, session_data['vendor_email_draft'], "Vendor Communication Draft")
 
-        # --- Human Factors Report Section ---
         if "Human Factors Report" in selected_sections and session_data.get('human_factors_data'):
             self._generate_human_factors_section(doc, session_data['human_factors_data'])
 
@@ -136,7 +128,7 @@ class DocumentGenerator:
     def _generate_capa_closure_section(self, doc: Document, closure_data: Dict[str, Any]):
         """Generates the CAPA Effectiveness Check & Closure section of the report."""
         if not closure_data.get('original_capa'):
-            return # Don't add the section if there's no data
+            return
 
         doc.add_page_break()
         doc.add_heading("CAPA Effectiveness Check & Closure", level=2)
@@ -146,13 +138,11 @@ class DocumentGenerator:
         table.columns[0].width = Inches(2.0)
         table.columns[1].width = Inches(5.5)
 
-        # Implementation Details
         self._add_main_table_row(table, "Implemented By", closure_data.get('implemented_by', ''))
         impl_date = closure_data.get('implementation_date')
         self._add_main_table_row(table, "Implementation Date", impl_date.strftime('%Y-%m-%d') if impl_date else '')
         self._add_main_table_row(table, "Implementation Details", closure_data.get('implementation_details', ''))
 
-        # Performance Metrics
         original_rate = "N/A"
         if closure_data.get('original_metrics'):
             original_rate = f"{closure_data['original_metrics']['return_summary'].iloc[0]['return_rate']:.2f}%"
@@ -163,7 +153,6 @@ class DocumentGenerator:
             new_rate = f"{closure_data['new_metrics']['return_summary'].iloc[0]['return_rate']:.2f}%"
         self._add_main_table_row(table, "Post-Implementation Return Rate", new_rate)
         
-        # Findings and Closure
         self._add_main_table_row(table, "Effectiveness Check Findings", closure_data.get('effectiveness_summary', ''))
         self._add_main_table_row(table, "Closed By", closure_data.get('closed_by', ''))
         closure_date = closure_data.get('closure_date')

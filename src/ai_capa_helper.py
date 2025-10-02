@@ -300,7 +300,7 @@ class AIHumanFactorsHelper:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
-                max_tokens=2500,
+                max_tokens=4000, # Increased from 2500 to 4000
                 response_format={"type": "json_object"}
             )
             return json.loads(response.choices[0].message.content)

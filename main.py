@@ -1,4 +1,4 @@
-# main.py
+# main.py (MODIFIED)
 
 import streamlit as st
 import pandas as pd
@@ -12,7 +12,7 @@ from src.analysis import run_full_analysis
 from src.document_generator import DocumentGenerator
 from src.ai_capa_helper import (
     AICAPAHelper, AIEmailDrafter, MedicalDeviceClassifier,
-    RiskAssessmentGenerator, UseRelatedRiskAnalyzer
+    RiskAssessmentGenerator, UseRelatedRiskAnalyzer, AIHumanFactorsHelper
 )
 from src.fmea import FMEA
 from src.pre_mortem import PreMortem
@@ -27,7 +27,7 @@ from src.tabs.compliance import display_compliance_tab
 from src.tabs.cost_of_quality import display_cost_of_quality_tab
 from src.tabs.human_factors import display_human_factors_tab
 from src.tabs.exports import display_exports_tab
-
+from src.tabs.capa_closure import display_capa_closure_tab # New import
 
 def load_css():
     """Loads custom CSS for styling the Streamlit application."""
@@ -101,6 +101,7 @@ def initialize_components():
         st.session_state.doc_generator = DocumentGenerator()
         st.session_state.data_processor = DataProcessor()
         st.session_state.ai_context_helper = AIContextHelper(api_key)
+        st.session_state.ai_hf_helper = AIHumanFactorsHelper(api_key) # New component
 
     st.session_state.components_initialized = True
 
@@ -247,17 +248,18 @@ def display_main_app():
 
     display_sidebar()
 
-    tab_list = ["Dashboard", "CAPA", "Risk & Safety", "Human Factors", "Vendor Comms", "Compliance", "Cost of Quality", "Exports"]
+    tab_list = ["Dashboard", "CAPA", "CAPA Closure", "Risk & Safety", "Human Factors", "Vendor Comms", "Compliance", "Cost of Quality", "Exports"] # New Tab Added
     tabs = st.tabs(tab_list)
 
     with tabs[0]: display_dashboard()
     with tabs[1]: display_capa_tab()
-    with tabs[2]: display_risk_safety_tab()
-    with tabs[3]: display_human_factors_tab()
-    with tabs[4]: display_vendor_comm_tab()
-    with tabs[5]: display_compliance_tab()
-    with tabs[6]: display_cost_of_quality_tab()
-    with tabs[7]: display_exports_tab()
+    with tabs[2]: display_capa_closure_tab() # New Tab display
+    with tabs[3]: display_risk_safety_tab()
+    with tabs[4]: display_human_factors_tab()
+    with tabs[5]: display_vendor_comm_tab()
+    with tabs[6]: display_compliance_tab()
+    with tabs[7]: display_cost_of_quality_tab()
+    with tabs[8]: display_exports_tab()
 
     if not st.session_state.api_key_missing:
         st.divider()

@@ -43,13 +43,16 @@ def load_css():
     <style>
         /* --- CSS Variables for Theming --- */
         :root {
-            --primary-color: #0068C9;
+            --primary-color: #005A9E;
             --primary-color-light: #E6F0F9;
             --primary-bg: #FFFFFF;
-            --secondary-bg: #F0F2F6;
-            --text-color: #0B1A3D;
-            --secondary-text-color: #475569;
+            --secondary-bg: #F8F9FA;
+            --text-color: #212529;
+            --secondary-text-color: #6C757D;
             --border-color: #DEE2E6;
+            --success-color: #28A745;
+            --warning-color: #FFC107;
+            --error-color: #DC3545;
         }
 
         /* --- Base Styles --- */
@@ -64,9 +67,7 @@ def load_css():
             background-color: var(--secondary-bg);
         }
         
-        h3 {
-            font-size: 1.75rem;
-            color: var(--text-color);
+        h1, h2, h3, h4, h5, h6 {
             font-weight: 700;
         }
 
@@ -83,12 +84,12 @@ def load_css():
             border-radius: 10px;
             padding: 1.5rem;
             margin-bottom: 2rem;
-            text-align: center;
         }
         .main-header h1 {
             font-weight: 700;
-            color: var(--text-color);
+            color: var(--primary-color);
             font-size: 2.25rem;
+            margin-bottom: 0.5rem;
         }
         .main-header p {
             color: var(--secondary-text-color);
@@ -100,22 +101,17 @@ def load_css():
             border-radius: 8px;
             font-weight: 600;
             padding: 0.5rem 1rem;
-            border: 1px solid var(--primary-color);
-            background-color: var(--primary-bg);
-            color: var(--primary-color);
         }
-        [data-testid="stButton"] button:hover {
-            border-color: var(--primary-color);
-            background-color: var(--primary-color-light);
-            color: var(--primary-color);
-        }
+        
         /* Primary Button Style */
-        [data-testid="stButton"] button.st-emotion-cache-19n6bnc {
+        [data-testid="stButton"] button[kind="primary"] {
              background-color: var(--primary-color);
              color: white;
+             border: 1px solid var(--primary-color);
         }
-        [data-testid="stButton"] button.st-emotion-cache-19n6bnc:hover {
-             opacity: 0.9;
+        [data-testid="stButton"] button[kind="primary"]:hover {
+             background-color: #004B82;
+             border-color: #004B82;
              color: white;
         }
 
@@ -130,33 +126,23 @@ def load_css():
             font-weight: 600;
             color: var(--text-color);
             font-size: 1.1rem;
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
         }
 
-        .st-emotion-cache-12w0qpk { 
-            border-radius: 10px;
-            border: 1px solid var(--border-color);
-            box-shadow: 0 4px 6px rgba(0,0,0,0.04);
-        }
-        
         /* --- Tabs --- */
         .stTabs [data-baseweb="tab-list"] {
-            gap: 2px;
             border-bottom: 2px solid var(--border-color);
         }
         .stTabs [data-baseweb="tab"] {
-            background-color: #F8F9FA;
+            background-color: transparent;
             border-radius: 8px 8px 0 0;
-            border: 1px solid var(--border-color);
-            margin-bottom: -1px;
+            margin-bottom: -2px;
             padding: 0.75rem 1.25rem;
             font-weight: 600;
             color: var(--secondary-text-color);
         }
         .stTabs [aria-selected="true"] {
             background-color: var(--primary-bg);
+            border: 2px solid var(--border-color);
             border-bottom-color: var(--primary-bg) !important;
             color: var(--primary-color);
         }
@@ -180,13 +166,18 @@ def initialize_session_state():
     """Initializes all required keys in Streamlit's session state with default values."""
     defaults = {
         'openai_api_key': None, 'api_key_missing': True, 'components_initialized': False,
-        'target_sku': 'SKU-12345', 'unit_cost': 15.50, 'sales_price': 49.99,
+        'product_info': {
+            'sku': 'SKU-12345',
+            'name': 'Example Product',
+            'ifu': 'This is an example Intended for Use statement.'
+        },
+        'unit_cost': 15.50, 'sales_price': 49.99,
         'start_date': date.today() - timedelta(days=30), 'end_date': date.today(),
         'sales_data': pd.DataFrame(), 'returns_data': pd.DataFrame(),
         'analysis_results': None, 'capa_data': {}, 'fmea_data': pd.DataFrame(),
         'vendor_email_draft': None, 'risk_assessment': None, 'urra': None,
         'pre_mortem_summary': None, 'medical_device_classification': None,
-        'human_factors_data': {}, 'logged_in': False, 'workflow_mode': None
+        'human_factors_data': {}, 'logged_in': False, 'workflow_mode': 'CAPA Management'
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -227,15 +218,20 @@ def check_password():
     if st.session_state.get("logged_in", False):
         return True
 
-    st.header("AQMS Login")
-    password_input = st.text_input("Password", type="password")
+    st.image("https://i.imgur.com/M1y4T7z.png", width=200)
+    st.title("Automated Quality Management System")
+    st.header("Login")
+    
+    with st.form("login_form"):
+        password_input = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Login", use_container_width=True, type="primary")
 
-    if st.button("Login"):
-        if password_input == st.secrets.get("APP_PASSWORD"):
-            st.session_state.logged_in = True
-            st.rerun()
-        else:
-            st.error("The password you entered is incorrect.")
+        if submitted:
+            if password_input == st.secrets.get("APP_PASSWORD"):
+                st.session_state.logged_in = True
+                st.rerun()
+            else:
+                st.error("The password you entered is incorrect.")
     return False
 
 
@@ -259,61 +255,64 @@ def parse_manual_input(input_str: str, target_sku: str) -> pd.DataFrame:
 def display_sidebar():
     """Renders all configuration and data input widgets in the sidebar."""
     with st.sidebar:
-        # Replaced URL with an embedded SVG for reliability
-        logo_svg = """
-        <svg width="150" height="40" viewBox="0 0 250 66" xmlns="http://www.w3.org/2000/svg">
-        <path d="M65.882 23.366c0-13.01-10.55-23.56-23.56-23.56-13.01 0-23.56 10.55-23.56 23.56 0 13.01 10.55 23.56 23.56 23.56 13.01 0 23.56-10.55 23.56-23.56zm-38.35 0c0-8.167 6.623-14.79 14.79-14.79s14.79 6.623 14.79 14.79-6.623 14.79-14.79 14.79-14.79-6.623-14.79-14.79z" fill="#000"/>
-        <path d="M96.65 11.536V46.92h-8.825V11.536h8.825zM128.508 11.536l-8.43 14.59-8.423-14.59h-9.74l13.29 22.99v12.394h8.824V34.526l13.29-22.99h-9.81zM161.417 11.536V46.92h-8.825V11.536h8.825z" fill="#000"/>
-        <path d="M211.503 24.38c0-5.32-4.31-9.63-9.63-9.63s-9.63 4.31-9.63 9.63 4.31 9.63 9.63 9.63 9.63-4.31 9.63-9.63zm-27.483 22.54h-8.825V11.536h8.825v7.2c1.94-2.85 5.2-4.73 8.94-4.73 7.93 0 14.36 6.43 14.36 14.36s-6.43 14.36-14.36 14.36c-3.74 0-7-1.88-8.94-4.73v11.12h0zM249.03 24.38c0-5.32-4.31-9.63-9.63-9.63s-9.63 4.31-9.63 9.63 4.31 9.63 9.63 9.63 9.63-4.31 9.63-9.63zm-27.483 22.54h-8.825V11.536h8.825v7.2c1.94-2.85 5.2-4.73 8.94-4.73 7.93 0 14.36 6.43 14.36 14.36s-6.43 14.36-14.36 14.36c-3.74 0-7-1.88-8.94-4.73v11.12h0z" fill="#000"/>
-        </svg>
-        """
-        st.markdown(f'<div style="margin-bottom: 2rem;">{logo_svg}</div>', unsafe_allow_html=True)
-        
+        st.image("https://i.imgur.com/M1y4T7z.png", width=100)
         st.header("Configuration")
-        st.session_state.target_sku = st.text_input("Target Product SKU", st.session_state.target_sku)
+        
+        st.session_state.workflow_mode = st.selectbox(
+            "Workflow Mode",
+            ["CAPA Management", "New Product Introduction", "Post-Market Surveillance"],
+            index=0
+        )
+        
+        with st.expander("Product Information", expanded=True):
+            product_info = st.session_state.product_info
+            product_info['sku'] = st.text_input("Target Product SKU", product_info['sku'])
+            product_info['name'] = st.text_input("Product Name", product_info['name'])
+            product_info['ifu'] = st.text_area("Intended for Use (IFU)", product_info['ifu'], height=150)
 
-        date_ranges = {
-            "Last 7 Days": timedelta(days=7),
-            "Last 30 Days": timedelta(days=30),
-            "Last 90 Days": timedelta(days=90),
-            "Year to Date": "ytd",
-            "Custom Range": "custom"
-        }
-        selected_range = st.selectbox("Select Date Range", list(date_ranges.keys()))
+        with st.expander("Reporting Period"):
+            date_ranges = {
+                "Last 7 Days": timedelta(days=7),
+                "Last 30 Days": timedelta(days=30),
+                "Last 90 Days": timedelta(days=90),
+                "Year to Date": "ytd",
+                "Custom Range": "custom"
+            }
+            selected_range = st.selectbox("Select Date Range", list(date_ranges.keys()))
 
-        today = date.today()
-        if selected_range == "Custom Range":
-            st.session_state.start_date, st.session_state.end_date = st.date_input(
-                "Select a date range", (today - timedelta(days=30), today)
-            )
-        elif date_ranges[selected_range] == "ytd":
-            st.session_state.start_date = date(today.year, 1, 1)
-            st.session_state.end_date = today
-        else:
-            st.session_state.start_date = today - date_ranges[selected_range]
-            st.session_state.end_date = today
+            today = date.today()
+            if selected_range == "Custom Range":
+                st.session_state.start_date, st.session_state.end_date = st.date_input(
+                    "Select a date range", (today - timedelta(days=30), today)
+                )
+            elif date_ranges[selected_range] == "ytd":
+                st.session_state.start_date = date(today.year, 1, 1)
+                st.session_state.end_date = today
+            else:
+                st.session_state.start_date = today - date_ranges[selected_range]
+                st.session_state.end_date = today
 
-        st.info(f"Period: {st.session_state.start_date.strftime('%b %d, %Y')} to {st.session_state.end_date.strftime('%b %d, %Y')}")
+            st.info(f"Period: {st.session_state.start_date.strftime('%b %d, %Y')} to {st.session_state.end_date.strftime('%b %d, %Y')}")
 
-        st.header("Add Data")
+        st.header("Data Input")
         with st.expander("Manual Data Entry", icon="✍️"):
-            manual_sales = st.text_area("Sales Data", placeholder=f"Total units sold for {st.session_state.target_sku} (e.g., 9502)")
-            manual_returns = st.text_area("Returns Data", placeholder=f"Total units returned for {st.session_state.target_sku} (e.g., 150)")
-            if st.button("Process Manual Data"):
+            manual_sales = st.text_area("Sales Data", placeholder=f"Total units sold for {st.session_state.product_info['sku']} (e.g., 9502)")
+            manual_returns = st.text_area("Returns Data", placeholder=f"Total units returned for {st.session_state.product_info['sku']} (e.g., 150)")
+            if st.button("Process Manual Data", type="primary"):
                 if not manual_sales:
                     st.warning("Sales data is required.")
                 else:
-                    sales_df = parse_manual_input(manual_sales, st.session_state.target_sku)
-                    returns_df = parse_manual_input(manual_returns, st.session_state.target_sku)
+                    sales_df = parse_manual_input(manual_sales, st.session_state.product_info['sku'])
+                    returns_df = parse_manual_input(manual_returns, st.session_state.product_info['sku'])
                     process_data(sales_df, returns_df)
 
-        with st.expander("Or Upload Files", icon="📄"):
+        with st.expander("File Upload", icon="📄"):
             uploaded_files = st.file_uploader(
                 "Upload sales, returns, or other data files",
                 accept_multiple_files=True,
                 type=['csv', 'xlsx', 'txt', 'tsv', 'png', 'jpg']
             )
-            if st.button("Process Uploaded Files"):
+            if st.button("Process Uploaded Files", type="primary"):
                 if uploaded_files:
                     process_uploaded_files(uploaded_files)
                 else:
@@ -345,10 +344,10 @@ def process_uploaded_files(uploaded_files: list):
 
     with st.spinner("AI is analyzing file structures..."):
         for file in uploaded_files:
-            analysis = parser.analyze_file_structure(file, st.session_state.target_sku)
+            analysis = parser.analyze_file_structure(file, st.session_state.product_info['sku'])
             st.write(f"File: `{file.name}` → AI identified as: `{analysis.get('content_type', 'unknown')}`")
 
-            df = parser.extract_data(file, analysis, st.session_state.target_sku)
+            df = parser.extract_data(file, analysis, st.session_state.product_info['sku'])
             if df is not None:
                 if analysis.get('content_type') == 'sales':
                     sales_dfs.append(df)
@@ -400,7 +399,7 @@ def main():
     """Main function to configure and run the Streamlit application."""
     st.set_page_config(
         page_title="AQMS",
-        page_icon="https://www.vivehealth.com/cdn/shop/files/vive-logo-1_2_250x.png?v=1613713028",
+        page_icon="https://i.imgur.com/M1y4T7z.png",
         layout="wide"
     )
 

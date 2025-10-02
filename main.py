@@ -38,6 +38,7 @@ from src.tabs.human_factors import display_human_factors_tab
 from src.tabs.exports import display_exports_tab
 from src.tabs.capa_closure import display_capa_closure_tab
 from src.tabs.product_development import display_product_development_tab
+from src.tabs.final_review import display_final_review_tab
 
 
 def load_css():
@@ -202,7 +203,7 @@ def initialize_session_state():
         'vendor_email_draft': None, 'risk_assessment': None, 'urra': None,
         'pre_mortem_summary': None, 'medical_device_classification': None,
         'human_factors_data': {}, 'logged_in': False, 'workflow_mode': 'CAPA Management',
-        'product_dev_data': {}
+        'product_dev_data': {}, 'final_review_summary': None
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -298,22 +299,26 @@ def display_sidebar():
         
         st.session_state.workflow_mode = st.selectbox(
             "Workflow Mode",
-            ["CAPA Management", "Product Development"]
+            ["Product Development", "CAPA Management"]
         )
         
         with st.expander("📝 Product Information", expanded=True):
             product_info = st.session_state.product_info
-            product_info['sku'] = st.text_input("Target Product SKU", product_info['sku'])
-            product_info['name'] = st.text_input("Product Name", product_info['name'])
-            product_info['ifu'] = st.text_area("Intended for Use (IFU)", product_info['ifu'], height=100)
+            product_info['sku'] = st.text_input("Target Product SKU", product_info.get('sku', ''), key="sidebar_sku")
+            product_info['name'] = st.text_input("Product Name", product_info.get('name', ''), key="sidebar_name")
+            product_info['ifu'] = st.text_area("Intended for Use (IFU)", product_info.get('ifu', ''), height=100, key="sidebar_ifu")
 
-        with st.expander("🗓️ Reporting Period"):
+        with st.expander("💰 Financials"):
+            st.session_state.unit_cost = st.number_input("Unit Cost ($)", value=st.session_state.get('unit_cost', 0.0), step=1.0, format="%.2f")
+            st.session_state.sales_price = st.number_input("Sales Price ($)", value=st.session_state.get('sales_price', 0.0), step=1.0, format="%.2f")
+
+        with st.expander("🗓️ Reporting Period (for CAPA)"):
             st.session_state.start_date, st.session_state.end_date = st.date_input(
                     "Select a date range", (st.session_state.start_date, st.session_state.end_date)
                 )
             st.caption(f"Period: {st.session_state.start_date.strftime('%b %d, %Y')} to {st.session_state.end_date.strftime('%b %d, %Y')}")
 
-        st.header("Data Input")
+        st.header("Data Input (for CAPA)")
         target_sku = st.session_state.product_info['sku']
         
         input_tabs = st.tabs(["Manual Entry", "File Upload"])
@@ -390,8 +395,8 @@ def display_main_app():
     display_sidebar()
 
     if st.session_state.workflow_mode == "CAPA Management":
-        tab_list = ["Dashboard", "CAPA", "CAPA Closure", "Risk & Safety", "Human Factors", "Vendor Comms", "Compliance", "Cost of Quality", "Exports"]
-        icons = ["📈", "📝", "✅", "⚠️", "👥", "📬", "⚖️", "💲", "📄"]
+        tab_list = ["Dashboard", "CAPA", "CAPA Closure", "Risk & Safety", "Human Factors", "Vendor Comms", "Compliance", "Cost of Quality", "Final Review", "Exports"]
+        icons = ["📈", "📝", "✅", "⚠️", "👥", "📬", "⚖️", "💲", "🔍", "📄"]
         tabs = st.tabs([f"{icon} {name}" for icon, name in zip(icons, tab_list)])
         with tabs[0]: display_dashboard()
         with tabs[1]: display_capa_tab()
@@ -401,15 +406,19 @@ def display_main_app():
         with tabs[5]: display_vendor_comm_tab()
         with tabs[6]: display_compliance_tab()
         with tabs[7]: display_cost_of_quality_tab()
-        with tabs[8]: display_exports_tab()
+        with tabs[8]: display_final_review_tab()
+        with tabs[9]: display_exports_tab()
 
     elif st.session_state.workflow_mode == "Product Development":
-        tab_list = ["🚀 Product Development", "Dashboard", "Exports"]
-        icons = ["🚀", "📈", "📄"]
+        tab_list = ["🚀 Product Development", "Risk & Safety", "Human Factors", "Compliance", "Final Review", "Exports"]
+        icons = ["🚀", "⚠️", "👥", "⚖️", "🔍", "📄"]
         tabs = st.tabs([f"{icon} {name}" for icon, name in zip(icons, tab_list)])
         with tabs[0]: display_product_development_tab()
-        with tabs[1]: display_dashboard()
-        with tabs[2]: display_exports_tab()
+        with tabs[1]: display_risk_safety_tab()
+        with tabs[2]: display_human_factors_tab()
+        with tabs[3]: display_compliance_tab()
+        with tabs[4]: display_final_review_tab()
+        with tabs[5]: display_exports_tab()
 
     if not st.session_state.api_key_missing:
         with st.expander("💬 AI Assistant (Context-Aware)"):
@@ -423,8 +432,8 @@ def main():
     page_icon_path = os.path.join(APP_DIR, "logo.png")
     st.set_page_config(page_title="AQMS", layout="wide", page_icon=page_icon_path if os.path.exists(page_icon_path) else "✅")
     
-    initialize_session_state()
     load_css()
+    initialize_session_state()
 
     if not check_password():
         st.stop()

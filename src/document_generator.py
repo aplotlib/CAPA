@@ -47,7 +47,6 @@ class DocumentGenerator:
             return
         doc.add_page_break()
         doc.add_heading(title, level=2)
-        # Simple conversion: replace markdown bold/italics if needed, but for now, just add text
         doc.add_paragraph(text)
         
     def _generate_executive_summary(self, session_data: Dict[str, Any], ai_context_helper: Any) -> str:
@@ -100,11 +99,14 @@ class DocumentGenerator:
                 "Implementation of Corrective Actions": capa_data.get('implementation_of_corrective_actions', ''),
                 "Preventive Action Plan": capa_data.get('preventive_action', ''),
                 "Implementation of Preventive Actions": capa_data.get('implementation_of_preventive_actions', ''),
-                "Effectiveness Check Plan": capa_data.get('effectiveness_verification_plan', ''),
-                "Effectiveness Check Findings": capa_data.get('effectiveness_check_findings', '')
+                "Effectiveness Check Plan": capa_data.get('effectiveness_verification_plan', '')
             }
             for heading, content in field_map.items():
                 self._add_main_table_row(main_table, heading, content)
+
+        # --- CAPA Closure Section ---
+        if "CAPA Closure" in selected_sections and session_data.get('capa_closure_data'):
+            self._generate_capa_closure_section(doc, session_data['capa_closure_data'])
 
         # --- FMEA Section ---
         if "FMEA" in selected_sections and session_data.get('fmea_data') is not None:
@@ -130,6 +132,42 @@ class DocumentGenerator:
         doc.save(buffer)
         buffer.seek(0)
         return buffer
+    
+    def _generate_capa_closure_section(self, doc: Document, closure_data: Dict[str, Any]):
+        """Generates the CAPA Effectiveness Check & Closure section of the report."""
+        if not closure_data.get('original_capa'):
+            return # Don't add the section if there's no data
+
+        doc.add_page_break()
+        doc.add_heading("CAPA Effectiveness Check & Closure", level=2)
+        
+        table = doc.add_table(rows=1, cols=2)
+        table.style = 'Table Grid'
+        table.columns[0].width = Inches(2.0)
+        table.columns[1].width = Inches(5.5)
+
+        # Implementation Details
+        self._add_main_table_row(table, "Implemented By", closure_data.get('implemented_by', ''))
+        impl_date = closure_data.get('implementation_date')
+        self._add_main_table_row(table, "Implementation Date", impl_date.strftime('%Y-%m-%d') if impl_date else '')
+        self._add_main_table_row(table, "Implementation Details", closure_data.get('implementation_details', ''))
+
+        # Performance Metrics
+        original_rate = "N/A"
+        if closure_data.get('original_metrics'):
+            original_rate = f"{closure_data['original_metrics']['return_summary'].iloc[0]['return_rate']:.2f}%"
+        self._add_main_table_row(table, "Initial Return Rate", original_rate)
+        
+        new_rate = "N/A"
+        if closure_data.get('new_metrics'):
+            new_rate = f"{closure_data['new_metrics']['return_summary'].iloc[0]['return_rate']:.2f}%"
+        self._add_main_table_row(table, "Post-Implementation Return Rate", new_rate)
+        
+        # Findings and Closure
+        self._add_main_table_row(table, "Effectiveness Check Findings", closure_data.get('effectiveness_summary', ''))
+        self._add_main_table_row(table, "Closed By", closure_data.get('closed_by', ''))
+        closure_date = closure_data.get('closure_date')
+        self._add_main_table_row(table, "Closure Date", closure_date.strftime('%Y-%m-%d') if closure_date else '')
 
     def _generate_human_factors_section(self, doc: Document, hf_data: Dict[str, Any]):
         """Generates the Human Factors section of the report."""

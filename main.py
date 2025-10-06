@@ -156,7 +156,7 @@ def load_css():
             color: var(--secondary-text-color);
             transition: all 0.2s ease-in-out;
         }
-        .stTabs [data-baseweb="tab"]:hover {
+        .stTabs [data-baswebeb="tab"]:hover {
             background-color: var(--primary-color-light);
             border-bottom: 3px solid #AED581;
         }
@@ -258,7 +258,7 @@ def initialize_components():
 
 def ensure_component_loaded(component_name):
     """Ensure a specific component is loaded when needed using the factory."""
-    if f"{component_name}_instance" not in st.session_state:
+    if f"{component_name}_instance" not in st.session_state and f"ai_{component_name}_triager" not in st.session_state:
         api_key = st.session_state.get('openai_api_key')
         if api_key:
             if component_name == 'design_controls':

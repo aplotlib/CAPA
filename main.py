@@ -261,7 +261,11 @@ def ensure_component_loaded(component_name):
     if f"{component_name}_instance" not in st.session_state:
         api_key = st.session_state.get('openai_api_key')
         if api_key:
-            AIHelperFactory.create_helper(component_name, api_key)
+            if component_name == 'design_controls':
+                 st.session_state.ai_design_controls_triager = AIHelperFactory.create_helper(component_name, api_key)
+            else:
+                 AIHelperFactory.create_helper(component_name, api_key)
+
 
 def check_password():
     """Displays a password input and returns True if the password is correct."""
@@ -519,6 +523,7 @@ def display_product_dev_workflow():
     
     with tabs[0]: 
         create_breadcrumb_navigation("Product Development")
+        ensure_component_loaded('design_controls')
         display_product_development_tab = lazy_import('tabs.product_development', 'display_product_development_tab')
         display_product_development_tab()
     with tabs[1]: 

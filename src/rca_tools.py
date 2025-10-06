@@ -2,7 +2,7 @@
 
 from typing import Dict, List
 import openai
-from utils import retry_with_backoff
+from .utils import retry_with_backoff
 
 class RootCauseAnalyzer:
     """

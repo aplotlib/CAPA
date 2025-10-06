@@ -6,7 +6,7 @@ import json
 import pytesseract
 from PIL import Image
 import openai
-from .utils import retry_with_backoff
+from utils import retry_with_backoff
 
 class AIFileParser:
     """

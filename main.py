@@ -11,21 +11,21 @@ from functools import lru_cache
 # FIX: Disable file watcher to prevent resource exhaustion on some systems
 os.environ['STREAMLIT_SERVER_FILE_WATCHER_TYPE'] = 'none'
 
-# Get the absolute path of a directory containing main.py
+# Get the absolute path of the app and src directories
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, APP_DIR)
+SRC_DIR = os.path.join(APP_DIR, 'src')
 
-from src.ai_factory import AIHelperFactory
+# FIX: Add both app and src directories to the Python path
+sys.path.insert(0, APP_DIR)
+sys.path.insert(0, SRC_DIR)
+
+from ai_factory import AIHelperFactory
 
 # Lazy import function to load modules only when needed
 def lazy_import(module_name, class_name=None):
     """Lazy import modules to reduce initial load time"""
-    full_module_name = f"src.{module_name}"
-    if class_name:
-        full_module_name = f"src.{module_name}"
-
-    # Simplified lazy loading for this context
-    module = __import__(full_module_name, fromlist=[class_name] if class_name else [])
+    # Imports are now relative to the 'src' directory
+    module = __import__(module_name, fromlist=[class_name] if class_name else [])
     if class_name:
         return getattr(module, class_name)
     return module
@@ -294,25 +294,9 @@ def check_password():
                     st.error("The password you entered is incorrect.")
     return False
 
-@st.cache_data
-def parse_manual_input(input_str: str, target_sku: str) -> pd.DataFrame:
-    """Parses manual string input into a DataFrame for sales or returns data."""
-    if not input_str.strip():
-        return pd.DataFrame()
-
-    if input_str.strip().isnumeric():
-        return pd.DataFrame([{'sku': target_sku, 'quantity': int(input_str)}])
-
-    try:
-        if 'sku' not in input_str.lower() or 'quantity' not in input_str.lower():
-            input_str = f"sku,quantity\n{target_sku},{input_str}"
-        return pd.read_csv(StringIO(input_str))
-    except Exception:
-        st.error("Could not parse manual data.")
-        return pd.DataFrame()
-
 def display_sidebar():
     """Renders all configuration and data input widgets in the sidebar."""
+    from utils import parse_manual_input
     with st.sidebar:
         logo_base64 = get_local_image_as_base64("logo.png")
         if logo_base64:
@@ -398,7 +382,6 @@ def process_uploaded_files(uploaded_files: list):
         st.error("Cannot process files without an OpenAI API key.")
         return
     
-    # ensure_component_loaded('file_parser')
     parser = AIHelperFactory.create_helper('parser', st.session_state.openai_api_key)
     sales_dfs, returns_dfs = [], []
     target_sku = st.session_state.product_info['sku']
@@ -457,8 +440,6 @@ def display_main_app():
         with st.expander("💬 AI Assistant (Context-Aware)"):
             if user_query := st.chat_input("Ask the AI about your current analysis..."):
                 with st.spinner("AI is synthesizing an answer..."):
-                    # This needs to be updated to use the factory if it's a shared helper
-                    # For now, assuming ai_context_helper is initialized separately
                     if 'ai_context_helper' not in st.session_state:
                          AIContextHelper = lazy_import('ai_context_helper', 'AIContextHelper')
                          st.session_state.ai_context_helper = AIContextHelper(st.session_state.openai_api_key)
@@ -513,7 +494,6 @@ def display_capa_workflow():
         display_vendor_comm_tab()
     with tabs[7]: 
         create_breadcrumb_navigation("Compliance")
-        # ensure_component_loaded('pre_mortem_generator') # This needs to be mapped in factory
         display_compliance_tab = lazy_import('tabs.compliance', 'display_compliance_tab')
         display_compliance_tab()
     with tabs[8]: 

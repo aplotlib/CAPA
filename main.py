@@ -296,7 +296,7 @@ def check_password():
 
 def display_sidebar():
     """Renders all configuration and data input widgets in the sidebar."""
-    from utils import parse_manual_input
+    from src.utils import parse_manual_input
     with st.sidebar:
         logo_base64 = get_local_image_as_base64("logo.png")
         if logo_base64:

@@ -5,6 +5,10 @@ import os
 import streamlit as st
 from datetime import date, timedelta
 import base64
+import yaml
+from functools import lru_cache
+
+os.environ['STREAMLIT_SERVER_FILE_WATCHER_TYPE'] = 'none'
 
 # Get the absolute path of a directory containing main.py
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -267,10 +271,8 @@ def initialize_components():
         workflow = st.session_state.get('workflow_mode', 'Product Development')
         
         # Core AI components (always needed)
-        AICAPAHelper = lazy_import('src.ai_capa_helper', 'AICAPAHelper')
         AIContextHelper = lazy_import('src.ai_context_helper', 'AIContextHelper')
         
-        st.session_state.ai_capa_helper = AICAPAHelper(api_key)
         st.session_state.ai_context_helper = AIContextHelper(api_key)
         
         # Workflow-specific lazy initialization
@@ -283,10 +285,8 @@ def initialize_components():
 
 def initialize_capa_components(api_key):
     """Initialize components specific to CAPA workflow"""
-    AIEmailDrafter = lazy_import('src.ai_capa_helper', 'AIEmailDrafter')
     AIFileParser = lazy_import('src.parsers', 'AIFileParser')
     
-    st.session_state.ai_email_drafter = AIEmailDrafter(api_key)
     st.session_state.file_parser = AIFileParser(api_key)
 
 def initialize_product_dev_components(api_key):
@@ -498,6 +498,33 @@ def process_uploaded_files(uploaded_files: list):
     else:
         st.warning("AI could not identify relevant sales or returns data in the uploaded files.")
 
+def create_breadcrumb_navigation():
+    """Shows current location and allow quick navigation"""
+    st.markdown(f"""
+        <div class="breadcrumb">
+            Home > {st.session_state.workflow_mode}
+        </div>
+    """, unsafe_allow_html=True)
+
+def add_guided_workflow():
+    """Step-by-step wizard for complex processes"""
+    current_step = st.session_state.get('workflow_step', 1)
+    total_steps = 5
+
+    st.progress(current_step / total_steps)
+    st.caption(f"Step {current_step} of {total_steps}: {get_step_description(current_step)}")
+
+def get_step_description(step):
+    """Returns the description for a given step in the workflow"""
+    descriptions = {
+        1: "Start by defining your product and its intended use.",
+        2: "Next, perform a risk analysis to identify potential failure modes.",
+        3: "Then, conduct a human factors analysis to ensure usability.",
+        4: "After that, generate a draft of your product manual.",
+        5: "Finally, review all the generated documents and export your project.",
+    }
+    return descriptions.get(step, "")
+
 def display_main_app():
     """Displays the main application interface, including header, sidebar, and tabs."""
     st.markdown(
@@ -507,6 +534,8 @@ def display_main_app():
     )
     
     display_sidebar()
+    create_breadcrumb_navigation()
+    add_guided_workflow()
 
     # Dynamic tab loading based on workflow
     if st.session_state.workflow_mode == "CAPA Management":
@@ -526,8 +555,8 @@ def display_capa_workflow():
     """Display CAPA Management workflow tabs"""
     # Lazy load tab modules
     tab_list = ["Dashboard", "CAPA", "CAPA Closure", "Risk & Safety", "Human Factors", 
-                "Vendor Comms", "Compliance", "Cost of Quality", "Final Review", "Exports"]
-    icons = ["📈", "📝", "✅", "⚠️", "👥", "📬", "⚖️", "💲", "🔍", "📄"]
+                "Vendor Comms", "Compliance", "Cost of Quality", "Final Review", "Exports", "RCA"]
+    icons = ["📈", "📝", "✅", "⚠️", "👥", "📬", "⚖️", "💲", "🔍", "📄", "🔬"]
     
     tabs = st.tabs([f"{icon} {name}" for icon, name in zip(icons, tab_list)])
     
@@ -565,11 +594,14 @@ def display_capa_workflow():
     with tabs[9]: 
         display_exports_tab = lazy_import('src.tabs.exports', 'display_exports_tab')
         display_exports_tab()
+    with tabs[10]:
+        display_rca_tab = lazy_import('src.tabs.rca', 'display_rca_tab')
+        display_rca_tab()
 
 def display_product_dev_workflow():
     """Display Product Development workflow tabs"""
-    tab_list = ["Product Development", "Risk & Safety", "Human Factors", "Manual Writer", "Compliance", "Final Review", "Exports"]
-    icons = ["🚀", "⚠️", "👥", "✍️", "⚖️", "🔍", "📄"]
+    tab_list = ["Product Development", "Risk & Safety", "Human Factors", "Manual Writer", "Compliance", "Final Review", "Exports", "RCA"]
+    icons = ["🚀", "⚠️", "👥", "✍️", "⚖️", "🔍", "📄", "🔬"]
     
     tabs = st.tabs([f"{icon} {name}" for icon, name in zip(icons, tab_list)])
     
@@ -596,6 +628,9 @@ def display_product_dev_workflow():
     with tabs[6]: 
         display_exports_tab = lazy_import('src.tabs.exports', 'display_exports_tab')
         display_exports_tab()
+    with tabs[7]:
+        display_rca_tab = lazy_import('src.tabs.rca', 'display_rca_tab')
+        display_rca_tab()
 
 def main():
     """Main function to configure and run the Streamlit application."""
@@ -610,6 +645,9 @@ def main():
     
     load_css()
     initialize_session_state()
+
+    with open("config.yaml", "r") as f:
+        st.session_state.config = yaml.safe_load(f)
 
     if not check_password():
         st.stop()

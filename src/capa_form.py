@@ -2,7 +2,7 @@
 
 import streamlit as st
 from datetime import date
-from .compliance import validate_capa_data
+from compliance import validate_capa_data
 
 def display_capa_form():
     """

@@ -25,5 +25,8 @@ class AIHelperFactory:
             elif helper_type == 'rca':
                 from rca_tools import RootCauseAnalyzer
                 st.session_state[instance_key] = RootCauseAnalyzer(api_key)
+            elif helper_type == 'design_controls':
+                from ai_capa_helper import AIDesignControlsTriager
+                st.session_state[instance_key] = AIDesignControlsTriager(api_key)
             # Add other helpers as needed
         return st.session_state[instance_key]

@@ -4,7 +4,7 @@ from typing import Dict, List, Optional
 import pandas as pd
 import openai
 import json
-from .utils import retry_with_backoff
+from utils import retry_with_backoff
 
 class FMEA:
     """Handles Failure Mode and Effects Analysis logic using OpenAI."""

@@ -3,7 +3,7 @@
 import json
 from typing import Dict, Optional, Any
 import openai
-from .utils import retry_with_backoff
+from utils import retry_with_backoff
 
 # Define the new model name as a constant
 FINE_TUNED_MODEL = "ft:gpt-4o-2024-08-06:vive-health-quality-department:qms-v2-stable-lr:CM1nuhta"
@@ -218,7 +218,7 @@ class AIDesignControlsTriager:
         - **Not Required**: Very low-risk consumer goods that are not considered medical devices.
 
         Analyze the user's description and provide a clear recommendation.
-        Return ONLY a valid JSON object with three keys: "recommendation" (one of "🔴 Design Controls Legally Required", "🟡 Design Controls Recommended", "🟢 Design Controls Not Required"), "rationale" (a clear, concise explanation for your decision, citing the device class if applicable), and "next_steps" (suggested next actions for the user).
+        Return ONLY a valid JSON object with three keys: "recommendation" (one of "閥 Design Controls Legally Required", "泯 Design Controls Recommended", "泙 Design Controls Not Required"), "rationale" (a clear, concise explanation for your decision, citing the device class if applicable), and "next_steps" (suggested next actions for the user).
         """
         user_prompt = f"**Product Description:**\n{device_description}"
 

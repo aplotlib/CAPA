@@ -4,7 +4,7 @@ import streamlit as st
 from typing import Optional, Dict
 import openai
 import pandas as pd
-from .utils import retry_with_backoff
+from utils import retry_with_backoff
 
 class AIContextHelper:
     """

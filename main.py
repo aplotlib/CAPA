@@ -8,30 +8,27 @@ import base64
 import yaml
 from functools import lru_cache
 
+# FIX: Disable file watcher to prevent resource exhaustion on some systems
 os.environ['STREAMLIT_SERVER_FILE_WATCHER_TYPE'] = 'none'
 
 # Get the absolute path of a directory containing main.py
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, APP_DIR)
 
+from src.ai_factory import AIHelperFactory
+
 # Lazy import function to load modules only when needed
 def lazy_import(module_name, class_name=None):
     """Lazy import modules to reduce initial load time"""
-    if module_name not in st.session_state.get('loaded_modules', {}):
-        if 'loaded_modules' not in st.session_state:
-            st.session_state.loaded_modules = {}
-        
-        module = __import__(module_name, fromlist=[class_name] if class_name else [])
-        st.session_state.loaded_modules[module_name] = module
-        
-        if class_name:
-            return getattr(module, class_name)
-        return module
-    else:
-        module = st.session_state.loaded_modules[module_name]
-        if class_name:
-            return getattr(module, class_name)
-        return module
+    full_module_name = f"src.{module_name}"
+    if class_name:
+        full_module_name = f"src.{module_name}"
+
+    # Simplified lazy loading for this context
+    module = __import__(full_module_name, fromlist=[class_name] if class_name else [])
+    if class_name:
+        return getattr(module, class_name)
+    return module
 
 # Core imports that are always needed
 import pandas as pd
@@ -52,6 +49,11 @@ def load_css():
             --secondary-text-color: #546E7A;
             --border-color: #CFD8DC;
             --font-family: 'Inter', sans-serif;
+        }
+        .breadcrumb {
+            font-size: 0.9rem;
+            color: var(--secondary-text-color);
+            margin-bottom: 1rem;
         }
 
         /* --- Base Styles --- */
@@ -170,23 +172,6 @@ def load_css():
             border-radius: 8px;
             padding: 1rem;
         }
-        
-        /* --- Performance Indicator --- */
-        .loading-indicator {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            background: var(--primary-color);
-            color: white;
-            padding: 5px 10px;
-            border-radius: 5px;
-            font-size: 12px;
-            z-index: 9999;
-            display: none;
-        }
-        .loading-indicator.active {
-            display: block;
-        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -257,76 +242,26 @@ def initialize_components():
     st.session_state.api_key_missing = not bool(api_key)
 
     # Always initialize non-AI components (lightweight)
-    DocumentGenerator = lazy_import('src.document_generator', 'DocumentGenerator')
-    DataProcessor = lazy_import('src.data_processing', 'DataProcessor')
-    
-    st.session_state.doc_generator = DocumentGenerator()
+    DataProcessor = lazy_import('data_processing', 'DataProcessor')
     st.session_state.data_processor = DataProcessor()
 
     # Initialize AI components only if API key is present
     if not st.session_state.api_key_missing:
         st.session_state.openai_api_key = api_key
+        # Use factory to get core helpers
+        st.session_state.ai_capa_helper = AIHelperFactory.create_helper('capa', api_key)
+        st.session_state.rca_helper = AIHelperFactory.create_helper('rca', api_key)
         
-        # Load AI components based on active workflow
-        workflow = st.session_state.get('workflow_mode', 'Product Development')
-        
-        # Core AI components (always needed)
-        AIContextHelper = lazy_import('src.ai_context_helper', 'AIContextHelper')
-        
-        st.session_state.ai_context_helper = AIContextHelper(api_key)
-        
-        # Workflow-specific lazy initialization
-        if workflow == 'CAPA Management':
-            initialize_capa_components(api_key)
-        elif workflow == 'Product Development':
-            initialize_product_dev_components(api_key)
+        # This can be expanded to load other helpers as needed
             
     st.session_state.components_initialized = True
 
-def initialize_capa_components(api_key):
-    """Initialize components specific to CAPA workflow"""
-    AIFileParser = lazy_import('src.parsers', 'AIFileParser')
-    
-    st.session_state.file_parser = AIFileParser(api_key)
-
-def initialize_product_dev_components(api_key):
-    """Initialize components specific to Product Development workflow"""
-    MedicalDeviceClassifier = lazy_import('src.ai_capa_helper', 'MedicalDeviceClassifier')
-    RiskAssessmentGenerator = lazy_import('src.ai_capa_helper', 'RiskAssessmentGenerator')
-    UseRelatedRiskAnalyzer = lazy_import('src.ai_capa_helper', 'UseRelatedRiskAnalyzer')
-    AIDesignControlsTriager = lazy_import('src.ai_capa_helper', 'AIDesignControlsTriager')
-    AIHumanFactorsHelper = lazy_import('src.ai_capa_helper', 'AIHumanFactorsHelper')
-    ProductManualWriter = lazy_import('src.ai_capa_helper', 'ProductManualWriter') # NEW
-    FMEA = lazy_import('src.fmea', 'FMEA')
-    PreMortem = lazy_import('src.pre_mortem', 'PreMortem')
-    
-    st.session_state.medical_device_classifier = MedicalDeviceClassifier(api_key)
-    st.session_state.risk_assessment_generator = RiskAssessmentGenerator(api_key)
-    st.session_state.urra_generator = UseRelatedRiskAnalyzer(api_key)
-    st.session_state.ai_design_controls_triager = AIDesignControlsTriager(api_key)
-    st.session_state.ai_hf_helper = AIHumanFactorsHelper(api_key)
-    st.session_state.manual_writer = ProductManualWriter(api_key) # NEW
-    st.session_state.fmea_generator = FMEA(api_key)
-    st.session_state.pre_mortem_generator = PreMortem(api_key)
-
 def ensure_component_loaded(component_name):
-    """Ensure a specific component is loaded when needed"""
-    if component_name not in st.session_state:
+    """Ensure a specific component is loaded when needed using the factory."""
+    if f"{component_name}_instance" not in st.session_state:
         api_key = st.session_state.get('openai_api_key')
-        if api_key and not st.session_state.api_key_missing:
-            if component_name == 'ai_email_drafter':
-                AIEmailDrafter = lazy_import('src.ai_capa_helper', 'AIEmailDrafter')
-                st.session_state.ai_email_drafter = AIEmailDrafter(api_key)
-            elif component_name == 'file_parser':
-                AIFileParser = lazy_import('src.parsers', 'AIFileParser')
-                st.session_state.file_parser = AIFileParser(api_key)
-            elif component_name == 'fmea_generator':
-                FMEA = lazy_import('src.fmea', 'FMEA')
-                st.session_state.fmea_generator = FMEA(api_key)
-            elif component_name == 'pre_mortem_generator':
-                PreMortem = lazy_import('src.pre_mortem', 'PreMortem')
-                st.session_state.pre_mortem_generator = PreMortem(api_key)
-            # Add other components as needed
+        if api_key:
+            AIHelperFactory.create_helper(component_name, api_key)
 
 def check_password():
     """Displays a password input and returns True if the password is correct."""
@@ -359,6 +294,7 @@ def check_password():
                     st.error("The password you entered is incorrect.")
     return False
 
+@st.cache_data
 def parse_manual_input(input_str: str, target_sku: str) -> pd.DataFrame:
     """Parses manual string input into a DataFrame for sales or returns data."""
     if not input_str.strip():
@@ -385,21 +321,10 @@ def display_sidebar():
         st.header("Configuration")
         
         # Workflow mode selector with change detection
-        prev_workflow = st.session_state.get('workflow_mode')
         st.session_state.workflow_mode = st.selectbox(
             "Workflow Mode",
             ["Product Development", "CAPA Management"]
         )
-        
-        # Reinitialize components if workflow changed
-        if prev_workflow != st.session_state.workflow_mode and prev_workflow is not None:
-            st.session_state.active_workflow = st.session_state.workflow_mode
-            if not st.session_state.api_key_missing:
-                api_key = st.session_state.openai_api_key
-                if st.session_state.workflow_mode == 'CAPA Management':
-                    initialize_capa_components(api_key)
-                else:
-                    initialize_product_dev_components(api_key)
         
         with st.expander("📝 Product Information", expanded=True):
             product_info = st.session_state.product_info
@@ -445,23 +370,25 @@ def display_sidebar():
                         else:
                             st.warning("Please upload at least one file.")
 
+@st.cache_data
+def run_cached_analysis(sales_df, returns_df, report_days, unit_cost, sales_price):
+    """Wrapper to cache the full analysis function."""
+    run_full_analysis = lazy_import('analysis', 'run_full_analysis')
+    return run_full_analysis(sales_df, returns_df, report_days, unit_cost, sales_price)
+
 def process_data(sales_df: pd.DataFrame, returns_df: pd.DataFrame):
     """Processes sales and returns DataFrames to run and store the main analysis."""
     with st.spinner("Processing data and running analysis..."):
-        data_processor = st.session_state.data_processor
-        st.session_state.sales_data = data_processor.process_sales_data(sales_df)
-        st.session_state.returns_data = data_processor.process_returns_data(returns_df)
+        st.session_state.sales_data = st.session_state.data_processor.process_sales_data(sales_df)
+        st.session_state.returns_data = st.session_state.data_processor.process_returns_data(returns_df)
         report_days = (st.session_state.end_date - st.session_state.start_date).days
         
-        # Lazy load analysis module
-        run_full_analysis = lazy_import('src.analysis', 'run_full_analysis')
-        
-        st.session_state.analysis_results = run_full_analysis(
-            sales_df=st.session_state.sales_data, 
-            returns_df=st.session_state.returns_data,
-            report_period_days=report_days, 
-            unit_cost=st.session_state.unit_cost,
-            sales_price=st.session_state.sales_price
+        st.session_state.analysis_results = run_cached_analysis(
+            st.session_state.sales_data, 
+            st.session_state.returns_data,
+            report_days, 
+            st.session_state.unit_cost,
+            st.session_state.sales_price
         )
     st.toast("✅ Analysis complete!", icon="🎉")
 
@@ -471,10 +398,8 @@ def process_uploaded_files(uploaded_files: list):
         st.error("Cannot process files without an OpenAI API key.")
         return
     
-    # Ensure file parser is loaded
-    ensure_component_loaded('file_parser')
-    
-    parser = st.session_state.file_parser
+    # ensure_component_loaded('file_parser')
+    parser = AIHelperFactory.create_helper('parser', st.session_state.openai_api_key)
     sales_dfs, returns_dfs = [], []
     target_sku = st.session_state.product_info['sku']
     
@@ -498,32 +423,18 @@ def process_uploaded_files(uploaded_files: list):
     else:
         st.warning("AI could not identify relevant sales or returns data in the uploaded files.")
 
-def create_breadcrumb_navigation():
+def create_breadcrumb_navigation(current_tab):
     """Shows current location and allow quick navigation"""
     st.markdown(f"""
         <div class="breadcrumb">
-            Home > {st.session_state.workflow_mode}
+            Home > {st.session_state.workflow_mode} > {current_tab}
         </div>
     """, unsafe_allow_html=True)
 
-def add_guided_workflow():
+def add_guided_workflow(step, total_steps, description):
     """Step-by-step wizard for complex processes"""
-    current_step = st.session_state.get('workflow_step', 1)
-    total_steps = 5
-
-    st.progress(current_step / total_steps)
-    st.caption(f"Step {current_step} of {total_steps}: {get_step_description(current_step)}")
-
-def get_step_description(step):
-    """Returns the description for a given step in the workflow"""
-    descriptions = {
-        1: "Start by defining your product and its intended use.",
-        2: "Next, perform a risk analysis to identify potential failure modes.",
-        3: "Then, conduct a human factors analysis to ensure usability.",
-        4: "After that, generate a draft of your product manual.",
-        5: "Finally, review all the generated documents and export your project.",
-    }
-    return descriptions.get(step, "")
+    st.progress(step / total_steps)
+    st.caption(f"Step {step} of {total_steps}: {description}")
 
 def display_main_app():
     """Displays the main application interface, including header, sidebar, and tabs."""
@@ -534,8 +445,6 @@ def display_main_app():
     )
     
     display_sidebar()
-    create_breadcrumb_navigation()
-    add_guided_workflow()
 
     # Dynamic tab loading based on workflow
     if st.session_state.workflow_mode == "CAPA Management":
@@ -548,106 +457,138 @@ def display_main_app():
         with st.expander("💬 AI Assistant (Context-Aware)"):
             if user_query := st.chat_input("Ask the AI about your current analysis..."):
                 with st.spinner("AI is synthesizing an answer..."):
+                    # This needs to be updated to use the factory if it's a shared helper
+                    # For now, assuming ai_context_helper is initialized separately
+                    if 'ai_context_helper' not in st.session_state:
+                         AIContextHelper = lazy_import('ai_context_helper', 'AIContextHelper')
+                         st.session_state.ai_context_helper = AIContextHelper(st.session_state.openai_api_key)
+
                     response = st.session_state.ai_context_helper.generate_response(user_query)
                     st.info(response)
 
 def display_capa_workflow():
     """Display CAPA Management workflow tabs"""
     # Lazy load tab modules
-    tab_list = ["Dashboard", "CAPA", "CAPA Closure", "Risk & Safety", "Human Factors", 
-                "Vendor Comms", "Compliance", "Cost of Quality", "Final Review", "Exports", "RCA"]
-    icons = ["📈", "📝", "✅", "⚠️", "👥", "📬", "⚖️", "💲", "🔍", "📄", "🔬"]
+    tab_list = ["Dashboard", "CAPA", "RCA", "CAPA Closure", "Risk & Safety", "Human Factors", 
+                "Vendor Comms", "Compliance", "Cost of Quality", "Final Review", "Exports"]
+    icons = ["📈", "📝", "🔬", "✅", "⚠️", "👥", "📬", "⚖️", "💲", "🔍", "📄"]
     
     tabs = st.tabs([f"{icon} {name}" for icon, name in zip(icons, tab_list)])
     
     # Load tab modules on demand
     with tabs[0]: 
-        display_dashboard = lazy_import('src.tabs.dashboard', 'display_dashboard')
+        create_breadcrumb_navigation("Dashboard")
+        add_guided_workflow(1, 6, "Review initial performance metrics and AI insights.")
+        display_dashboard = lazy_import('tabs.dashboard', 'display_dashboard')
         display_dashboard()
     with tabs[1]: 
-        display_capa_tab = lazy_import('src.tabs.capa', 'display_capa_tab')
+        create_breadcrumb_navigation("CAPA")
+        add_guided_workflow(2, 6, "Define the problem and initiate the CAPA form.")
+        display_capa_tab = lazy_import('tabs.capa', 'display_capa_tab')
         display_capa_tab()
-    with tabs[2]: 
-        display_capa_closure_tab = lazy_import('src.tabs.capa_closure', 'display_capa_closure_tab')
-        display_capa_closure_tab()
-    with tabs[3]: 
-        ensure_component_loaded('fmea_generator')
-        display_risk_safety_tab = lazy_import('src.tabs.risk_safety', 'display_risk_safety_tab')
-        display_risk_safety_tab()
-    with tabs[4]: 
-        display_human_factors_tab = lazy_import('src.tabs.human_factors', 'display_human_factors_tab')
-        display_human_factors_tab()
-    with tabs[5]: 
-        ensure_component_loaded('ai_email_drafter')
-        display_vendor_comm_tab = lazy_import('src.tabs.vendor_comms', 'display_vendor_comm_tab')
-        display_vendor_comm_tab()
-    with tabs[6]: 
-        ensure_component_loaded('pre_mortem_generator')
-        display_compliance_tab = lazy_import('src.tabs.compliance', 'display_compliance_tab')
-        display_compliance_tab()
-    with tabs[7]: 
-        display_cost_of_quality_tab = lazy_import('src.tabs.cost_of_quality', 'display_cost_of_quality_tab')
-        display_cost_of_quality_tab()
-    with tabs[8]: 
-        display_final_review_tab = lazy_import('src.tabs.final_review', 'display_final_review_tab')
-        display_final_review_tab()
-    with tabs[9]: 
-        display_exports_tab = lazy_import('src.tabs.exports', 'display_exports_tab')
-        display_exports_tab()
-    with tabs[10]:
-        display_rca_tab = lazy_import('src.tabs.rca', 'display_rca_tab')
+    with tabs[2]:
+        create_breadcrumb_navigation("RCA")
+        add_guided_workflow(3, 6, "Use guided tools to find the root cause.")
+        display_rca_tab = lazy_import('tabs.rca', 'display_rca_tab')
         display_rca_tab()
+    with tabs[3]: 
+        create_breadcrumb_navigation("CAPA Closure")
+        add_guided_workflow(4, 6, "Verify the effectiveness of actions and close the CAPA.")
+        display_capa_closure_tab = lazy_import('tabs.capa_closure', 'display_capa_closure_tab')
+        display_capa_closure_tab()
+    with tabs[4]: 
+        create_breadcrumb_navigation("Risk & Safety")
+        add_guided_workflow(5, 6, "Conduct FMEA and other risk assessments.")
+        ensure_component_loaded('fmea')
+        display_risk_safety_tab = lazy_import('tabs.risk_safety', 'display_risk_safety_tab')
+        display_risk_safety_tab()
+    with tabs[5]: 
+        create_breadcrumb_navigation("Human Factors")
+        display_human_factors_tab = lazy_import('tabs.human_factors', 'display_human_factors_tab')
+        display_human_factors_tab()
+    with tabs[6]: 
+        create_breadcrumb_navigation("Vendor Comms")
+        ensure_component_loaded('email')
+        display_vendor_comm_tab = lazy_import('tabs.vendor_comms', 'display_vendor_comm_tab')
+        display_vendor_comm_tab()
+    with tabs[7]: 
+        create_breadcrumb_navigation("Compliance")
+        # ensure_component_loaded('pre_mortem_generator') # This needs to be mapped in factory
+        display_compliance_tab = lazy_import('tabs.compliance', 'display_compliance_tab')
+        display_compliance_tab()
+    with tabs[8]: 
+        create_breadcrumb_navigation("Cost of Quality")
+        display_cost_of_quality_tab = lazy_import('tabs.cost_of_quality', 'display_cost_of_quality_tab')
+        display_cost_of_quality_tab()
+    with tabs[9]: 
+        create_breadcrumb_navigation("Final Review")
+        add_guided_workflow(6, 6, "Generate a final summary and export all documentation.")
+        display_final_review_tab = lazy_import('tabs.final_review', 'display_final_review_tab')
+        display_final_review_tab()
+    with tabs[10]: 
+        create_breadcrumb_navigation("Exports")
+        display_exports_tab = lazy_import('tabs.exports', 'display_exports_tab')
+        display_exports_tab()
 
 def display_product_dev_workflow():
     """Display Product Development workflow tabs"""
-    tab_list = ["Product Development", "Risk & Safety", "Human Factors", "Manual Writer", "Compliance", "Final Review", "Exports", "RCA"]
-    icons = ["🚀", "⚠️", "👥", "✍️", "⚖️", "🔍", "📄", "🔬"]
+    tab_list = ["Product Development", "Risk & Safety", "RCA", "Human Factors", "Manual Writer", "Compliance", "Final Review", "Exports"]
+    icons = ["🚀", "⚠️", "🔬", "👥", "✍️", "⚖️", "🔍", "📄"]
     
     tabs = st.tabs([f"{icon} {name}" for icon, name in zip(icons, tab_list)])
     
     with tabs[0]: 
-        display_product_development_tab = lazy_import('src.tabs.product_development', 'display_product_development_tab')
+        create_breadcrumb_navigation("Product Development")
+        display_product_development_tab = lazy_import('tabs.product_development', 'display_product_development_tab')
         display_product_development_tab()
     with tabs[1]: 
-        ensure_component_loaded('fmea_generator')
-        display_risk_safety_tab = lazy_import('src.tabs.risk_safety', 'display_risk_safety_tab')
+        create_breadcrumb_navigation("Risk & Safety")
+        ensure_component_loaded('fmea')
+        display_risk_safety_tab = lazy_import('tabs.risk_safety', 'display_risk_safety_tab')
         display_risk_safety_tab()
-    with tabs[2]: 
-        display_human_factors_tab = lazy_import('src.tabs.human_factors', 'display_human_factors_tab')
-        display_human_factors_tab()
-    with tabs[3]: # NEW
-        display_manual_writer_tab = lazy_import('src.tabs.manual_writer', 'display_manual_writer_tab')
-        display_manual_writer_tab()
-    with tabs[4]: 
-        ensure_component_loaded('pre_mortem_generator')
-        display_compliance_tab = lazy_import('src.tabs.compliance', 'display_compliance_tab')
-        display_compliance_tab()
-    with tabs[5]: 
-        display_final_review_tab = lazy_import('src.tabs.final_review', 'display_final_review_tab')
-        display_final_review_tab()
-    with tabs[6]: 
-        display_exports_tab = lazy_import('src.tabs.exports', 'display_exports_tab')
-        display_exports_tab()
-    with tabs[7]:
-        display_rca_tab = lazy_import('src.tabs.rca', 'display_rca_tab')
+    with tabs[2]:
+        create_breadcrumb_navigation("RCA")
+        display_rca_tab = lazy_import('tabs.rca', 'display_rca_tab')
         display_rca_tab()
+    with tabs[3]: 
+        create_breadcrumb_navigation("Human Factors")
+        display_human_factors_tab = lazy_import('tabs.human_factors', 'display_human_factors_tab')
+        display_human_factors_tab()
+    with tabs[4]: 
+        create_breadcrumb_navigation("Manual Writer")
+        display_manual_writer_tab = lazy_import('tabs.manual_writer', 'display_manual_writer_tab')
+        display_manual_writer_tab()
+    with tabs[5]: 
+        create_breadcrumb_navigation("Compliance")
+        display_compliance_tab = lazy_import('tabs.compliance', 'display_compliance_tab')
+        display_compliance_tab()
+    with tabs[6]: 
+        create_breadcrumb_navigation("Final Review")
+        display_final_review_tab = lazy_import('tabs.final_review', 'display_final_review_tab')
+        display_final_review_tab()
+    with tabs[7]: 
+        create_breadcrumb_navigation("Exports")
+        display_exports_tab = lazy_import('tabs.exports', 'display_exports_tab')
+        display_exports_tab()
 
 def main():
     """Main function to configure and run the Streamlit application."""
-    # Page config with optimizations
-    page_icon_path = os.path.join(APP_DIR, "logo.png")
     st.set_page_config(
         page_title="AQMS", 
         layout="wide", 
-        page_icon=page_icon_path if os.path.exists(page_icon_path) else "✅",
         initial_sidebar_state="expanded"
     )
     
     load_css()
     initialize_session_state()
 
-    with open("config.yaml", "r") as f:
-        st.session_state.config = yaml.safe_load(f)
+    # Load config from YAML
+    try:
+        with open("config.yaml", "r") as f:
+            st.session_state.config = yaml.safe_load(f)
+    except FileNotFoundError:
+        st.error("Configuration file (config.yaml) not found.")
+        st.stop()
 
     if not check_password():
         st.stop()

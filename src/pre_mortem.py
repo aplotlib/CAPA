@@ -3,7 +3,7 @@
 from typing import List, Dict, Optional
 import json
 import openai
-from .utils import retry_with_backoff
+from utils import retry_with_backoff
 
 class PreMortem:
     """Handles proactive Pre-Mortem analysis logic using OpenAI."""

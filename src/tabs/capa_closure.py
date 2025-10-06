@@ -48,8 +48,8 @@ def display_capa_closure_tab():
         st.markdown("Enter new data for a similar time period *after* the implementation date to measure the change.")
         
         with st.form("effectiveness_form"):
-            from utils import parse_manual_input
-            from analysis import run_full_analysis
+            from src.utils import parse_manual_input
+            from src.analysis import run_full_analysis
 
             c1, c2 = st.columns(2)
             new_sales = c1.text_input("New Sales Data (Post-CAPA)", placeholder="e.g., 8500")

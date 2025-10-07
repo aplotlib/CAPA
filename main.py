@@ -222,7 +222,8 @@ def initialize_session_state():
         'capa_closure_data': {},
         'coq_results': None,
         'fmea_rows': [],
-        'manual_content': {}
+        'manual_content': {},
+        'project_charter_data': {} # NEW
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -511,40 +512,44 @@ def display_capa_workflow():
 
 def display_product_dev_workflow():
     """Display Product Development workflow tabs"""
-    tab_list = ["Product Development", "Risk & Safety", "RCA", "Human Factors", "Manual Writer", "Compliance", "Final Review", "Exports"]
-    icons = ["🚀", "⚠️", "🔬", "👥", "✍️", "⚖️", "🔍", "📄"]
+    tab_list = ["Project Charter", "Product Development", "Risk & Safety", "RCA", "Human Factors", "Manual Writer", "Compliance", "Final Review", "Exports"]
+    icons = ["📑", "🚀", "⚠️", "🔬", "👥", "✍️", "⚖️", "🔍", "📄"]
     
     tabs = st.tabs([f"{icon} {name}" for icon, name in zip(icons, tab_list)])
     
     with tabs[0]: 
+        create_breadcrumb_navigation("Project Charter")
+        display_project_charter_tab = lazy_import('tabs.project_charter', 'display_project_charter_tab')
+        display_project_charter_tab()
+    with tabs[1]: 
         create_breadcrumb_navigation("Product Development")
         display_product_development_tab = lazy_import('tabs.product_development', 'display_product_development_tab')
         display_product_development_tab()
-    with tabs[1]: 
+    with tabs[2]: 
         create_breadcrumb_navigation("Risk & Safety")
         display_risk_safety_tab = lazy_import('tabs.risk_safety', 'display_risk_safety_tab')
         display_risk_safety_tab()
-    with tabs[2]:
+    with tabs[3]:
         create_breadcrumb_navigation("RCA")
         display_rca_tab = lazy_import('tabs.rca', 'display_rca_tab')
         display_rca_tab()
-    with tabs[3]: 
+    with tabs[4]: 
         create_breadcrumb_navigation("Human Factors")
         display_human_factors_tab = lazy_import('tabs.human_factors', 'display_human_factors_tab')
         display_human_factors_tab()
-    with tabs[4]: 
+    with tabs[5]: 
         create_breadcrumb_navigation("Manual Writer")
         display_manual_writer_tab = lazy_import('tabs.manual_writer', 'display_manual_writer_tab')
         display_manual_writer_tab()
-    with tabs[5]: 
+    with tabs[6]: 
         create_breadcrumb_navigation("Compliance")
         display_compliance_tab = lazy_import('tabs.compliance', 'display_compliance_tab')
         display_compliance_tab()
-    with tabs[6]: 
+    with tabs[7]: 
         create_breadcrumb_navigation("Final Review")
         display_final_review_tab = lazy_import('tabs.final_review', 'display_final_review_tab')
         display_final_review_tab()
-    with tabs[7]: 
+    with tabs[8]: 
         create_breadcrumb_navigation("Exports")
         display_exports_tab = lazy_import('tabs.exports', 'display_exports_tab')
         display_exports_tab()

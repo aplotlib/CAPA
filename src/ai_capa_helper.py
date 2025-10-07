@@ -4,7 +4,7 @@ import json
 import re
 from typing import Dict, Optional, Any
 import openai
-from utils import retry_with_backoff
+from utils import retry_with_backoff, parse_ai_json_response
 
 # Define the new model name as a constant
 FINE_TUNED_MODEL = "ft:gpt-4o-2024-08-06:vive-health-quality-department:qms-v2-stable-lr:CM1nuhta"
@@ -102,16 +102,9 @@ class MedicalDeviceClassifier:
         try:
             response = self.client.chat.completions.create(model=self.model, messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}], max_tokens=2500, temperature=0.2, response_format={"type": "json_object"})
             raw_content = response.choices[0].message.content
-            
-            # FIX: Find the JSON block within the response to make parsing robust
-            json_match = re.search(r'\{.*\}', raw_content, re.DOTALL)
-            if json_match:
-                json_string = json_match.group(0)
-                return json.loads(json_string)
-            else:
-                return {"error": "AI response did not contain a valid JSON object."}
-        except json.JSONDecodeError as e:
-            return {"error": f"Failed to decode AI response as JSON: {e}. Raw response: {raw_content[:500]}"}
+            return parse_ai_json_response(raw_content)
+        except json.JSONDecodeError:
+            return {"error": "AI response did not contain a valid JSON object."}
         except Exception as e: return {"error": f"Failed to classify the device due to an AI model error: {e}"}
 
 class RiskAssessmentGenerator:
@@ -194,10 +187,13 @@ class AIHumanFactorsHelper:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
-                max_tokens=4000,
+                max_tokens=4095,
                 response_format={"type": "json_object"}
             )
-            return json.loads(response.choices[0].message.content)
+            raw_content = response.choices[0].message.content
+            return parse_ai_json_response(raw_content)
+        except json.JSONDecodeError as e:
+            return {"error": f"AI response was invalid or incomplete: {e}"}
         except Exception as e:
             print(f"Error generating HF report from answers: {e}")
             return {"error": f"Failed to generate HF report from answers: {e}"}
@@ -229,7 +225,7 @@ class AIDesignControlsTriager:
         - **Not Required**: Very low-risk consumer goods that are not considered medical devices.
 
         Analyze the user's description and provide a clear recommendation.
-        Return ONLY a valid JSON object with three keys: "recommendation" (one of "閥 Design Controls Legally Required", "泯 Design Controls Recommended", "泙 Design Controls Not Required"), "rationale" (a clear, concise explanation for your decision, citing the device class if applicable), and "next_steps" (suggested next actions for the user).
+        Return ONLY a valid JSON object with three keys: "recommendation" (one of "Design Controls Legally Required", "Design Controls Recommended", "Design Controls Not Required"), "rationale" (a clear, concise explanation for your decision, citing the device class if applicable), and "next_steps" (suggested next actions for the user).
         """
         user_prompt = f"**Product Description:**\n{device_description}"
 
@@ -341,3 +337,50 @@ class ProductManualWriter:
         except Exception as e:
             print(f"Error generating manual section '{section_title}': {e}")
             return f"Failed to generate section: {e}"
+            
+class AIProjectCharterHelper:
+    """
+    AI assistant for drafting a project charter.
+    """
+    def __init__(self, api_key: Optional[str] = None):
+        self.client = None
+        if api_key:
+            try:
+                self.client = openai.OpenAI(api_key=api_key)
+                self.model = "gpt-4o"
+            except Exception as e:
+                print(f"Failed to initialize AIProjectCharterHelper: {e}")
+
+    @retry_with_backoff()
+    def generate_charter_draft(self, product_name: str, problem: str, user: str) -> Dict[str, Any]:
+        """Generates a draft of a project charter from a few key inputs."""
+        if not self.client: return {"error": "AI client not initialized."}
+        
+        system_prompt = """
+        You are a senior project manager and regulatory affairs expert specializing in medical devices.
+        A user has provided initial information for a new product. Your task is to expand this into a formal project charter draft.
+        - Extrapolate a plausible "Project Goal" from the problem statement.
+        - Define a reasonable "Project Scope".
+        - Suggest a likely FDA "Device Classification" (Class I, Class II, or Class III) based on the description.
+        - Propose a list of "Applicable Standards & Regulations" based on the classification.
+        - Suggest key "Stakeholders".
+        Return ONLY a single, valid JSON object with these exact keys: "problem_statement", "project_goal", "scope", "device_classification", "applicable_standards" (as a list of strings), and "stakeholders".
+        """
+        user_prompt = f"""
+        **Product Name:** {product_name}
+        **Problem it Solves:** {problem}
+        **Target User:** {user}
+        
+        Now, generate the complete project charter draft as a JSON object.
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+                max_tokens=2000,
+                response_format={"type": "json_object"}
+            )
+            raw_content = response.choices[0].message.content
+            return parse_ai_json_response(raw_content)
+        except Exception as e:
+            return {"error": f"Failed to generate project charter draft: {e}"}

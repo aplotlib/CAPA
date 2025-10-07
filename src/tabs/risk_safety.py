@@ -67,7 +67,6 @@ def display_risk_safety_tab():
             if st.button("🤖 Suggest Additional Failure Modes with AI", use_container_width=True, type="primary"):
                 if 'fmea_generator' in st.session_state:
                     with st.spinner("AI is brainstorming other risks..."):
-                        # FIX: Check if analysis_results exists before accessing it
                         analysis_results = st.session_state.get('analysis_results')
                         insights = "High return rate observed."
                         if analysis_results:
@@ -81,12 +80,19 @@ def display_risk_safety_tab():
                         for suggestion in suggestions:
                             suggestion.update({"Severity": 5, "Occurrence": 5, "Detection": 5, "RPN": 125})
                             st.session_state.fmea_rows.append(suggestion)
+                        
+                        # NEW: Audit logging
+                        st.session_state.audit_logger.log_action(
+                            user="current_user",
+                            action="generate_ai_fmea_suggestions",
+                            entity="fmea",
+                            details={"sku": st.session_state.product_info.get('sku'), "suggestions_added": len(suggestions)}
+                        )
                         st.success("AI has added new failure modes for your review.")
                         st.rerun()
                 else:
                     st.warning("AI features are not available. Check your API key.")
         
-        # Update fmea_data for export
         if st.session_state.fmea_rows:
             st.session_state.fmea_data = pd.DataFrame(st.session_state.fmea_rows)
     

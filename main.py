@@ -66,7 +66,6 @@ def load_css():
         h1, h2, h3 {
             font-weight: 600;
         }
-        /* Use monospace for SKUs and data for a technical feel */
         code {
             font-family: var(--font-mono);
             background-color: #EDF2F7;
@@ -123,14 +122,25 @@ def load_css():
         /* --- Containers & Expanders --- */
         [data-testid="stContainer"], [data-testid="stExpander"] {
             border: 1px solid var(--border-color);
-            border-radius: 8px; /* Slightly softer corners */
+            border-radius: 8px;
             background-color: var(--primary-bg);
             box-shadow: none;
         }
+        
+        /* --- FIX FOR EXPANDER TEXT OVERLAP --- */
         [data-testid="stExpander"] summary {
             font-weight: 500;
             font-size: 1.05rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
         }
+        [data-testid="stExpander"] summary p {
+            flex: 1; /* Allow text to take up available space */
+            padding-right: 1rem; /* Add spacing between text and icon */
+        }
+        /* --- END FIX --- */
 
         /* --- TABS: Clean, text-only design --- */
         .stTabs [data-baseweb="tab-list"] {
@@ -148,7 +158,7 @@ def load_css():
         }
         .stTabs [data-baseweb="tab"]:hover {
             color: var(--text-color);
-            border-bottom: 2px solid #A0AEC0; /* Gray underline on hover */
+            border-bottom: 2px solid #A0AEC0;
         }
         .stTabs [aria-selected="true"] {
             color: var(--primary-color) !important;
@@ -166,7 +176,7 @@ def load_css():
             font-weight: 500;
             color: var(--secondary-text-color);
         }
-        [data-testid="stMetric"] .st-emotion-cache-1g8sfyr { /* Metric value */
+        [data-testid="stMetric"] .st-emotion-cache-1g8sfyr {
             font-size: 2rem;
             font-weight: 600;
         }
@@ -188,8 +198,8 @@ def initialize_session_state():
         'openai_api_key': None,
         'api_key_missing': True,
         'components_initialized': False,
-        'loaded_modules': {},  # Track loaded modules for lazy loading
-        'active_workflow': None,  # Track which workflow is active
+        'loaded_modules': {},
+        'active_workflow': None,
         'product_info': {
             'sku': 'SKU-12345',
             'name': 'Example Product',
@@ -231,8 +241,7 @@ def get_api_key():
 
 def initialize_components():
     """
-    Initializes all application components. AI helpers are initialized
-    at once if the API key is available.
+    Initializes all application components.
     """
     if st.session_state.get('components_initialized'):
         return
@@ -240,14 +249,12 @@ def initialize_components():
     api_key = get_api_key()
     st.session_state.api_key_missing = not bool(api_key)
 
-    # Always initialize non-AI components (lightweight)
     DataProcessor = lazy_import('data_processing', 'DataProcessor')
     DocumentGenerator = lazy_import('document_generator', 'DocumentGenerator')
     st.session_state.data_processor = DataProcessor()
     st.session_state.doc_generator = DocumentGenerator()
-    st.session_state.audit_logger = AuditLogger() # Initialize logger
+    st.session_state.audit_logger = AuditLogger()
 
-    # Initialize all AI components at once if API key is present
     if not st.session_state.api_key_missing:
         st.session_state.openai_api_key = api_key
         AIHelperFactory.initialize_ai_helpers(api_key)
@@ -365,7 +372,6 @@ def process_data(sales_df: pd.DataFrame, returns_df: pd.DataFrame):
         )
         st.session_state.analysis_results = results
 
-        # NEW: Enhanced audit logging
         if results and 'return_summary' in results and not results['return_summary'].empty:
             summary = results['return_summary'].iloc[0]
             st.session_state.audit_logger.log_action(
@@ -426,16 +432,14 @@ def display_main_app():
     elif st.session_state.workflow_mode == "Product Development":
         display_product_dev_workflow()
 
-    if not st.session_state.api_key_missing:
-        with st.expander("AI Assistant (Context-Aware)"):
-            if user_query := st.chat_input("Ask the AI about your current analysis..."):
-                with st.spinner("AI is synthesizing an answer..."):
-                    response = st.session_state.ai_context_helper.generate_response(user_query)
-                    st.info(response)
+    with st.expander("AI Assistant (Context-Aware)"):
+        if user_query := st.chat_input("Ask the AI about your current analysis..."):
+            with st.spinner("AI is synthesizing an answer..."):
+                response = st.session_state.ai_context_helper.generate_response(user_query)
+                st.info(response)
 
 def display_capa_workflow():
     """Display CAPA Management workflow tabs"""
-    # REDESIGN: Removed icons for a cleaner look
     tab_list = ["Dashboard", "CAPA", "RCA", "CAPA Closure", "Risk & Safety", "Human Factors",
                 "Vendor Comms", "Compliance", "Cost of Quality", "Final Review", "Exports"]
 
@@ -477,7 +481,6 @@ def display_capa_workflow():
 
 def display_product_dev_workflow():
     """Display Product Development workflow tabs"""
-    # REDESIGN: Removed icons for a cleaner look
     tab_list = ["Project Charter", "Product Development", "Risk & Safety", "RCA", "Human Factors", "Manual Writer", "Compliance", "Final Review", "Exports"]
 
     tabs = st.tabs(tab_list)

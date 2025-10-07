@@ -15,9 +15,9 @@ enforceSerializableSessionState = false
 gatherUsageStats = false
 
 [theme]
-# Professional medical device industry theme
-primaryColor = "#2E7D32"
+# New "AQMS Clarity Blue" Theme
+primaryColor = "#0052CC"
 backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F5F7F8"
-textColor = "#263238"
+secondaryBackgroundColor = "#F4F5F7"
+textColor = "#172B4D"
 font = "sans serif"

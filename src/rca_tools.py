@@ -2,6 +2,7 @@
 
 from typing import Dict, List
 import openai
+import json
 from .utils import retry_with_backoff
 
 class RootCauseAnalyzer:
@@ -61,10 +62,8 @@ class RootCauseAnalyzer:
                 temperature=0.7,
                 response_format={"type": "json_object"}
             )
-            result = response.json()
-            # The API response is a JSON string, so we need to parse it twice.
-            import json
-            parsed_result = json.loads(result['choices'][0]['message']['content'])
+            # FIX: Correctly parse the JSON response from the OpenAI API client
+            parsed_result = json.loads(response.choices[0].message.content)
             return parsed_result.get("causes", [])
         except Exception as e:
             return [f"Error generating suggestions: {e}"]

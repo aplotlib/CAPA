@@ -19,6 +19,7 @@ SRC_DIR = os.path.join(APP_DIR, 'src')
 sys.path.insert(0, APP_DIR)
 sys.path.insert(0, SRC_DIR)
 
+# FIX: Centralize AI helper initialization with a factory
 from ai_factory import AIHelperFactory
 
 # Lazy import function to load modules only when needed
@@ -232,8 +233,8 @@ def get_api_key():
 
 def initialize_components():
     """
-    Initializes helper classes with intelligent lazy loading based on workflow.
-    Only loads what's immediately needed.
+    Initializes all application components. AI helpers are initialized
+    at once if the API key is available.
     """
     if st.session_state.get('components_initialized'):
         return
@@ -243,29 +244,16 @@ def initialize_components():
 
     # Always initialize non-AI components (lightweight)
     DataProcessor = lazy_import('data_processing', 'DataProcessor')
+    DocumentGenerator = lazy_import('document_generator', 'DocumentGenerator')
     st.session_state.data_processor = DataProcessor()
+    st.session_state.doc_generator = DocumentGenerator() # Ensure doc generator is globally available
 
-    # Initialize AI components only if API key is present
+    # Initialize all AI components at once if API key is present
     if not st.session_state.api_key_missing:
         st.session_state.openai_api_key = api_key
-        # Use factory to get core helpers
-        st.session_state.ai_capa_helper = AIHelperFactory.create_helper('capa', api_key)
-        st.session_state.rca_helper = AIHelperFactory.create_helper('rca', api_key)
-        
-        # This can be expanded to load other helpers as needed
+        AIHelperFactory.initialize_ai_helpers(api_key)
             
     st.session_state.components_initialized = True
-
-def ensure_component_loaded(component_name):
-    """Ensure a specific component is loaded when needed using the factory."""
-    if f"{component_name}_instance" not in st.session_state and f"ai_{component_name}_triager" not in st.session_state:
-        api_key = st.session_state.get('openai_api_key')
-        if api_key:
-            if component_name == 'design_controls':
-                 st.session_state.ai_design_controls_triager = AIHelperFactory.create_helper(component_name, api_key)
-            else:
-                 AIHelperFactory.create_helper(component_name, api_key)
-
 
 def check_password():
     """Displays a password input and returns True if the password is correct."""
@@ -386,7 +374,7 @@ def process_uploaded_files(uploaded_files: list):
         st.error("Cannot process files without an OpenAI API key.")
         return
     
-    parser = AIHelperFactory.create_helper('parser', st.session_state.openai_api_key)
+    parser = st.session_state.parser
     sales_dfs, returns_dfs = [], []
     target_sku = st.session_state.product_info['sku']
     
@@ -444,10 +432,7 @@ def display_main_app():
         with st.expander("💬 AI Assistant (Context-Aware)"):
             if user_query := st.chat_input("Ask the AI about your current analysis..."):
                 with st.spinner("AI is synthesizing an answer..."):
-                    if 'ai_context_helper' not in st.session_state:
-                         AIContextHelper = lazy_import('ai_context_helper', 'AIContextHelper')
-                         st.session_state.ai_context_helper = AIContextHelper(st.session_state.openai_api_key)
-
+                    # FIX: AI Context Helper is now reliably initialized by the factory
                     response = st.session_state.ai_context_helper.generate_response(user_query)
                     st.info(response)
 
@@ -484,7 +469,6 @@ def display_capa_workflow():
     with tabs[4]: 
         create_breadcrumb_navigation("Risk & Safety")
         add_guided_workflow(5, 6, "Conduct FMEA and other risk assessments.")
-        ensure_component_loaded('fmea')
         display_risk_safety_tab = lazy_import('tabs.risk_safety', 'display_risk_safety_tab')
         display_risk_safety_tab()
     with tabs[5]: 
@@ -493,7 +477,6 @@ def display_capa_workflow():
         display_human_factors_tab()
     with tabs[6]: 
         create_breadcrumb_navigation("Vendor Comms")
-        ensure_component_loaded('email')
         display_vendor_comm_tab = lazy_import('tabs.vendor_comms', 'display_vendor_comm_tab')
         display_vendor_comm_tab()
     with tabs[7]: 
@@ -523,12 +506,10 @@ def display_product_dev_workflow():
     
     with tabs[0]: 
         create_breadcrumb_navigation("Product Development")
-        ensure_component_loaded('design_controls')
         display_product_development_tab = lazy_import('tabs.product_development', 'display_product_development_tab')
         display_product_development_tab()
     with tabs[1]: 
         create_breadcrumb_navigation("Risk & Safety")
-        ensure_component_loaded('fmea')
         display_risk_safety_tab = lazy_import('tabs.risk_safety', 'display_risk_safety_tab')
         display_risk_safety_tab()
     with tabs[2]:

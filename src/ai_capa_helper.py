@@ -1,9 +1,9 @@
 # src/ai_capa_helper.py
 
 import json
+import re
 from typing import Dict, Optional, Any
 import openai
-# FIX: Changed relative import to absolute import
 from utils import retry_with_backoff
 
 # Define the new model name as a constant
@@ -98,9 +98,20 @@ class MedicalDeviceClassifier:
         if not self.client: return {"error": "AI client is not initialized."}
         system_prompt = """You are an expert in U.S. FDA medical device classification (21 CFR 862-892). Analyze the device description. Return a single, valid JSON object with keys: "classification", "rationale" (citing regulation number), "risks" (bulleted list), and "regulatory_requirements" (bulleted list). Return ONLY the valid JSON object."""
         user_prompt = f"**Device Description:**\n{device_description}"
+        raw_content = ""
         try:
             response = self.client.chat.completions.create(model=self.model, messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}], max_tokens=2500, temperature=0.2, response_format={"type": "json_object"})
-            return json.loads(response.choices[0].message.content)
+            raw_content = response.choices[0].message.content
+            
+            # FIX: Find the JSON block within the response to make parsing robust
+            json_match = re.search(r'\{.*\}', raw_content, re.DOTALL)
+            if json_match:
+                json_string = json_match.group(0)
+                return json.loads(json_string)
+            else:
+                return {"error": "AI response did not contain a valid JSON object."}
+        except json.JSONDecodeError as e:
+            return {"error": f"Failed to decode AI response as JSON: {e}. Raw response: {raw_content[:500]}"}
         except Exception as e: return {"error": f"Failed to classify the device due to an AI model error: {e}"}
 
 class RiskAssessmentGenerator:

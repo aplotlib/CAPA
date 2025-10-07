@@ -61,7 +61,7 @@ def parse_manual_input(input_str: str, target_sku: str) -> pd.DataFrame:
 
 def parse_ai_json_response(raw_content: str) -> dict:
     """
-    NEW: Robustly parses a JSON object from a string that may include markdown fences or other text.
+    Robustly parses a JSON object from a string that may include markdown fences or other text.
     """
     try:
         # Clean the string by removing markdown fences for JSON

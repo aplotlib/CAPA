@@ -3,7 +3,7 @@
 import json
 from typing import Dict, Optional, Any
 import openai
-from .utils import retry_with_backoff
+from utils import retry_with_backoff
 
 # Define the new model name as a constant
 FINE_TUNED_MODEL = "ft:gpt-4o-2024-08-06:vive-health-quality-department:qms-v2-stable-lr:CM1nuhta"

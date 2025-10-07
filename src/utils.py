@@ -7,6 +7,8 @@ import openai
 import streamlit as st
 import pandas as pd
 from io import StringIO
+import json
+import re
 
 def retry_with_backoff(retries=5, initial_delay=1, backoff_factor=2, jitter=0.1):
     """
@@ -25,7 +27,7 @@ def retry_with_backoff(retries=5, initial_delay=1, backoff_factor=2, jitter=0.1)
                     if e.status_code in [429, 500, 502, 503, 504]:
                         if i < retries - 1:
                             sleep_time = delay + random.uniform(0, jitter)
-                            st.toast(f"🤖 AI server busy. Retrying in {sleep_time:.1f}s...")
+                            st.toast(f"AI server busy. Retrying in {sleep_time:.1f}s...")
                             time.sleep(sleep_time)
                             delay *= backoff_factor
                         else:
@@ -56,3 +58,26 @@ def parse_manual_input(input_str: str, target_sku: str) -> pd.DataFrame:
     except Exception:
         st.error("Could not parse manual data.")
         return pd.DataFrame()
+
+def parse_ai_json_response(raw_content: str) -> dict:
+    """
+    NEW: Robustly parses a JSON object from a string that may include markdown fences or other text.
+    """
+    try:
+        # Clean the string by removing markdown fences for JSON
+        cleaned_content = re.sub(r'```json\s*|\s*```', '', raw_content.strip())
+        
+        # Find the JSON object using a regex that looks for the outer curly braces
+        json_match = re.search(r'\{.*\}', cleaned_content, re.DOTALL)
+        
+        if json_match:
+            json_string = json_match.group(0)
+            return json.loads(json_string)
+        else:
+            # Fallback for simple cases if regex fails
+            return json.loads(cleaned_content)
+    except json.JSONDecodeError as e:
+        # This will be caught by the calling function's exception handler
+        raise e
+    except Exception as e:
+        raise ValueError(f"An unexpected error occurred during JSON parsing: {e}")

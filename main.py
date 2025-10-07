@@ -129,7 +129,7 @@ def load_css():
             font-size: 1.05rem;
         }
         
-        /* --- TABS: FIX FOR TEXT OVERLAP --- */
+        /* --- TABS: ROBUST FIX FOR TEXT OVERLAP --- */
         .stTabs [data-baseweb="tab-list"] {
             gap: 24px;
             border-bottom: 2px solid var(--border-color);
@@ -140,13 +140,14 @@ def load_css():
             border: none;
             border-bottom: 3px solid transparent;
             margin-bottom: -2px;
-            padding: 0.75rem 0.25rem; /* Reduced horizontal padding */
+            padding: 0.75rem 0.25rem;
             font-weight: 600;
             color: var(--secondary-text-color);
             transition: all 0.2s ease-in-out;
-            display: flex; /* Use flexbox for alignment */
+            display: flex;
             align-items: center;
             gap: 8px; /* Space between icon and text */
+            white-space: nowrap; /* Prevent text from wrapping */
         }
         .stTabs [data-baseweb="tab"]:hover {
             background-color: var(--secondary-bg);
@@ -458,6 +459,7 @@ def display_capa_workflow():
     with tabs[1]: 
         create_breadcrumb_navigation("CAPA")
         add_guided_workflow(2, 6, "Define the problem and initiate the CAPA form.")
+        # CORRECTED an`d FINAL FIX for the AttributeError
         display_capa_tab = lazy_import('tabs.capa', 'display_capa_tab')
         display_capa_tab()
     with tabs[2]:

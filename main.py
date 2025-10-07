@@ -42,28 +42,22 @@ def load_css():
     """Loads a custom CSS stylesheet to improve the application's appearance."""
     st.markdown("""
     <style>
-        /* --- Greenlight Guru Inspired Theme --- */
+        /* --- AQMS Clarity Blue Theme --- */
         :root {
-            --primary-color: #2E7D32;
-            --primary-color-light: #E8F5E9;
+            --primary-color: #0052CC; /* Atlassian Blue */
+            --primary-color-light: #DEEBFF;
             --primary-bg: #FFFFFF;
-            --secondary-bg: #F5F7F8;
-            --text-color: #263238;
-            --secondary-text-color: #546E7A;
-            --border-color: #CFD8DC;
-            --font-family: 'Inter', sans-serif;
-        }
-        .breadcrumb {
-            font-size: 0.9rem;
-            color: var(--secondary-text-color);
-            margin-bottom: 1rem;
+            --secondary-bg: #F4F5F7; /* Light Gray */
+            --text-color: #172B4D; /* Dark Blue-Gray */
+            --secondary-text-color: #505F79;
+            --border-color: #DFE1E6;
+            --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
         }
 
-        /* --- Base Styles --- */
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-        
+        /* --- Base & Font Styles --- */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         html, body, [class*="st-"], [class*="css-"] {
-            font-family: var(--font-family);
+            font-family: 'Inter', var(--font-family);
             color: var(--text-color);
         }
 
@@ -86,16 +80,9 @@ def load_css():
         }
 
         /* --- Header in Main App --- */
-        .main-header {
-            background-color: transparent;
-            padding-bottom: 1rem;
-            margin-bottom: 1.5rem;
-            border-bottom: 2px solid var(--border-color);
-        }
         .main-header h1 {
             color: var(--text-color);
             font-size: 2.25rem;
-            margin-bottom: 0.25rem;
         }
         .main-header p {
             color: var(--secondary-text-color);
@@ -104,67 +91,70 @@ def load_css():
 
         /* --- Buttons --- */
         [data-testid="stButton"] button {
-            border-radius: 8px;
+            border-radius: 6px;
             font-weight: 600;
             padding: 0.5rem 1rem;
-            border: 2px solid var(--primary-color);
-            background-color: transparent;
-            color: var(--primary-color);
+            border: 1px solid var(--border-color);
+            background-color: #F4F5F7;
+            color: var(--text-color);
             transition: all 0.2s ease-in-out;
         }
         [data-testid="stButton"] button:hover {
-            border-color: #1B5E20;
-            background-color: var(--primary-color-light);
-            color: #1B5E20;
+            border-color: #c1c7d0;
+            background-color: #dfe1e6;
         }
         
         /* Primary Button Style */
         [data-testid="stButton"] button[kind="primary"] {
              background-color: var(--primary-color) !important;
              color: white !important;
-             border: 2px solid var(--primary-color) !important;
+             border: 1px solid var(--primary-color) !important;
         }
         [data-testid="stButton"] button[kind="primary"]:hover {
-             background-color: #1B5E20 !important;
-             border-color: #1B5E20 !important;
+             background-color: #0043A5 !important;
+             border-color: #0043A5 !important;
              color: white !important;
         }
 
-        /* --- Containers & Expanders --- */
+        /* --- Containers & Cards --- */
         [data-testid="stContainer"], [data-testid="stExpander"] {
             border: 1px solid var(--border-color);
-            border-radius: 10px;
+            border-radius: 8px;
             background-color: var(--primary-bg);
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
         }
         
         [data-testid="stExpander"] summary {
             font-weight: 600;
-            color: var(--text-color);
-            font-size: 1.1rem;
+            font-size: 1.05rem;
         }
         
-        /* --- Tabs --- */
+        /* --- TABS: FIX FOR TEXT OVERLAP --- */
         .stTabs [data-baseweb="tab-list"] {
-            gap: 8px;
+            gap: 24px;
             border-bottom: 2px solid var(--border-color);
+            padding-left: 12px;
         }
         .stTabs [data-baseweb="tab"] {
             background-color: transparent;
             border: none;
             border-bottom: 3px solid transparent;
             margin-bottom: -2px;
-            padding: 0.75rem 0.5rem;
+            padding: 0.75rem 0.25rem; /* Reduced horizontal padding */
             font-weight: 600;
             color: var(--secondary-text-color);
             transition: all 0.2s ease-in-out;
+            display: flex; /* Use flexbox for alignment */
+            align-items: center;
+            gap: 8px; /* Space between icon and text */
         }
-        .stTabs [data-baswebeb="tab"]:hover {
-            background-color: var(--primary-color-light);
-            border-bottom: 3px solid #AED581;
+        .stTabs [data-baseweb="tab"]:hover {
+            background-color: var(--secondary-bg);
+            border-bottom: 3px solid #AEB9C9;
+            color: var(--text-color);
         }
         .stTabs [aria-selected="true"] {
-            color: var(--primary-color);
+            color: var(--primary-color) !important;
             border-bottom: 3px solid var(--primary-color) !important;
         }
         
@@ -174,6 +164,7 @@ def load_css():
             border: 1px solid var(--border-color);
             border-radius: 8px;
             padding: 1rem;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
         }
     </style>
     """, unsafe_allow_html=True)
@@ -223,7 +214,7 @@ def initialize_session_state():
         'coq_results': None,
         'fmea_rows': [],
         'manual_content': {},
-        'project_charter_data': {} # NEW
+        'project_charter_data': {}
     }
     for key, value in defaults.items():
         if key not in st.session_state:

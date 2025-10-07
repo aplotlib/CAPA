@@ -3,6 +3,7 @@
 import json
 from typing import Dict, Optional, Any
 import openai
+# FIX: Changed relative import to absolute import
 from utils import retry_with_backoff
 
 # Define the new model name as a constant
@@ -157,7 +158,6 @@ class AIHumanFactorsHelper:
         if not self.client:
             return {"error": "AI client is not initialized."}
         
-        # FIX: Added more robust instructions to ensure valid JSON output
         system_prompt = """
         You are a Human Factors Engineering (HFE) expert drafting a report that aligns with FDA guidance.
         A user has provided high-level answers to key questions. Your task is to expand these answers into a comprehensive, professionally worded draft for all sections of an HFE report.
@@ -243,7 +243,6 @@ class AIDesignControlsTriager:
         if not self.client:
             return {"error": "AI client is not initialized."}
 
-        # NEW: Enhanced prompt for higher quality and traceability matrix
         system_prompt = """
         You are a Senior R&D Engineer and Regulatory Affairs Specialist, an expert in FDA 21 CFR 820.30 and ISO 13485.
         Your task is to draft a comprehensive Design Controls document for a new medical device based on high-level user inputs.

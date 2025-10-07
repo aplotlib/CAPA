@@ -3,14 +3,16 @@
 import streamlit as st
 from datetime import date
 from src.audit_logger import AuditLogger
-from src.document_generator import DocumentGenerator
+# FIX: DocumentGenerator is now initialized in main.py and stored in session_state
+# from src.document_generator import DocumentGenerator 
 
 def display_exports_tab():
     st.header("📄 Document Exports")
     st.info("Generate a single, comprehensive project summary document by selecting the sections you want to include.")
     
     logger = AuditLogger()
-    doc_generator = DocumentGenerator()
+    # FIX: Use the globally initialized doc_generator from session_state
+    doc_generator = st.session_state.doc_generator
 
     with st.container(border=True):
         export_options = st.multiselect(

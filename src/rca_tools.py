@@ -3,7 +3,8 @@
 from typing import Dict, List
 import openai
 import json
-from .utils import retry_with_backoff
+# FIX: Changed relative import to absolute import
+from utils import retry_with_backoff
 
 class RootCauseAnalyzer:
     """
@@ -62,7 +63,6 @@ class RootCauseAnalyzer:
                 temperature=0.7,
                 response_format={"type": "json_object"}
             )
-            # FIX: Correctly parse the JSON response from the OpenAI API client
             parsed_result = json.loads(response.choices[0].message.content)
             return parsed_result.get("causes", [])
         except Exception as e:

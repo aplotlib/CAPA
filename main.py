@@ -21,6 +21,8 @@ sys.path.insert(0, SRC_DIR)
 
 # FIX: Centralize AI helper initialization with a factory
 from ai_factory import AIHelperFactory
+# NEW: Import the audit logger
+from audit_logger import AuditLogger
 
 # Lazy import function to load modules only when needed
 def lazy_import(module_name, class_name=None):
@@ -246,7 +248,8 @@ def initialize_components():
     DataProcessor = lazy_import('data_processing', 'DataProcessor')
     DocumentGenerator = lazy_import('document_generator', 'DocumentGenerator')
     st.session_state.data_processor = DataProcessor()
-    st.session_state.doc_generator = DocumentGenerator() # Ensure doc generator is globally available
+    st.session_state.doc_generator = DocumentGenerator()
+    st.session_state.audit_logger = AuditLogger() # Initialize logger
 
     # Initialize all AI components at once if API key is present
     if not st.session_state.api_key_missing:
@@ -288,7 +291,7 @@ def check_password():
 
 def display_sidebar():
     """Renders all configuration and data input widgets in the sidebar."""
-    from src.utils import parse_manual_input
+    from utils import parse_manual_input
     with st.sidebar:
         logo_base64 = get_local_image_as_base64("logo.png")
         if logo_base64:
@@ -296,7 +299,6 @@ def display_sidebar():
         
         st.header("Configuration")
         
-        # Workflow mode selector with change detection
         st.session_state.workflow_mode = st.selectbox(
             "Workflow Mode",
             ["Product Development", "CAPA Management"]
@@ -312,7 +314,6 @@ def display_sidebar():
             st.session_state.unit_cost = st.number_input("Unit Cost ($)", value=st.session_state.get('unit_cost', 0.0), step=1.0, format="%.2f")
             st.session_state.sales_price = st.number_input("Sales Price ($)", value=st.session_state.get('sales_price', 0.0), step=1.0, format="%.2f")
 
-        # Only show post-market data input for CAPA Management workflow
         if st.session_state.workflow_mode == "CAPA Management":
             st.header("Post-Market Data Input")
             st.caption("For CAPA Management & Kaizen")
@@ -359,13 +360,29 @@ def process_data(sales_df: pd.DataFrame, returns_df: pd.DataFrame):
         st.session_state.returns_data = st.session_state.data_processor.process_returns_data(returns_df)
         report_days = (st.session_state.end_date - st.session_state.start_date).days
         
-        st.session_state.analysis_results = run_cached_analysis(
+        results = run_cached_analysis(
             st.session_state.sales_data, 
             st.session_state.returns_data,
             report_days, 
             st.session_state.unit_cost,
             st.session_state.sales_price
         )
+        st.session_state.analysis_results = results
+
+        # NEW: Enhanced audit logging
+        if results and 'return_summary' in results and not results['return_summary'].empty:
+            summary = results['return_summary'].iloc[0]
+            st.session_state.audit_logger.log_action(
+                user="system",
+                action="run_data_analysis",
+                entity="dashboard_metrics",
+                details={
+                    "sku": summary.get('sku'),
+                    "return_rate": f"{summary.get('return_rate', 0):.2f}%",
+                    "total_sold": summary.get('total_sold'),
+                    "total_returned": summary.get('total_returned')
+                }
+            )
     st.toast("✅ Analysis complete!", icon="🎉")
 
 def process_uploaded_files(uploaded_files: list):
@@ -421,31 +438,26 @@ def display_main_app():
     
     display_sidebar()
 
-    # Dynamic tab loading based on workflow
     if st.session_state.workflow_mode == "CAPA Management":
         display_capa_workflow()
     elif st.session_state.workflow_mode == "Product Development":
         display_product_dev_workflow()
 
-    # AI Assistant (always available if API key exists)
     if not st.session_state.api_key_missing:
         with st.expander("💬 AI Assistant (Context-Aware)"):
             if user_query := st.chat_input("Ask the AI about your current analysis..."):
                 with st.spinner("AI is synthesizing an answer..."):
-                    # FIX: AI Context Helper is now reliably initialized by the factory
                     response = st.session_state.ai_context_helper.generate_response(user_query)
                     st.info(response)
 
 def display_capa_workflow():
     """Display CAPA Management workflow tabs"""
-    # Lazy load tab modules
     tab_list = ["Dashboard", "CAPA", "RCA", "CAPA Closure", "Risk & Safety", "Human Factors", 
                 "Vendor Comms", "Compliance", "Cost of Quality", "Final Review", "Exports"]
     icons = ["📈", "📝", "🔬", "✅", "⚠️", "👥", "📬", "⚖️", "💲", "🔍", "📄"]
     
     tabs = st.tabs([f"{icon} {name}" for icon, name in zip(icons, tab_list)])
     
-    # Load tab modules on demand
     with tabs[0]: 
         create_breadcrumb_navigation("Dashboard")
         add_guided_workflow(1, 6, "Review initial performance metrics and AI insights.")
@@ -548,7 +560,6 @@ def main():
     load_css()
     initialize_session_state()
 
-    # Load config from YAML
     try:
         with open("config.yaml", "r") as f:
             st.session_state.config = yaml.safe_load(f)

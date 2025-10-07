@@ -11,6 +11,28 @@ def display_exports_tab():
     logger = AuditLogger()
     doc_generator = st.session_state.doc_generator
 
+    # NEW: Project Charter Export
+    if st.session_state.get('project_charter_data'):
+        with st.container(border=True):
+            st.subheader("Project Charter")
+            charter_data = st.session_state.project_charter_data
+            if st.button("Generate Project Charter Document", use_container_width=True):
+                with st.spinner("Generating charter..."):
+                    doc_buffer = doc_generator.generate_project_charter_docx(charter_data)
+                    st.download_button(
+                        "📥 Download Project Charter (.docx)", doc_buffer,
+                        f"Project_Charter_{charter_data.get('project_name', 'project').replace(' ', '_')}_{date.today()}.docx",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True,
+                        type="primary"
+                    )
+                    logger.log_action(
+                        user="current_user",
+                        action="export_document",
+                        entity="project_charter",
+                        details={"project_name": charter_data.get('project_name'), "format": "docx"}
+                    )
+
     with st.container(border=True):
         st.subheader("Comprehensive Project Report")
         export_options = st.multiselect(

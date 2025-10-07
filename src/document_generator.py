@@ -182,6 +182,46 @@ class DocumentGenerator:
             doc.add_heading(title, level=3)
             doc.add_paragraph(str(hf_data.get(key, "No data provided.")))
 
+    def _add_section_heading(self, doc, text: str):
+        """Helper to add a bolded section heading."""
+        p = doc.add_paragraph()
+        p.add_run(text).bold = True
+
+    def generate_project_charter_docx(self, charter_data: Dict[str, Any]) -> BytesIO:
+        """
+        NEW: Generates a project charter Word document.
+        """
+        doc = Document()
+        doc.add_heading(charter_data.get('project_name', 'Project Charter'), level=1)
+        doc.add_paragraph(f"Date: {date.today().strftime('%Y-%m-%d')}")
+        
+        doc.add_heading("1. Project Overview & Business Case", level=2)
+        self._add_section_heading(doc, "Problem Statement")
+        doc.add_paragraph(charter_data.get('problem_statement', 'N/A'))
+        self._add_section_heading(doc, "Project Goal")
+        doc.add_paragraph(charter_data.get('project_goal', 'N/A'))
+        self._add_section_heading(doc, "Project Scope")
+        doc.add_paragraph(charter_data.get('scope', 'N/A'))
+
+        doc.add_heading("2. Regulatory & Quality Strategy", level=2)
+        self._add_section_heading(doc, "Device Classification (FDA)")
+        doc.add_paragraph(charter_data.get('device_classification', 'N/A'))
+        self._add_section_heading(doc, "Applicable Standards & Regulations")
+        standards = charter_data.get('applicable_standards', [])
+        if standards:
+            for standard in standards:
+                doc.add_paragraph(standard, style='List Bullet')
+        else:
+            doc.add_paragraph("N/A")
+
+        doc.add_heading("3. Key Stakeholders", level=2)
+        doc.add_paragraph(charter_data.get('stakeholders', 'N/A'))
+        
+        buffer = BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+        return buffer
+
     def generate_scar_docx(self, capa_data: Dict[str, Any], vendor_name: str) -> BytesIO:
         # This function remains the same
         pass

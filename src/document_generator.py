@@ -105,7 +105,7 @@ class DocumentGenerator:
         Generates a single comprehensive report based on selected sections.
         """
         doc = Document()
-        doc.add_heading("Project Summary Report", level=1)
+        doc.add_heading("ORION Project Summary Report", level=1)
         
         summary_text = self._generate_executive_summary(session_data)
         doc.add_heading("Executive Summary", level=2)
@@ -113,9 +113,6 @@ class DocumentGenerator:
         
         if "CAPA Form" in selected_sections and session_data.get('capa_data'):
             self._generate_capa_form_section(doc, session_data['capa_data'])
-
-        if "CAPA Closure" in selected_sections and session_data.get('capa_closure_data'):
-            self._generate_capa_closure_section(doc, session_data['capa_closure_data'])
 
         if "FMEA" in selected_sections and session_data.get('fmea_data') is not None:
             self._add_df_as_table(doc, session_data['fmea_data'], "Failure Mode and Effects Analysis (FMEA)")
@@ -138,26 +135,53 @@ class DocumentGenerator:
         return buffer
 
     def _generate_capa_form_section(self, doc: Document, capa_data: Dict[str, Any]):
+        """
+        Generates the CAPA section based on the Greenlight Guru style template.
+        """
         doc.add_page_break()
-        doc.add_heading("Corrective and Preventive Action (CAPA) Details", level=2)
-        table = doc.add_table(rows=1, cols=2, style='Table Grid')
+        doc.add_heading("CAPA Report", level=1)
+        
+        # Header Info
+        table_info = doc.add_table(rows=0, cols=2)
+        table_info.style = 'Table Grid'
+        self._add_main_table_row(table_info, "CAPA Number:", capa_data.get('capa_number', ''))
+        self._add_main_table_row(table_info, "Date:", str(capa_data.get('date', '')))
+        self._add_main_table_row(table_info, "Prepared By:", capa_data.get('prepared_by', ''))
+        self._add_main_table_row(table_info, "Product:", capa_data.get('product_name', ''))
+        
+        doc.add_paragraph() 
+
+        # Main Body - Matching the PDF template structure specifically
+        table = doc.add_table(rows=0, cols=2)
+        table.style = 'Table Grid'
+        table.autofit = False 
         table.columns[0].width = Inches(2.0)
-        table.columns[1].width = Inches(5.5)
-        field_map = {
-            "CAPA Number": capa_data.get('capa_number', 'N/A'),
-            "Product Name / Model": capa_data.get('product_name', 'N/A'),
-            "Initiation Date": capa_data.get('date', date.today()).strftime('%Y-%m-%d'),
-            "Problem Description": capa_data.get('issue_description', ''),
-            "Immediate Actions/Corrections": capa_data.get('immediate_actions', ''),
-            "Root Cause Analysis": capa_data.get('root_cause', ''),
-            "Corrective Action Plan": capa_data.get('corrective_action', ''),
-            "Preventive Action Plan": capa_data.get('preventive_action', ''),
-            "Effectiveness Check Plan": capa_data.get('effectiveness_verification_plan', '')
-        }
-        for heading, content in field_map.items():
-            self._add_main_table_row(table, heading, content)
-    
+        table.columns[1].width = Inches(5.0)
+
+        fields = [
+            ("Issue", "issue_description"),
+            ("Immediate Actions/Corrections", "immediate_actions"),
+            ("Root Cause", "root_cause"),
+            ("Corrective Action", "corrective_action"),
+            ("Implementation of Corrective Actions", "implementation_of_corrective_actions"),
+            ("Preventive Action", "preventive_action"),
+            ("Implementation of Preventive Actions", "implementation_of_preventive_actions"),
+            ("Additional Comments", "additional_comments"),
+            ("Effectiveness Check Plan", "effectiveness_verification_plan"),
+            ("Effectiveness Check Findings", "effectiveness_check_findings"),
+        ]
+
+        for label, key in fields:
+            self._add_main_table_row(table, label, capa_data.get(key, ""))
+
+        # Signatures
+        doc.add_paragraph()
+        doc.add_paragraph("__________________________\nSignature, Principal Investigator")
+        doc.add_paragraph(f"Date: {capa_data.get('closure_date', '___________')}")
+
     def _generate_capa_closure_section(self, doc: Document, closure_data: Dict[str, Any]):
+        # This method is maintained for backward compatibility but is largely superseded 
+        # by _generate_capa_form_section which now includes closure fields.
         if not closure_data.get('original_capa'): return
         doc.add_page_break()
         doc.add_heading("CAPA Effectiveness Check & Closure", level=2)
@@ -223,7 +247,7 @@ class DocumentGenerator:
         return buffer
 
     def generate_scar_docx(self, capa_data: Dict[str, Any], vendor_name: str) -> BytesIO:
-        # This function remains the same
+        # Placeholder for SCAR generation logic
         pass
 
     def generate_capa_tracker_excel(self, session_data: Dict[str, Any]) -> BytesIO:

@@ -1,12 +1,14 @@
 app:
   name: "AQMS"
-  version: "2.0.0"
+  version: "2.1.0"
 quality_thresholds:
   critical_return_rate: 15
   warning_return_rate: 10
 ai_models:
-  default: "gpt-4o"
-  fine_tuned: "ft:gpt-4o-2024-08-06:vive-health-quality-department:qms-v2-stable-lr:CM1nuhta"
+  # Use Mini for grammar, simple rewrites, and basic summaries (Faster/Cheaper)
+  fast: "gpt-4o-mini"
+  # Use Standard 4o for complex reasoning, root cause analysis, and regulatory drafting
+  reasoning: "gpt-4o"
 export_formats:
   - docx
   - pdf

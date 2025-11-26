@@ -13,6 +13,11 @@ def display_manual_writer_tab():
         st.error("AI features are disabled. Please configure your API key to use this feature.")
         return
 
+    # --- INITIALIZATION FIX ---
+    # Ensure the container for manual content exists in session state
+    if 'manual_content' not in st.session_state:
+        st.session_state.manual_content = {}
+
     # --- Step 1: User Input ---
     with st.container(border=True):
         st.subheader("Step 1: Provide Key Product Information")
@@ -63,15 +68,21 @@ def display_manual_writer_tab():
                             "Technical Specifications"
                         ]
                         
-                        # Generate each section
+                        # Generate each section safely
                         for section in manual_sections:
-                            st.session_state.manual_content[section] = st.session_state.manual_writer.generate_manual_section(
-                                section_title=section,
-                                product_name=product_info['name'],
-                                product_ifu=product_info['ifu'],
-                                user_inputs=user_inputs,
-                                target_language=target_language
-                            )
+                            try:
+                                content = st.session_state.manual_writer.generate_manual_section(
+                                    section_title=section,
+                                    product_name=product_info['name'],
+                                    product_ifu=product_info['ifu'],
+                                    user_inputs=user_inputs,
+                                    target_language=target_language
+                                )
+                                st.session_state.manual_content[section] = content
+                            except Exception as e:
+                                st.error(f"Error generating section '{section}': {e}")
+                                st.session_state.manual_content[section] = "Error generating content."
+
                     st.success("✅ Manual draft generated successfully!")
                 else:
                     st.warning("Please fill in all the product information fields to generate the manual.")

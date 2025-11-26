@@ -19,19 +19,3 @@ backgroundColor = "#0B0E14" # Deep Space
 secondaryBackgroundColor = "#151922" # Panel Background
 textColor = "#E0E6ED" # High contrast text
 font = "sans serif"
-
-# Explicit Light Mode Overrides for Accessibility
-[theme.light]
-base = "light"
-primaryColor = "#007BB5" # Darker Cyan for visibility on white
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F0F2F6"
-textColor = "#1A202C"
-
-# Explicit Dark Mode Overrides
-[theme.dark]
-base = "dark"
-primaryColor = "#00F3FF"
-backgroundColor = "#0B0E14"
-secondaryBackgroundColor = "#151922"
-textColor = "#E0E6ED"

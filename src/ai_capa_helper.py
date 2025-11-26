@@ -18,7 +18,7 @@ class AICAPAHelper:
         if api_key:
             try:
                 self.client = openai.OpenAI(api_key=api_key)
-                self.model = "gpt-4o" # Use robust model for general editing/refining
+                self.model = "gpt-4o" 
             except Exception as e:
                 print(f"Failed to initialize AI helper: {e}")
 
@@ -35,11 +35,12 @@ class AICAPAHelper:
         You are a Quality Assurance Regulatory Expert for Medical Devices (ISO 13485 / 21 CFR 820).
         Your task is to rewrite the user's rough notes for the CAPA field: "{field_name}".
         
-        Rules:
-        1. Make the language professional, objective, and precise.
-        2. Do NOT invent facts. If the input is ambiguous, ask a clarifying question in [brackets].
-        3. Use active voice where appropriate.
-        4. Focus on clarity and "auditor-readiness".
+        **Guiding Principles (from '15 Steps to Risk-Based CAPA'):**
+        1. **Risk-Based:** Ensure the language reflects the appropriate level of urgency and severity.
+        2. **Fact-Based:** Focus on objective evidence (Man, Machine, Material, Method, Environment).
+        3. **Auditor-Ready:** Use professional, precise technical writing (active voice).
+        
+        Do NOT invent facts. Refine only the provided input.
         """
         
         user_prompt = f"""
@@ -57,7 +58,7 @@ class AICAPAHelper:
                     {"role": "user", "content": user_prompt}
                 ],
                 max_tokens=500,
-                temperature=0.3 # Lower temperature for more deterministic/professional output
+                temperature=0.3 
             )
             return response.choices[0].message.content.strip()
         except Exception as e:

@@ -59,10 +59,9 @@ def display_capa_workflow():
     data = st.session_state.capa_data
 
     # --- WORKFLOW NAVIGATION ---
-    # UPDATED: Added "Review (QRB)" step as per '15 Steps' Infographic Step #3
+    # Improved Navigation: Clearer steps
     steps = ["1. Intake", "2. Review (QRB)", "3. Investigation", "4. Actions", "5. Verification", "6. Closure"]
     
-    # Initialize step if not present
     if "capa_active_step" not in st.session_state:
         st.session_state.capa_active_step = steps[0]
 
@@ -82,8 +81,27 @@ def display_capa_workflow():
     # === STEP 1: INTAKE ===
     if st.session_state.capa_active_step == steps[0]:
         st.subheader("🚀 Incident Intake")
-        st.info("Step 1: Create a request and outline possible sources.")
+        st.info("Step 1: Describe the issue clearly. Use Voice-to-Text for speed.")
         
+        # --- Voice to Text Integration ---
+        with st.container(border=True):
+            st.markdown("#### 🎙️ Voice Input")
+            audio_val = st.audio_input("Record Issue Description")
+            
+            if audio_val is not None:
+                # Check if we have already transcribed this specific audio to avoid loop
+                if st.session_state.get("last_audio_id") != id(audio_val):
+                    with st.status("Transcribing audio...", expanded=True) as status:
+                        if st.session_state.api_key_missing:
+                            status.update(label="AI Key Missing", state="error")
+                            st.error("Cannot transcribe without API Key.")
+                        else:
+                            text = st.session_state.ai_capa_helper.transcribe_audio(audio_val)
+                            st.session_state.capa_data['issue_description'] = text
+                            st.session_state.last_audio_id = id(audio_val)
+                            status.update(label="Transcription Complete!", state="complete")
+                            st.rerun()
+
         c1, c2 = st.columns(2)
         with c1:
             data['capa_number'] = st.text_input("CAPA ID", value=data.get('capa_number'))
@@ -93,13 +111,7 @@ def display_capa_workflow():
             source_opts = ['Customer Complaint', 'Internal Audit', 'Nonconforming Product', 'Trend Analysis', 'Management Review']
             data['source_of_issue'] = st.pills("Source", source_opts, selection_mode="single", default=data.get('source_of_issue', 'Customer Complaint'))
 
-        st.markdown("#### Issue Description")
-        
-        # Audio Input
-        audio_val = st.audio_input("Record Issue Description")
-        if audio_val:
-            st.info("🎤 Audio captured.")
-        
+        st.markdown("#### Issue Details")
         ai_assist_field("Detailed Description", "issue_desc", "Details of the non-conformity...", height=150, field_key="issue_description")
         ai_assist_field("Immediate Actions (Containment)", "imm_actions", "How will we 'stop the bleeding'?", height=100, field_key="immediate_actions")
 
@@ -109,10 +121,10 @@ def display_capa_workflow():
             st.toast("Request submitted to QRB!", icon="✅")
             st.rerun()
 
-    # === STEP 2: REVIEW (QRB) - NEW ===
+    # === STEP 2: REVIEW (QRB) ===
     elif st.session_state.capa_active_step == steps[1]:
         st.subheader("⚖️ Quality Review Board (QRB) Assessment")
-        st.info("Step 3 & 4: Review the request to determine if a full investigation is warranted based on risk.")
+        st.info("Step 3 & 4: Review risk to determine if full investigation is warranted.")
         
         st.markdown(f"**Issue:** {data.get('issue_description', 'N/A')}")
         
@@ -141,7 +153,7 @@ def display_capa_workflow():
             if st.button("🚫 Reject Request", use_container_width=True):
                 data['status'] = 'Rejected'
                 data['closure_date'] = date.today()
-                st.warning("CAPA Request Rejected. Please document rationale in comments.")
+                st.warning("CAPA Request Rejected.")
                 st.session_state.capa_active_step = steps[5] # Jump to Closure
                 st.rerun()
 
@@ -182,7 +194,7 @@ def display_capa_workflow():
     # === STEP 5: VERIFICATION ===
     elif st.session_state.capa_active_step == steps[4]:
         st.subheader("✅ Effectiveness Verification")
-        st.info("Step 13 & 14: Verify that the actions were effective and the issue is resolved.")
+        st.info("Step 13 & 14: Verify that the actions were effective.")
         
         ai_assist_field("Effectiveness Check Plan", "eff_plan", "How will we prove it worked?", height=100, field_key="effectiveness_verification_plan")
         ai_assist_field("Effectiveness Findings / Evidence", "eff_findings", "Results of the check...", height=150, field_key="effectiveness_check_findings")
@@ -213,25 +225,28 @@ def display_capa_workflow():
         data['closed_by'] = c1.text_input("Closed By", value=data.get('closed_by', ''))
         data['closure_date'] = c2.date_input("Closure Date", value=data.get('closure_date', date.today()))
         
-        if st.button("🔒 FORMALLY CLOSE CAPA", type="primary", use_container_width=True):
-            is_valid, errors, _ = validate_capa_data(data)
-            # Relax validation for Rejected CAPAs
-            if data.get('status') != 'Rejected' and errors:
-                for e in errors: st.error(e)
-            else:
-                data['status'] = 'Closed'
-                st.balloons()
-                st.toast("CAPA Closed Successfully!", icon="🎉")
-
-    # === EXPORT ===
-    st.markdown("---")
-    with st.expander("📄 Document Actions", expanded=True):
-        if st.button("📥 Export CAPA (.docx)"):
-             doc_buffer = st.session_state.doc_generator.generate_summary_docx(st.session_state, ["CAPA Form"])
-             st.download_button(
-                label="Download DOCX",
-                data=doc_buffer,
-                file_name=f"{data.get('capa_number')}.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                key="dl_capa_docx"
-             )
+        # UI UX Improvement: Clearer distinction between Drafting and Closing
+        st.markdown("### 📥 External Review")
+        st.info("Before formally closing, export the document to Word for Google Docs/Sharepoint review.")
+        
+        col_export, col_close = st.columns(2)
+        with col_export:
+             if st.button("📄 Download Draft for Review (.docx)", use_container_width=True):
+                 doc_buffer = st.session_state.doc_generator.generate_summary_docx(st.session_state, ["CAPA Form"])
+                 st.download_button(
+                    label="Click to Save DOCX",
+                    data=doc_buffer,
+                    file_name=f"{data.get('capa_number')}_DRAFT.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    key="dl_capa_docx_draft"
+                 )
+        
+        with col_close:
+            if st.button("🔒 FORMALLY CLOSE CAPA", type="primary", use_container_width=True):
+                is_valid, errors, _ = validate_capa_data(data)
+                if data.get('status') != 'Rejected' and errors:
+                    for e in errors: st.error(e)
+                else:
+                    data['status'] = 'Closed'
+                    st.balloons()
+                    st.toast("CAPA Closed Successfully!", icon="🎉")

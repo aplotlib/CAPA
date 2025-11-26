@@ -1,80 +1,193 @@
-# src/ai_capa_helper.py
+# src/tabs/capa.py
 
-import json
-import re
-from typing import Dict, Optional, Any
-import openai
-from utils import retry_with_backoff, parse_ai_json_response
+import streamlit as st
+from datetime import date
+import pandas as pd
+from compliance import validate_capa_data
 
-FINE_TUNED_MODEL = "ft:gpt-4o-2024-08-06:vive-health-quality-department:qms-v2-stable-lr:CM1nuhta"
+def ai_assist_field(label, key_suffix, help_text="", height=100, field_key=None):
+    """
+    Helper widget that renders a text area with an optional AI Refine button.
+    """
+    col_main, col_ai = st.columns([5, 1])
+    
+    # Retrieve current value
+    current_val = st.session_state.capa_data.get(field_key, "")
+    
+    with col_main:
+        user_input = st.text_area(
+            label, 
+            value=current_val, 
+            height=height, 
+            help=help_text, 
+            key=f"input_{key_suffix}"
+        )
+        # Update session state immediately on change
+        st.session_state.capa_data[field_key] = user_input
 
-class AICAPAHelper:
-    """AI assistant for CAPA workflows."""
+    with col_ai:
+        st.write("") # Spacer
+        st.write("") 
+        if st.button("✨ Refine", key=f"btn_{key_suffix}", help="Use AI to polish this text"):
+            if st.session_state.api_key_missing:
+                st.error("No API Key")
+            else:
+                with st.spinner("Polishing..."):
+                    refined = st.session_state.ai_capa_helper.refine_capa_input(
+                        field_name=label,
+                        rough_input=user_input,
+                        product_context=st.session_state.product_info['name']
+                    )
+                    st.session_state.capa_data[field_key] = refined
+                    st.rerun()
 
-    def __init__(self, api_key: Optional[str] = None):
-        self.client = None
-        if api_key:
-            try:
-                self.client = openai.OpenAI(api_key=api_key)
-                self.model = "gpt-4o" # Fallback to standard robust model for general editing
-            except Exception as e:
-                print(f"Failed to initialize AI helper: {e}")
+def display_capa_tab():
+    st.header("⚡ CAPA LIFECYCLE HUB")
+    
+    # Ensure CAPA data init
+    if 'capa_data' not in st.session_state:
+        st.session_state.capa_data = {
+            'capa_number': f"CAPA-{date.today().strftime('%Y%m%d')}-001",
+            'date': date.today(),
+            'status': 'Open'
+        }
+    data = st.session_state.capa_data
 
-    @retry_with_backoff()
-    def refine_capa_input(self, field_name: str, rough_input: str, product_context: str) -> str:
-        """
-        Takes rough user notes for a specific CAPA field and refines them into
-        professional, regulatory-compliant language (FDA/ISO).
-        """
-        if not self.client: return "AI client not initialized."
-        if not rough_input or len(rough_input) < 3: return rough_input
+    # --- Status Header ---
+    status_color = {
+        'Open': 'red',
+        'Investigation': 'orange',
+        'Actions Implementation': 'yellow',
+        'Verification': 'blue',
+        'Closed': 'green'
+    }.get(data.get('status', 'Open'), 'grey')
+    
+    st.markdown(f"""
+    <div style="padding: 10px; border: 1px solid {status_color}; border-radius: 5px; background: rgba(0,0,0,0.3); display: flex; justify-content: space-between; align-items: center;">
+        <div><strong>ACTIVE CAPA:</strong> <span style="font-family:'Fira Code'; color:var(--neon-cyan);">{data.get('capa_number')}</span></div>
+        <div><strong>STATUS:</strong> <span style="color:{status_color}; font-weight:bold;">{data.get('status', 'Open').upper()}</span></div>
+    </div>
+    <br>
+    """, unsafe_allow_html=True)
 
-        system_prompt = f"""
-        You are a Quality Assurance Regulatory Expert for Medical Devices (ISO 13485 / 21 CFR 820).
-        Your task is to rewrite the user's rough notes for the CAPA field: "{field_name}".
+    # --- Workflow Tabs ---
+    tabs = st.tabs(["1. INTAKE (Fast Track)", "2. INVESTIGATION", "3. ACTIONS", "4. VERIFICATION", "5. CLOSURE"])
+
+    # === TAB 1: INTAKE ===
+    with tabs[0]:
+        st.caption("🚀 Optimized for quick entry by Product Developers.")
         
-        Rules:
-        1. Make the language professional, objective, and precise.
-        2. Do NOT invent facts. If the input is ambiguous, ask a clarifying question in [brackets].
-        3. Use active voice where appropriate.
-        4. Focus on clarity and "auditor-readiness".
-        """
+        c1, c2 = st.columns(2)
+        with c1:
+            data['capa_number'] = st.text_input("CAPA ID", value=data.get('capa_number'))
+            data['product_name'] = st.text_input("Product/Asset", value=data.get('product_name', st.session_state.product_info['sku']))
+        with c2:
+            data['date'] = st.date_input("Initiation Date", value=data.get('date'))
+            data['prepared_by'] = st.text_input("Reporter / Prepared By", value=data.get('prepared_by', ''))
+
+        st.divider()
         
-        user_prompt = f"""
-        **Product Context:** {product_context}
-        **Rough Input:** {rough_input}
+        source_opts = ['Internal Audit', 'Customer Complaint', 'Nonconforming Product', 'Trend Analysis', 'Other']
+        data['source_of_issue'] = st.selectbox("Source of Issue", source_opts, index=source_opts.index(data.get('source_of_issue')) if data.get('source_of_issue') in source_opts else 1)
         
-        **Refined Output:**
-        """
+        ai_assist_field(
+            "Issue Description", 
+            "issue_desc", 
+            "What was the issue identified? Include source details.", 
+            height=150, 
+            field_key="issue_description"
+        )
+        
+        ai_assist_field(
+            "Immediate Actions / Corrections", 
+            "imm_actions", 
+            "How will we 'stop the bleeding' immediately?", 
+            height=100, 
+            field_key="immediate_actions"
+        )
+        
+        if st.button("💾 Save Intake & Advance", type="primary"):
+            data['status'] = 'Investigation'
+            st.success("Intake saved. Proceeding to Investigation.")
 
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                max_tokens=500,
-                temperature=0.3 # Lower temperature for more deterministic/professional output
-            )
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            return f"Error refining input: {e}"
+    # === TAB 2: INVESTIGATION (RCA) ===
+    with tabs[1]:
+        st.info("Perform Root Cause Analysis (Fishbone/5 Whys) before filling this section.")
+        
+        ai_assist_field(
+            "Root Cause Analysis Findings", 
+            "root_cause", 
+            "What is the underlying cause? Attach findings.", 
+            height=200, 
+            field_key="root_cause"
+        )
+        
+        col1, col2 = st.columns(2)
+        with col1:
+             st.markdown("**Risk Severity**")
+             data['risk_severity'] = st.slider("Severity", 1, 5, value=data.get('risk_severity', 3))
+        with col2:
+             st.markdown("**Risk Probability**")
+             data['risk_probability'] = st.slider("Probability", 1, 5, value=data.get('risk_probability', 3))
 
-    # ... (Keep existing generate_capa_suggestions method) ...
-    @retry_with_backoff()
-    def generate_capa_suggestions(self, issue_summary: str, analysis_results: Dict) -> Dict[str, str]:
-        """Generate AI suggestions for CAPA form fields (Legacy/Full Auto mode)."""
-        if not self.client: return {}
+    # === TAB 3: ACTIONS ===
+    with tabs[2]:
+        st.subheader("Corrective & Preventive Action Plan")
+        
+        with st.expander("Corrective Actions (Fix the specific issue)", expanded=True):
+            ai_assist_field("Corrective Action Description", "ca_desc", "How will we correct the issue?", height=100, field_key="corrective_action")
+            ai_assist_field("Implementation Plan (CA)", "ca_impl", "Who will do what by when?", height=100, field_key="implementation_of_corrective_actions")
+        
+        with st.expander("Preventive Actions (Prevent recurrence)", expanded=True):
+            ai_assist_field("Preventive Action Description", "pa_desc", "How will we prevent recurrence?", height=100, field_key="preventive_action")
+            ai_assist_field("Implementation Plan (PA)", "pa_impl", "Who will do what by when?", height=100, field_key="implementation_of_preventive_actions")
 
-        summary = analysis_results.get('return_summary', {}).iloc[0] if not analysis_results.get('return_summary', {}).empty else {}
-        context = f"""
-        Issue Summary: {issue_summary}
-        SKU: {summary.get('sku', 'N/A')}
-        Return Rate: {summary.get('return_rate', 0):.2f}%
-        """
-        # ... (rest of the existing method remains unchanged) ...
-        # (For brevity, assuming the rest of the file follows the original structure provided)
-        return {"error": "Method not fully implemented in this snippet, refer to original file."}
+    # === TAB 4: VERIFICATION ===
+    with tabs[3]:
+        st.subheader("Effectiveness Check")
+        st.caption("Plan how you will verify the fix works.")
+        
+        ai_assist_field(
+            "Effectiveness Check Plan", 
+            "eff_plan", 
+            "Criteria for success?", 
+            height=100, 
+            field_key="effectiveness_verification_plan"
+        )
+        
+        st.divider()
+        st.markdown("### Post-Implementation Findings")
+        ai_assist_field(
+            "Effectiveness Check Findings", 
+            "eff_findings", 
+            "Objective evidence that the action worked.", 
+            height=150, 
+            field_key="effectiveness_check_findings"
+        )
 
-# ... (Include other helper classes from original file: AIEmailDrafter, etc.) ...
+    # === TAB 5: CLOSURE ===
+    with tabs[4]:
+        st.subheader("Final Review & Sign-off")
+        
+        if not data.get('effectiveness_check_findings'):
+            st.warning("⚠️ Effectiveness findings are missing.")
+        
+        c1, c2 = st.columns(2)
+        data['closed_by'] = c1.text_input("Closed By (Principal Investigator)", value=data.get('closed_by', ''))
+        data['closure_date'] = c2.date_input("Closure Date", value=data.get('closure_date', date.today()))
+        
+        data['additional_comments'] = st.text_area("Additional Comments / Residual Risk", value=data.get('additional_comments', ''))
+
+        st.divider()
+        if st.button("🔒 FORMALLY CLOSE CAPA", type="primary", use_container_width=True):
+            is_valid, errors, _ = validate_capa_data(data)
+            if errors:
+                for e in errors: st.error(e)
+            else:
+                data['status'] = 'Closed'
+                st.balloons()
+                st.success(f"CAPA {data['capa_number']} Closed Successfully.")
+                # Log to audit trail
+                st.session_state.audit_logger.log_action(
+                    user="current_user", action="close_capa", entity="capa", details={"id": data['capa_number']}
+                )

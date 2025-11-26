@@ -4,6 +4,7 @@ import json
 import re
 from typing import Dict, Optional, Any
 import openai
+from io import BytesIO
 from utils import retry_with_backoff, parse_ai_json_response
 
 # Define the new model name as a constant
@@ -21,6 +22,29 @@ class AICAPAHelper:
                 self.model = "gpt-4o" 
             except Exception as e:
                 print(f"Failed to initialize AI helper: {e}")
+
+    @retry_with_backoff()
+    def transcribe_audio(self, audio_file) -> str:
+        """
+        Transcribes audio input using OpenAI's Whisper model.
+        Expects a file-like object from st.audio_input.
+        """
+        if not self.client:
+            return "Error: AI client not initialized."
+        
+        try:
+            # st.audio_input returns a BytesIO object. We need to give it a name attribute
+            # so the OpenAI library knows what format it is (e.g., .wav).
+            audio_file.name = "input_audio.wav"
+            
+            transcript = self.client.audio.transcriptions.create(
+                model="whisper-1", 
+                file=audio_file,
+                response_format="text"
+            )
+            return transcript
+        except Exception as e:
+            return f"Error transcribing audio: {e}"
 
     @retry_with_backoff()
     def refine_capa_input(self, field_name: str, rough_input: str, product_context: str) -> str:
@@ -98,6 +122,7 @@ class AICAPAHelper:
         except Exception as e:
             print(f"Error generating CAPA suggestions: {e}")
             return {"error": f"Failed to generate CAPA suggestions: {e}"}
+
 
 class AIEmailDrafter:
     """AI assistant for drafting vendor communications using OpenAI."""

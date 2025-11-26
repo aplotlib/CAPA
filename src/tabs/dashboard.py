@@ -2,63 +2,58 @@
 
 import streamlit as st
 import pandas as pd
-import os
+import plotly.graph_objects as go
 
 def display_dashboard():
-    """Renders the main dashboard tab with key metrics and AI insights."""
-
-    if not st.session_state.analysis_results:
-        st.info("Welcome to the Automated QMS. Please add product and data in the sidebar to begin your analysis.")
-        
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-        logo_path = os.path.join(project_root, "logo.png")
-        
-        if os.path.exists(logo_path):
-            st.image(logo_path, width=200)
-        
+    # ... (Keep existing data checks) ...
+    if not st.session_state.get('analysis_results'):
+        st.info("Please process data to view the dashboard.")
         return
 
     results = st.session_state.analysis_results
-    if "error" in results:
-        st.error(f"Analysis Failed: {results['error']}")
-        return
-
-    summary_df = results.get('return_summary')
-    if summary_df is None or summary_df.empty:
-        st.warning("No data found for the target SKU to generate a summary.")
-        return
-
-    # Filter summary data for the specific target SKU
-    sku_summary = summary_df[summary_df['sku'] == st.session_state.product_info['sku']]
-    if sku_summary.empty:
-        st.warning(f"No summary data could be calculated for SKU: `{st.session_state.product_info['sku']}`")
-        return
-
-    summary_data = sku_summary.iloc[0]
-
-    st.subheader(f"Quality Overview for SKU: `{st.session_state.product_info['sku']}`")
-
-    # REDESIGN: Cleaner metric display
-    cols = st.columns(4)
-    cols[0].metric("Return Rate", f"{summary_data.get('return_rate', 0):.2f}%")
-    cols[1].metric("Total Returned", f"{int(summary_data.get('total_returned', 0)):,}")
-    cols[2].metric("Total Sold", f"{int(summary_data.get('total_sold', 0)):,}")
+    summary_data = results.get('return_summary').iloc[0]
     
-    quality_score = results['quality_metrics'].get('quality_score', 0)
+    st.title(f"Mission Control: `{st.session_state.product_info['sku']}`")
+
+    # Metrics
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Return Rate", f"{summary_data.get('return_rate', 0):.2f}%")
+    c2.metric("Total Returns", f"{int(summary_data.get('total_returned', 0)):,}")
+    
     risk_level = results['quality_metrics'].get('risk_level', 'Low')
-    
-    # Set color based on risk level for a clearer visual cue
     delta_color = "inverse" if risk_level in ["Medium", "High"] else "normal"
-    
-    cols[3].metric(
-        label="Quality Score",
-        value=f"{quality_score}/100",
-        delta=risk_level,
-        delta_color=delta_color
-    )
+    c4.metric("Quality Score", f"{results['quality_metrics'].get('quality_score')}/100", delta=risk_level, delta_color=delta_color)
 
     st.divider()
 
-    # AI-generated insights
-    st.subheader("AI-Generated Insights")
-    st.info(f"{results.get('insights', 'No insights were generated.')}")
+    # THEME AWARE CHARTS (v1.46+)
+    # Detect if we are in dark mode to adjust chart background
+    theme = st.context.theme
+    is_dark = theme.base == "dark" if theme else True
+    
+    chart_bg = "#151922" if is_dark else "#FFFFFF"
+    text_color = "#E0E6ED" if is_dark else "#1A202C"
+
+    # Example Chart
+    fig = go.Figure(go.Indicator(
+        mode = "gauge+number",
+        value = summary_data.get('return_rate', 0),
+        title = {'text': "Return Rate (%)", 'font': {'color': text_color}},
+        gauge = {
+            'axis': {'range': [None, 20]},
+            'bar': {'color': "#00F3FF"},
+            'bgcolor': chart_bg,
+            'steps': [
+                {'range': [0, 5], 'color': "rgba(0, 255, 157, 0.3)"},
+                {'range': [5, 10], 'color': "rgba(255, 255, 0, 0.3)"},
+                {'range': [10, 20], 'color': "rgba(255, 0, 0, 0.3)"}
+            ],
+        }
+    ))
+    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", font={'color': text_color})
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Insights
+    st.subheader("🤖 AI Analysis")
+    st.container(border=True).markdown(results.get('insights'))

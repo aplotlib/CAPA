@@ -1,10 +1,8 @@
 # src/utils.py
 
 import time
-import random
 import streamlit as st
 from datetime import date, timedelta
-import pandas as pd
 from functools import wraps
 import openai
 import json
@@ -25,6 +23,9 @@ def init_session_state():
             st.session_state[k] = v
 
 def retry_with_backoff(retries=3, initial_delay=1):
+    """
+    Robust retry decorator that handles specific OpenAI errors.
+    """
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -32,12 +33,22 @@ def retry_with_backoff(retries=3, initial_delay=1):
             for i in range(retries):
                 try:
                     return func(*args, **kwargs)
-                except openai.APIStatusError as e:
-                    if e.status_code == 429:
-                        time.sleep(delay)
-                        delay *= 2
-                    else:
-                        raise e
+                except openai.RateLimitError:
+                    st.toast(f"Rate limit hit. Retrying in {delay}s...", icon="⏳")
+                    time.sleep(delay)
+                    delay *= 2
+                except openai.APIConnectionError:
+                    st.toast(f"Connection error. Retrying in {delay}s...", icon="🔌")
+                    time.sleep(delay)
+                    delay *= 2
+                except openai.APIError as e:
+                    # Don't retry on fatal API errors (like invalid request)
+                    st.error(f"OpenAI API Error: {e}")
+                    raise e
+                except Exception as e:
+                    # General catch-all for other unexpected issues
+                    print(f"Unexpected error: {e}")
+                    raise e
             return func(*args, **kwargs)
         return wrapper
     return decorator
@@ -47,13 +58,10 @@ def parse_ai_json_response(response_text: str) -> dict:
     Parses a JSON string from an AI response, handling potential Markdown code blocks.
     """
     try:
-        # Strip markdown code blocks if present
         if "```" in response_text:
-            # Regex to find the content inside ```json ... ``` or just ``` ... ```
             match = re.search(r"```(?:json)?(.*?)```", response_text, re.DOTALL)
             if match:
                 response_text = match.group(1)
-        
         return json.loads(response_text.strip())
     except json.JSONDecodeError:
         return {"error": "Failed to parse JSON response from AI."}

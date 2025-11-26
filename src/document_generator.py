@@ -52,7 +52,7 @@ class DocumentGenerator:
 
     def _parse_and_add_markdown_table(self, doc, markdown_text: str, title: str):
         """
-        NEW: Parses a Markdown table string and adds it as a proper table to the document,
+        Parses a Markdown table string and adds it as a proper table to the document,
         cleaning up formatting artifacts.
         """
         if not markdown_text:
@@ -180,8 +180,9 @@ class DocumentGenerator:
         doc.add_paragraph(f"Date: {capa_data.get('closure_date', '___________')}")
 
     def _generate_capa_closure_section(self, doc: Document, closure_data: Dict[str, Any]):
-        # This method is maintained for backward compatibility but is largely superseded 
-        # by _generate_capa_form_section which now includes closure fields.
+        """
+        Legacy closure section generator. Superseded by _generate_capa_form_section but kept for compatibility.
+        """
         if not closure_data.get('original_capa'): return
         doc.add_page_break()
         doc.add_heading("CAPA Effectiveness Check & Closure", level=2)
@@ -213,7 +214,7 @@ class DocumentGenerator:
 
     def generate_project_charter_docx(self, charter_data: Dict[str, Any]) -> BytesIO:
         """
-        NEW: Generates a project charter Word document.
+        Generates a project charter Word document.
         """
         doc = Document()
         doc.add_heading(charter_data.get('project_name', 'Project Charter'), level=1)
@@ -246,13 +247,9 @@ class DocumentGenerator:
         buffer.seek(0)
         return buffer
 
-    def generate_scar_docx(self, capa_data: Dict[str, Any], vendor_name: str) -> BytesIO:
-        # Placeholder for SCAR generation logic
-        pass
-
     def generate_capa_tracker_excel(self, session_data: Dict[str, Any]) -> BytesIO:
         """
-        NEW: Generates an Excel file with key CAPA data for tracking in a master sheet.
+        Generates an Excel file with key CAPA data for tracking in a master sheet.
         """
         capa_data = session_data.get('capa_data', {})
         status = "Closed" if capa_data.get('closure_date') else "Open"
@@ -281,3 +278,21 @@ class DocumentGenerator:
                 writer.sheets['CAPA_Tracker_Data'].set_column(i, i, col_len)
         output.seek(0)
         return output
+        
+    def generate_scar_docx(self, capa_data: Dict[str, Any], vendor_name: str) -> BytesIO:
+        """Generates a Supplier Corrective Action Request (SCAR) document."""
+        doc = Document()
+        doc.add_heading(f"SCAR: {vendor_name}", level=1)
+        doc.add_paragraph(f"Date: {date.today()}")
+        doc.add_paragraph(f"Reference CAPA: {capa_data.get('capa_number', 'N/A')}")
+        
+        doc.add_heading("Issue Description", level=2)
+        doc.add_paragraph(capa_data.get('issue_description', 'No description provided.'))
+        
+        doc.add_heading("Requirement", level=2)
+        doc.add_paragraph("Please investigate the root cause of this issue and provide a corrective action plan within 14 days.")
+        
+        buffer = BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+        return buffer

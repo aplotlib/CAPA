@@ -7,8 +7,7 @@ import time
 
 def ai_assist_field(label, key_suffix, help_text="", height=100, field_key=None):
     """
-    Renders a text area with an AI Refine button.
-    Uses st.rerun() explicitly to ensure UI updates after refinement.
+    Renders a text area with a 'Refine' button that uses the Fast AI model.
     """
     col_main, col_ai = st.columns([5, 1], vertical_alignment="bottom")
     
@@ -30,77 +29,79 @@ def ai_assist_field(label, key_suffix, help_text="", height=100, field_key=None)
         st.session_state.capa_data[field_key] = user_input
 
     with col_ai:
-        if st.button("✨ Refine", key=f"btn_{key_suffix}", help="AI Polish"):
+        if st.button("✨ Refine", key=f"btn_{key_suffix}", help="Polish grammar and tone (Fast AI)"):
             if st.session_state.api_key_missing:
                 st.toast("AI API Key Missing", icon="⚠️")
             else:
-                with st.spinner("Polishing..."):
+                # Use st.status for better feedback on background tasks
+                with st.status("Polishing text...", expanded=False) as status:
                     refined = st.session_state.ai_capa_helper.refine_capa_input(
                         field_name=label,
                         rough_input=user_input,
                         product_context=st.session_state.product_info['name']
                     )
                     st.session_state.capa_data[field_key] = refined
-                    st.toast("Text refined!", icon="✨")
-                    time.sleep(0.5) # Brief pause for UX
+                    status.update(label="Done!", state="complete")
+                    time.sleep(0.5) 
                     st.rerun()
 
 def display_capa_workflow():
     st.title("⚡ CAPA Lifecycle Hub")
-    st.caption("Aligned with ISO 13485 & Risk-Based CAPA Processes")
     
-    # Init Data
+    # --- DATA INITIALIZATION ---
     if 'capa_data' not in st.session_state:
         st.session_state.capa_data = {
             'capa_number': f"CAPA-{date.today().strftime('%Y%m%d')}-001",
             'date': date.today(),
-            'status': 'Open'
+            'status': 'Draft' # Draft, Investigation, Implementation, Verification, Closed
         }
     data = st.session_state.capa_data
 
-    # --- WORKFLOW NAVIGATION ---
-    # Improved Navigation: Clearer steps
-    steps = ["1. Intake", "2. Review (QRB)", "3. Investigation", "4. Actions", "5. Verification", "6. Closure"]
+    # --- PROGRESS INDICATOR (UX Improvement) ---
+    # Instead of strict steps, we show progress but allow free navigation
+    phases = ["Draft", "Investigation", "Implementation", "Verification", "Closed"]
     
-    if "capa_active_step" not in st.session_state:
-        st.session_state.capa_active_step = steps[0]
+    # Determine current index based on status
+    try:
+        current_phase_idx = phases.index(data.get('status', 'Draft'))
+    except ValueError:
+        current_phase_idx = 0
 
-    selected_step = st.segmented_control(
-        "Workflow Stage",
-        steps,
-        selection_mode="single",
-        default=st.session_state.capa_active_step,
-        key="capa_step_control" 
-    )
-    
-    if selected_step:
-        st.session_state.capa_active_step = selected_step
-
+    # Render a visual progress bar
+    progress_cols = st.columns(len(phases))
+    for i, phase in enumerate(phases):
+        color = "green" if i <= current_phase_idx else "grey"
+        if i == current_phase_idx:
+            progress_cols[i].markdown(f":blue-background[**{phase}**]")
+        else:
+            progress_cols[i].markdown(f":grey[{phase}]")
+            
     st.divider()
 
-    # === STEP 1: INTAKE ===
-    if st.session_state.capa_active_step == steps[0]:
-        st.subheader("🚀 Incident Intake")
-        st.info("Step 1: Describe the issue clearly. Use Voice-to-Text for speed.")
+    # --- TABS FOR NAVIGATION (Non-Linear Workflow) ---
+    # This allows the user to jump between sections to fix things without being locked out
+    tab_intake, tab_investigation, tab_action, tab_closure = st.tabs([
+        "1. Intake & Definition", 
+        "2. Root Cause Analysis", 
+        "3. Action Plan", 
+        "4. Effectiveness & Closure"
+    ])
+
+    # === TAB 1: INTAKE ===
+    with tab_intake:
+        st.subheader("📝 Incident Definition")
         
-        # --- Voice to Text Integration ---
-        with st.container(border=True):
-            st.markdown("#### 🎙️ Voice Input")
+        # Voice Input Section
+        with st.expander("🎙️ Voice Quick-Entry", expanded=False):
             audio_val = st.audio_input("Record Issue Description")
-            
-            if audio_val is not None:
-                # Check if we have already transcribed this specific audio to avoid loop
+            if audio_val:
                 if st.session_state.get("last_audio_id") != id(audio_val):
-                    with st.status("Transcribing audio...", expanded=True) as status:
-                        if st.session_state.api_key_missing:
-                            status.update(label="AI Key Missing", state="error")
-                            st.error("Cannot transcribe without API Key.")
-                        else:
-                            text = st.session_state.ai_capa_helper.transcribe_audio(audio_val)
-                            st.session_state.capa_data['issue_description'] = text
-                            st.session_state.last_audio_id = id(audio_val)
-                            status.update(label="Transcription Complete!", state="complete")
-                            st.rerun()
+                    with st.status("Transcribing and processing...", expanded=True) as status:
+                        text = st.session_state.ai_capa_helper.transcribe_audio(audio_val)
+                        st.session_state.capa_data['issue_description'] = text
+                        st.session_state.last_audio_id = id(audio_val)
+                        status.update(label="Transcription Complete", state="complete")
+                        st.rerun()
 
         c1, c2 = st.columns(2)
         with c1:
@@ -108,145 +109,99 @@ def display_capa_workflow():
             data['product_name'] = st.text_input("Product", value=data.get('product_name', st.session_state.product_info['sku']))
         with c2:
             data['date'] = st.date_input("Initiation Date", value=data.get('date'))
-            source_opts = ['Customer Complaint', 'Internal Audit', 'Nonconforming Product', 'Trend Analysis', 'Management Review']
-            data['source_of_issue'] = st.pills("Source", source_opts, selection_mode="single", default=data.get('source_of_issue', 'Customer Complaint'))
+            source_opts = ['Customer Complaint', 'Internal Audit', 'Nonconforming Product', 'Trend Analysis']
+            data['source_of_issue'] = st.selectbox("Source", source_opts, index=0 if not data.get('source_of_issue') else source_opts.index(data.get('source_of_issue')))
 
-        st.markdown("#### Issue Details")
         ai_assist_field("Detailed Description", "issue_desc", "Details of the non-conformity...", height=150, field_key="issue_description")
-        ai_assist_field("Immediate Actions (Containment)", "imm_actions", "How will we 'stop the bleeding'?", height=100, field_key="immediate_actions")
-
-        if st.button("💾 Submit for Review", type="primary", use_container_width=True):
-            data['status'] = 'Under Review'
-            st.session_state.capa_active_step = steps[1] # Move to Review
-            st.toast("Request submitted to QRB!", icon="✅")
-            st.rerun()
-
-    # === STEP 2: REVIEW (QRB) ===
-    elif st.session_state.capa_active_step == steps[1]:
-        st.subheader("⚖️ Quality Review Board (QRB) Assessment")
-        st.info("Step 3 & 4: Review risk to determine if full investigation is warranted.")
         
-        st.markdown(f"**Issue:** {data.get('issue_description', 'N/A')}")
-        
-        st.write("#### Initial Risk Assessment")
-        col1, col2 = st.columns(2)
-        with col1:
-             st.markdown("**Severity (Impact)**")
-             data['risk_severity'] = st.slider("1 (Insignificant) - 5 (Catastrophic)", 1, 5, value=data.get('risk_severity', 3), key="risk_s")
-        with col2:
-             st.markdown("**Probability (Likelihood)**")
-             data['risk_probability'] = st.slider("1 (Remote) - 5 (Frequent)", 1, 5, value=data.get('risk_probability', 3), key="risk_p")
-        
-        risk_score = data.get('risk_severity', 3) * data.get('risk_probability', 3)
-        risk_label = "High" if risk_score >= 12 else ("Medium" if risk_score >= 6 else "Low")
-        
-        st.metric("Calculated Risk Priority", f"{risk_score} ({risk_label})")
-
-        c_accept, c_reject = st.columns(2)
-        with c_accept:
-            if st.button("✅ Accept & Initiate Investigation", type="primary", use_container_width=True):
+        # Status Advance Button
+        if data['status'] == 'Draft':
+            if st.button("🚀 Advance to Investigation", type="primary"):
                 data['status'] = 'Investigation'
-                st.session_state.capa_active_step = steps[2]
-                st.toast("CAPA Initiated!", icon="🚀")
-                st.rerun()
-        with c_reject:
-            if st.button("🚫 Reject Request", use_container_width=True):
-                data['status'] = 'Rejected'
-                data['closure_date'] = date.today()
-                st.warning("CAPA Request Rejected.")
-                st.session_state.capa_active_step = steps[5] # Jump to Closure
+                st.toast("Status updated: Investigation", icon="🔍")
                 st.rerun()
 
-    # === STEP 3: INVESTIGATION ===
-    elif st.session_state.capa_active_step == steps[2]:
-        st.subheader("🔍 Investigation & Root Cause Analysis")
-        st.info("Step 7 & 8: Determine root cause using 5 Whys or Fishbone tools.")
+    # === TAB 2: INVESTIGATION ===
+    with tab_investigation:
+        st.subheader("🔍 Investigation & Risk")
         
-        with st.popover("Need help with RCA?"):
-            st.markdown("Use the **Root Cause Tools** page for 5 Whys and Fishbone diagrams.")
+        c1, c2 = st.columns(2)
+        with c1:
+             st.info("Risk Assessment")
+             data['risk_severity'] = st.slider("Severity", 1, 5, value=data.get('risk_severity', 3))
+             data['risk_probability'] = st.slider("Probability", 1, 5, value=data.get('risk_probability', 3))
+             st.caption(f"Risk Score: {data['risk_severity'] * data['risk_probability']}")
+
+        with c2:
+            st.info("Tools")
+            st.markdown("Use the **Root Cause Tools** page in the sidebar for 5 Whys / Fishbone, then paste findings below.")
 
         ai_assist_field("Root Cause Analysis Findings", "root_cause", "What is the underlying cause?", height=200, field_key="root_cause")
-
-        if st.button("💾 Save & Proceed to Action Plan", type="primary", use_container_width=True):
-            st.session_state.capa_active_step = steps[3]
-            st.toast("Investigation saved!", icon="✅")
-            st.rerun()
-
-    # === STEP 4: ACTIONS ===
-    elif st.session_state.capa_active_step == steps[3]:
-        st.subheader("🛠️ Corrective & Preventive Action Plan")
-        st.info("Step 9 & 10: Develop and implement an action plan.")
         
-        with st.expander("Corrective Actions (Fix the Issue)", expanded=True):
-            ai_assist_field("Action Description", "ca_desc", height=100, field_key="corrective_action")
-            ai_assist_field("Implementation Plan (Who/When)", "ca_impl", height=100, field_key="implementation_of_corrective_actions")
+        if data['status'] == 'Investigation':
+            if st.button("🚀 Advance to Implementation", type="primary"):
+                if data.get('root_cause'):
+                    data['status'] = 'Implementation'
+                    st.toast("Status updated: Implementation", icon="🛠️")
+                    st.rerun()
+                else:
+                    st.error("Please define a Root Cause before proceeding.")
+
+    # === TAB 3: ACTION PLAN ===
+    with tab_action:
+        st.subheader("🛠️ Corrective & Preventive Actions")
         
-        with st.expander("Preventive Actions (Prevent Recurrence)", expanded=True):
-            ai_assist_field("Action Description", "pa_desc", height=100, field_key="preventive_action")
-            ai_assist_field("Implementation Plan (Who/When)", "pa_impl", height=100, field_key="implementation_of_preventive_actions")
+        # AI Generator for Actions
+        if st.button("🤖 Auto-Draft Actions from Root Cause", help="Uses 'Reasoning' Model"):
+            if not data.get('root_cause'):
+                st.error("Root Cause required.")
+            else:
+                with st.status("AI is analyzing root cause and drafting actions...", expanded=True) as status:
+                    # Mocking an analysis result object for the helper
+                    mock_analysis = {'return_summary': None} 
+                    suggestions = st.session_state.ai_capa_helper.generate_capa_suggestions(data['root_cause'], mock_analysis)
+                    
+                    if suggestions:
+                        data['corrective_action'] = suggestions.get('corrective_action', '')
+                        data['preventive_action'] = suggestions.get('preventive_action', '')
+                        data['effectiveness_verification_plan'] = suggestions.get('effectiveness_verification_plan', '')
+                        status.update(label="Drafting Complete!", state="complete")
+                        st.rerun()
 
-        if st.button("💾 Save & Proceed to Verification", type="primary", use_container_width=True):
-            data['status'] = 'Actions Implementation'
-            st.session_state.capa_active_step = steps[4]
-            st.toast("Action plan saved!", icon="✅")
-            st.rerun()
+        ai_assist_field("Corrective Action (Fix)", "ca_desc", height=100, field_key="corrective_action")
+        ai_assist_field("Preventive Action (Prevent)", "pa_desc", height=100, field_key="preventive_action")
+        ai_assist_field("Implementation Plan (Who/When)", "impl_plan", height=100, field_key="implementation_of_corrective_actions")
 
-    # === STEP 5: VERIFICATION ===
-    elif st.session_state.capa_active_step == steps[4]:
-        st.subheader("✅ Effectiveness Verification")
-        st.info("Step 13 & 14: Verify that the actions were effective.")
+        if data['status'] == 'Implementation':
+            if st.button("🚀 Advance to Verification", type="primary"):
+                data['status'] = 'Verification'
+                st.toast("Status updated: Verification", icon="✅")
+                st.rerun()
+
+    # === TAB 4: CLOSURE ===
+    with tab_closure:
+        st.subheader("🔒 Effectiveness & Closure")
         
-        ai_assist_field("Effectiveness Check Plan", "eff_plan", "How will we prove it worked?", height=100, field_key="effectiveness_verification_plan")
-        ai_assist_field("Effectiveness Findings / Evidence", "eff_findings", "Results of the check...", height=150, field_key="effectiveness_check_findings")
+        ai_assist_field("Effectiveness Check Plan", "eff_plan", height=100, field_key="effectiveness_verification_plan")
+        ai_assist_field("Effectiveness Findings / Evidence", "eff_findings", height=150, field_key="effectiveness_check_findings")
 
-        if st.button("💾 Save & Proceed to Closure", type="primary", use_container_width=True):
-            data['status'] = 'Verification'
-            st.session_state.capa_active_step = steps[5]
-            st.toast("Verification saved!", icon="✅")
-            st.rerun()
-
-    # === STEP 6: CLOSURE ===
-    elif st.session_state.capa_active_step == steps[5]:
-        st.subheader("🔒 Final Closure")
-        
-        if data.get('status') == 'Rejected':
-            st.warning("This CAPA request was REJECTED.")
-            ai_assist_field("Rationale for Rejection", "reject_rationale", "Why was this rejected?", height=100, field_key="additional_comments")
-        else:
-            st.success("All steps complete. Ready for final approval.")
-            # Feedback Widget
-            st.write("Rate Effectiveness of this CAPA:")
-            effectiveness_rating = st.feedback("thumbs", key="capa_effectiveness_rating")
-            if effectiveness_rating is not None:
-                rating_map = {0: "Ineffective", 1: "Effective"}
-                data['effectiveness_rating'] = rating_map[effectiveness_rating]
-
+        st.divider()
         c1, c2 = st.columns(2)
         data['closed_by'] = c1.text_input("Closed By", value=data.get('closed_by', ''))
         data['closure_date'] = c2.date_input("Closure Date", value=data.get('closure_date', date.today()))
-        
-        # UI UX Improvement: Clearer distinction between Drafting and Closing
-        st.markdown("### 📥 External Review")
-        st.info("Before formally closing, export the document to Word for Google Docs/Sharepoint review.")
-        
-        col_export, col_close = st.columns(2)
-        with col_export:
-             if st.button("📄 Download Draft for Review (.docx)", use_container_width=True):
-                 doc_buffer = st.session_state.doc_generator.generate_summary_docx(st.session_state, ["CAPA Form"])
-                 st.download_button(
-                    label="Click to Save DOCX",
-                    data=doc_buffer,
-                    file_name=f"{data.get('capa_number')}_DRAFT.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    key="dl_capa_docx_draft"
-                 )
-        
-        with col_close:
-            if st.button("🔒 FORMALLY CLOSE CAPA", type="primary", use_container_width=True):
+
+        if data['status'] != 'Closed':
+            if st.button("🔒 Verify & Close CAPA", type="primary", use_container_width=True):
                 is_valid, errors, _ = validate_capa_data(data)
-                if data.get('status') != 'Rejected' and errors:
+                if errors:
                     for e in errors: st.error(e)
                 else:
                     data['status'] = 'Closed'
                     st.balloons()
-                    st.toast("CAPA Closed Successfully!", icon="🎉")
+                    st.success("CAPA Formally Closed.")
+                    st.rerun()
+        else:
+            st.success("This CAPA is CLOSED.")
+            if st.button("Re-open CAPA"):
+                data['status'] = 'Verification'
+                st.rerun()

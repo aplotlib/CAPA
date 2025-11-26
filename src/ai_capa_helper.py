@@ -1,193 +1,427 @@
-# src/tabs/capa.py
+# src/ai_capa_helper.py
 
-import streamlit as st
-from datetime import date
-import pandas as pd
-from compliance import validate_capa_data
+import json
+import re
+from typing import Dict, Optional, Any
+import openai
+from utils import retry_with_backoff, parse_ai_json_response
 
-def ai_assist_field(label, key_suffix, help_text="", height=100, field_key=None):
+# Define the new model name as a constant
+FINE_TUNED_MODEL = "ft:gpt-4o-2024-08-06:vive-health-quality-department:qms-v2-stable-lr:CM1nuhta"
+
+class AICAPAHelper:
+    """AI assistant for generating CAPA form suggestions using OpenAI."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        """Initialize with OpenAI API key."""
+        self.client = None
+        if api_key:
+            try:
+                self.client = openai.OpenAI(api_key=api_key)
+                self.model = "gpt-4o" # Use robust model for general editing/refining
+            except Exception as e:
+                print(f"Failed to initialize AI helper: {e}")
+
+    @retry_with_backoff()
+    def refine_capa_input(self, field_name: str, rough_input: str, product_context: str) -> str:
+        """
+        Takes rough user notes for a specific CAPA field and refines them into
+        professional, regulatory-compliant language (FDA/ISO).
+        """
+        if not self.client: return "AI client not initialized."
+        if not rough_input or len(rough_input) < 3: return rough_input
+
+        system_prompt = f"""
+        You are a Quality Assurance Regulatory Expert for Medical Devices (ISO 13485 / 21 CFR 820).
+        Your task is to rewrite the user's rough notes for the CAPA field: "{field_name}".
+        
+        Rules:
+        1. Make the language professional, objective, and precise.
+        2. Do NOT invent facts. If the input is ambiguous, ask a clarifying question in [brackets].
+        3. Use active voice where appropriate.
+        4. Focus on clarity and "auditor-readiness".
+        """
+        
+        user_prompt = f"""
+        **Product Context:** {product_context}
+        **Rough Input:** {rough_input}
+        
+        **Refined Output:**
+        """
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                max_tokens=500,
+                temperature=0.3 # Lower temperature for more deterministic/professional output
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            return f"Error refining input: {e}"
+
+    @retry_with_backoff()
+    def generate_capa_suggestions(self, issue_summary: str, analysis_results: Dict) -> Dict[str, str]:
+        """Generate AI suggestions for CAPA form fields."""
+        if not self.client: return {}
+
+        summary = analysis_results.get('return_summary', {}).iloc[0] if not analysis_results.get('return_summary', {}).empty else {}
+        context = f"""
+        Issue Summary: {issue_summary}
+        SKU: {summary.get('sku', 'N/A')}
+        Return Rate: {summary.get('return_rate', 0):.2f}%
+        Total Returns: {int(summary.get('total_returned', 0))}
+        """
+
+        system_prompt = """
+        You are a medical device quality expert helping to complete a CAPA form based on the provided context.
+        Generate content for each CAPA field following ISO 13485, FDA 21 CFR 820.100, and EU MDR standards.
+        Return ONLY a valid JSON object with keys for all relevant fields: "issue_description", "root_cause", "corrective_action", "preventive_action", and "effectiveness_verification_plan".
+        """
+        user_prompt = f"Here is the context for the CAPA form:\n{context}"
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                max_tokens=2500,
+                response_format={"type": "json_object"}
+            )
+            return json.loads(response.choices[0].message.content)
+        except Exception as e:
+            print(f"Error generating CAPA suggestions: {e}")
+            return {"error": f"Failed to generate CAPA suggestions: {e}"}
+
+class AIEmailDrafter:
+    """AI assistant for drafting vendor communications using OpenAI."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.client = None
+        if api_key:
+            try:
+                self.client = openai.OpenAI(api_key=api_key)
+                self.model = FINE_TUNED_MODEL
+            except Exception as e:
+                print(f"Failed to initialize AI Email Drafter: {e}")
+
+    @retry_with_backoff()
+    def draft_vendor_email(self, goal: str, analysis_results: Dict, sku: str,
+                           vendor_name: str, contact_name: str, english_ability: int) -> str:
+        if not self.client: return "AI client not initialized."
+        summary = analysis_results.get('return_summary', {}).iloc[0] if not analysis_results.get('return_summary', {}).empty else {}
+        context = f"""- Product SKU: {sku}\n- Recent Return Rate: {summary.get('return_rate', 0):.2f}%\n- AI Insights: {analysis_results.get('insights', 'N/A')}"""
+        if english_ability <= 2: language_instruction = "IMPORTANT: Use very simple words, short sentences, and basic grammar."
+        else: language_instruction = "Use standard professional business English."
+        system_prompt = f"""You are a quality manager writing a collaborative email to a manufacturing partner, {vendor_name}. Tone must be reasonable, not accusatory. Goal: Start a productive, data-driven conversation. Recipient's English Ability: {english_ability}/5. {language_instruction} Draft a professional email to {contact_name}. Propose 1-2 realistic KPIs and a reasonable timeline (e.g., "initial analysis within 15 days"). Return only the full email text."""
+        user_prompt = f"**Email Goal:** {goal}\n\n**Data Context:**\n{context}"
+        try:
+            response = self.client.chat.completions.create(model=self.model, messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}], max_tokens=2000)
+            return response.choices[0].message.content
+        except Exception as e: return f"An error occurred: {e}"
+
+class MedicalDeviceClassifier:
+    """Classifies medical devices based on FDA regulations using OpenAI."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.client = None
+        if api_key:
+            try: self.client = openai.OpenAI(api_key=api_key); self.model = FINE_TUNED_MODEL
+            except Exception as e: print(f"Failed to initialize Medical Device Classifier: {e}")
+
+    @retry_with_backoff()
+    def classify_device(self, device_description: str) -> Dict[str, str]:
+        if not self.client: return {"error": "AI client is not initialized."}
+        system_prompt = """You are an expert in U.S. FDA medical device classification (21 CFR 862-892). Analyze the device description. Return a single, valid JSON object with keys: "classification", "rationale" (citing regulation number), "risks" (bulleted list), and "regulatory_requirements" (bulleted list). Return ONLY the valid JSON object."""
+        user_prompt = f"**Device Description:**\n{device_description}"
+        raw_content = ""
+        try:
+            response = self.client.chat.completions.create(model=self.model, messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}], max_tokens=2500, temperature=0.2, response_format={"type": "json_object"})
+            raw_content = response.choices[0].message.content
+            return parse_ai_json_response(raw_content)
+        except json.JSONDecodeError:
+            return {"error": "AI response did not contain a valid JSON object."}
+        except Exception as e: return {"error": f"Failed to classify the device due to an AI model error: {e}"}
+
+class RiskAssessmentGenerator:
+    """Generates risk assessments based on ISO 14971 using OpenAI."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.client = None
+        if api_key:
+            try: self.client = openai.OpenAI(api_key=api_key); self.model = FINE_TUNED_MODEL
+            except Exception as e: print(f"Failed to initialize Risk Assessment Generator: {e}")
+
+    @retry_with_backoff()
+    def generate_assessment(self, product_name: str, sku: str, product_description: str) -> str:
+        if not self.client: return "Error: AI client for Risk Assessment is not initialized."
+        system_prompt = "You are a certified risk management expert (ISO 14971). Generate a formal risk assessment as a Markdown table. Columns: `Hazard`, `Foreseeable Sequence of Events`, `Hazardous Situation`, `Potential Harm`, `Severity (S)`, `Probability (P)`, `Risk Level`, and `Proposed Mitigation`. Identify 5-7 risks. Use a 1-5 scale for S and P. Determine Risk Level. Propose concrete mitigations."
+        user_prompt = f"**Product:** {product_name} (SKU: {sku})\n**Description:** {product_description}"
+        try:
+            response = self.client.chat.completions.create(model=self.model, messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}], max_tokens=3000, temperature=0.3)
+            return response.choices[0].message.content
+        except Exception as e: return f"An error occurred: {e}"
+
+class UseRelatedRiskAnalyzer:
+    """Generates a Use-Related Risk Analysis (URRA) based on IEC 62366 using OpenAI."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.client = None
+        if api_key:
+            try: self.client = openai.OpenAI(api_key=api_key); self.model = FINE_TUNED_MODEL
+            except Exception as e: print(f"Failed to initialize Use-Related Risk Analyzer: {e}")
+    
+    @retry_with_backoff()
+    def generate_urra(self, product_name: str, product_description: str, intended_user: str, use_environment: str) -> str:
+        if not self.client: return "Error: AI client for URRA is not initialized."
+        system_prompt = "You are a human factors engineering expert (IEC 62366). Generate a formal Use-Related Risk Analysis (URRA) in a Markdown table. Columns: `Use Task`, `Potential Use Error`, `Foreseeable Consequences`, `Potential Harm`, `Severity (S)`, `Probability (P)`, `Risk Level`, `Proposed Mitigation/Design Recommendation`. Identify 5-7 critical use tasks. Brainstorm errors, consequences. Assign S & P (1-5), determine Risk Level, and provide actionable design recommendations."
+        user_prompt = f"**Product:** {product_name}\n**Description:** {product_description}\n**User:** {intended_user}\n**Environment:** {use_environment}"
+        try:
+            response = self.client.chat.completions.create(model=self.model, messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}], max_tokens=3000, temperature=0.4)
+            return response.choices[0].message.content
+        except Exception as e: return f"An error occurred: {e}"
+
+class AIHumanFactorsHelper:
+    """AI assistant for generating Human Factors report content."""
+    def __init__(self, api_key: Optional[str] = None):
+        self.client = None
+        if api_key:
+            try:
+                self.client = openai.OpenAI(api_key=api_key)
+                self.model = FINE_TUNED_MODEL
+            except Exception as e:
+                print(f"Failed to initialize AIHumanFactorsHelper: {e}")
+
+    @retry_with_backoff()
+    def generate_hf_report_from_answers(self, product_name: str, product_desc: str, user_answers: Dict[str, str]) -> Dict[str, str]:
+        """Generates a full HFE report draft from answers to broad questions."""
+        if not self.client:
+            return {"error": "AI client is not initialized."}
+        
+        system_prompt = """
+        You are a Human Factors Engineering (HFE) expert drafting a report that aligns with FDA guidance.
+        A user has provided high-level answers to key questions. Your task is to expand these answers into a comprehensive, professionally worded draft for all sections of an HFE report.
+        Extrapolate from the user's answers, product name, and description to create detailed, plausible content for each section.
+        
+        IMPORTANT: Your final output must be a single, valid, and complete JSON object. Ensure that all property names and string values are enclosed in double quotes. Do not include any text or formatting outside of the main JSON object.
+        The JSON object must have keys for each section: "conclusion_statement",
+        "descriptions", "device_interface", "known_problems", "hazards_analysis", 
+        "preliminary_analyses", "critical_tasks", and "validation_testing". Ensure the JSON is not truncated.
+        """
+        user_prompt = f"""
+        **Product Name:** {product_name}
+        **Product Description:** {product_desc}
+
+        **User's Answers to Key Questions:**
+        1. **User Profile & Environment:** {user_answers.get('user_profile')}
+        2. **Critical Tasks:** {user_answers.get('critical_tasks')}
+        3. **Potential Harms from Errors:** {user_answers.get('potential_harms')}
+
+        Now, generate the full HFE report draft.
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+                max_tokens=4095,
+                response_format={"type": "json_object"}
+            )
+            raw_content = response.choices[0].message.content
+            return parse_ai_json_response(raw_content)
+        except json.JSONDecodeError as e:
+            return {"error": f"AI response was invalid or incomplete: {e}"}
+        except Exception as e:
+            print(f"Error generating HF report from answers: {e}")
+            return {"error": f"Failed to generate HF report from answers: {e}"}
+
+class AIDesignControlsTriager:
+    """AI assistant for determining the need for design controls and generating them."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.client = None
+        if api_key:
+            try:
+                self.client = openai.OpenAI(api_key=api_key)
+                self.model = "gpt-4o"
+            except Exception as e:
+                print(f"Failed to initialize AIDesignControlsTriager: {e}")
+
+    @retry_with_backoff()
+    def triage_device(self, device_description: str) -> Dict[str, str]:
+        """Analyzes a device description to recommend if design controls are needed."""
+        if not self.client:
+            return {"error": "AI client is not initialized."}
+
+        system_prompt = """
+        You are an FDA compliance expert specializing in 21 CFR 820.30 (Design Controls).
+        Your task is to analyze a product description and determine if design controls are legally required, recommended as a best practice, or not required.
+
+        - **Legally Required**: All Class II and Class III devices. Also, specific Class I devices listed in the regulation (tracheobronchial suction catheters, surgeon's gloves, protective restraints, devices with computer software, manual radionuclide applicator systems, radionuclide teletherapy sources).
+        - **Recommended**: Most other Class I devices or products with moderate risk where formal controls would significantly improve safety and effectiveness, even if not strictly mandated.
+        - **Not Required**: Very low-risk consumer goods that are not considered medical devices.
+
+        Analyze the user's description and provide a clear recommendation.
+        Return ONLY a valid JSON object with three keys: "recommendation" (one of "Design Controls Legally Required", "Design Controls Recommended", "Design Controls Not Required"), "rationale" (a clear, concise explanation for your decision, citing the device class if applicable), and "next_steps" (suggested next actions for the user).
+        """
+        user_prompt = f"**Product Description:**\n{device_description}"
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                max_tokens=1500,
+                response_format={"type": "json_object"}
+            )
+            return json.loads(response.choices[0].message.content)
+        except Exception as e:
+            print(f"Error in design controls triage: {e}")
+            return {"error": f"Failed to generate triage recommendation: {e}"}
+
+    @retry_with_backoff()
+    def generate_design_controls(self, product_name: str, product_ifu: str, user_needs: str, tech_reqs: str, risks: str) -> Dict[str, str]:
+        """Generates a full design controls document draft from user answers."""
+        if not self.client:
+            return {"error": "AI client is not initialized."}
+
+        system_prompt = """
+        You are a Senior R&D Engineer and Regulatory Affairs Specialist, an expert in FDA 21 CFR 820.30 and ISO 13485.
+        Your task is to draft a comprehensive Design Controls document for a new medical device based on high-level user inputs.
+        Structure your output as a single, valid JSON object. For each key, provide detailed, professional content formatted with Markdown.
+
+        The JSON object must contain these exact keys: "inputs", "outputs", "verification", "validation", "plan", "transfer", "dhf", and "traceability_matrix".
+
+        For the "traceability_matrix", generate a Markdown table that links User Needs to Design Inputs, Outputs, Verification, and Validation activities.
+        Example Traceability Matrix Row:
+        | User Need | Design Input | Design Output | Verification | Validation |
+        |---|---|---|---|---|
+        | Patient needs to track ROM at home | The device shall measure knee flexion with +/- 1 degree accuracy | Firmware implements a Kalman filter for the 9-axis IMU | Protocol VT-001: Bench test confirms accuracy against a goniometer | Protocol VL-002: Usability study with 15 post-op patients confirms they can track ROM |
+        
+        Generate professional, plausible content for all sections.
+        """
+        user_prompt = f"""
+        **Product Name:** {product_name}
+        **Product Intended For Use:** {product_ifu}
+
+        **User's High-Level Answers:**
+        1. **Core User Needs:** {user_needs}
+        2. **Key Technical Requirements:** {tech_reqs}
+        3. **Significant Known Risks:** {risks}
+
+        Now, generate the full Design Controls document draft.
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+                max_tokens=4000,
+                response_format={"type": "json_object"}
+            )
+            try:
+                return json.loads(response.choices[0].message.content)
+            except json.JSONDecodeError:
+                return {"error": "AI returned incomplete or invalid JSON. Please try again."}
+        except Exception as e:
+            print(f"Error generating design controls draft: {e}")
+            return {"error": f"Failed to generate design controls draft: {e}"}
+
+class ProductManualWriter:
+    """AI assistant for generating a product user manual."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.client = None
+        if api_key:
+            try:
+                self.client = openai.OpenAI(api_key=api_key)
+                self.model = "gpt-4o"
+            except Exception as e:
+                print(f"Failed to initialize ProductManualWriter: {e}")
+
+    @retry_with_backoff()
+    def generate_manual_section(self, section_title: str, product_name: str, product_ifu: str, user_inputs: Dict, target_language: str = "English") -> str:
+        """Generates a specific section of the user manual."""
+        if not self.client:
+            return "AI client is not initialized."
+
+        system_prompt = f"""
+        You are an expert technical writer creating a user manual for the medical device '{product_name}'.
+        Your task is to write the '{section_title}' section of the manual.
+        The manual should be clear, concise, and easy for a layperson to understand, adhering to medical device documentation standards.
+        The target language for the output is {target_language}.
+        Use Markdown for formatting (e.g., headings, bullet points, bold text).
+        """
+        user_prompt = f"""
+        **Product Name:** {product_name}
+        **Intended For Use:** {product_ifu}
+
+        **User-Provided Information:**
+        - **Key Features:** {user_inputs.get('features', 'Not provided.')}
+        - **Step-by-Step Instructions:** {user_inputs.get('instructions', 'Not provided.')}
+        - **Safety Warnings:** {user_inputs.get('warnings', 'Not provided.')}
+
+        Please write the content for the '{section_title}' section now.
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+                max_tokens=3000
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"Error generating manual section '{section_title}': {e}")
+            return f"Failed to generate section: {e}"
+            
+class AIProjectCharterHelper:
     """
-    Helper widget that renders a text area with an optional AI Refine button.
+    AI assistant for drafting a project charter.
     """
-    col_main, col_ai = st.columns([5, 1])
-    
-    # Retrieve current value
-    current_val = st.session_state.capa_data.get(field_key, "")
-    
-    with col_main:
-        user_input = st.text_area(
-            label, 
-            value=current_val, 
-            height=height, 
-            help=help_text, 
-            key=f"input_{key_suffix}"
-        )
-        # Update session state immediately on change
-        st.session_state.capa_data[field_key] = user_input
+    def __init__(self, api_key: Optional[str] = None):
+        self.client = None
+        if api_key:
+            try:
+                self.client = openai.OpenAI(api_key=api_key)
+                self.model = "gpt-4o"
+            except Exception as e:
+                print(f"Failed to initialize AIProjectCharterHelper: {e}")
 
-    with col_ai:
-        st.write("") # Spacer
-        st.write("") 
-        if st.button("✨ Refine", key=f"btn_{key_suffix}", help="Use AI to polish this text"):
-            if st.session_state.api_key_missing:
-                st.error("No API Key")
-            else:
-                with st.spinner("Polishing..."):
-                    refined = st.session_state.ai_capa_helper.refine_capa_input(
-                        field_name=label,
-                        rough_input=user_input,
-                        product_context=st.session_state.product_info['name']
-                    )
-                    st.session_state.capa_data[field_key] = refined
-                    st.rerun()
-
-def display_capa_tab():
-    st.header("⚡ CAPA LIFECYCLE HUB")
-    
-    # Ensure CAPA data init
-    if 'capa_data' not in st.session_state:
-        st.session_state.capa_data = {
-            'capa_number': f"CAPA-{date.today().strftime('%Y%m%d')}-001",
-            'date': date.today(),
-            'status': 'Open'
-        }
-    data = st.session_state.capa_data
-
-    # --- Status Header ---
-    status_color = {
-        'Open': 'red',
-        'Investigation': 'orange',
-        'Actions Implementation': 'yellow',
-        'Verification': 'blue',
-        'Closed': 'green'
-    }.get(data.get('status', 'Open'), 'grey')
-    
-    st.markdown(f"""
-    <div style="padding: 10px; border: 1px solid {status_color}; border-radius: 5px; background: rgba(0,0,0,0.3); display: flex; justify-content: space-between; align-items: center;">
-        <div><strong>ACTIVE CAPA:</strong> <span style="font-family:'Fira Code'; color:var(--neon-cyan);">{data.get('capa_number')}</span></div>
-        <div><strong>STATUS:</strong> <span style="color:{status_color}; font-weight:bold;">{data.get('status', 'Open').upper()}</span></div>
-    </div>
-    <br>
-    """, unsafe_allow_html=True)
-
-    # --- Workflow Tabs ---
-    tabs = st.tabs(["1. INTAKE (Fast Track)", "2. INVESTIGATION", "3. ACTIONS", "4. VERIFICATION", "5. CLOSURE"])
-
-    # === TAB 1: INTAKE ===
-    with tabs[0]:
-        st.caption("🚀 Optimized for quick entry by Product Developers.")
+    @retry_with_backoff()
+    def generate_charter_draft(self, product_name: str, problem: str, user: str) -> Dict[str, Any]:
+        """Generates a draft of a project charter from a few key inputs."""
+        if not self.client: return {"error": "AI client not initialized."}
         
-        c1, c2 = st.columns(2)
-        with c1:
-            data['capa_number'] = st.text_input("CAPA ID", value=data.get('capa_number'))
-            data['product_name'] = st.text_input("Product/Asset", value=data.get('product_name', st.session_state.product_info['sku']))
-        with c2:
-            data['date'] = st.date_input("Initiation Date", value=data.get('date'))
-            data['prepared_by'] = st.text_input("Reporter / Prepared By", value=data.get('prepared_by', ''))
-
-        st.divider()
+        system_prompt = """
+        You are a senior project manager and regulatory affairs expert specializing in medical devices.
+        A user has provided initial information for a new product. Your task is to expand this into a formal project charter draft.
+        - Extrapolate a plausible "Project Goal" from the problem statement.
+        - Define a reasonable "Project Scope".
+        - Suggest a likely FDA "Device Classification" (Class I, Class II, or Class III) based on the description.
+        - Propose a list of "Applicable Standards & Regulations" based on the classification.
+        - Suggest key "Stakeholders".
+        Return ONLY a single, valid JSON object with these exact keys: "problem_statement", "project_goal", "scope", "device_classification", "applicable_standards" (as a list of strings), and "stakeholders".
+        """
+        user_prompt = f"""
+        **Product Name:** {product_name}
+        **Problem it Solves:** {problem}
+        **Target User:** {user}
         
-        source_opts = ['Internal Audit', 'Customer Complaint', 'Nonconforming Product', 'Trend Analysis', 'Other']
-        data['source_of_issue'] = st.selectbox("Source of Issue", source_opts, index=source_opts.index(data.get('source_of_issue')) if data.get('source_of_issue') in source_opts else 1)
-        
-        ai_assist_field(
-            "Issue Description", 
-            "issue_desc", 
-            "What was the issue identified? Include source details.", 
-            height=150, 
-            field_key="issue_description"
-        )
-        
-        ai_assist_field(
-            "Immediate Actions / Corrections", 
-            "imm_actions", 
-            "How will we 'stop the bleeding' immediately?", 
-            height=100, 
-            field_key="immediate_actions"
-        )
-        
-        if st.button("💾 Save Intake & Advance", type="primary"):
-            data['status'] = 'Investigation'
-            st.success("Intake saved. Proceeding to Investigation.")
-
-    # === TAB 2: INVESTIGATION (RCA) ===
-    with tabs[1]:
-        st.info("Perform Root Cause Analysis (Fishbone/5 Whys) before filling this section.")
-        
-        ai_assist_field(
-            "Root Cause Analysis Findings", 
-            "root_cause", 
-            "What is the underlying cause? Attach findings.", 
-            height=200, 
-            field_key="root_cause"
-        )
-        
-        col1, col2 = st.columns(2)
-        with col1:
-             st.markdown("**Risk Severity**")
-             data['risk_severity'] = st.slider("Severity", 1, 5, value=data.get('risk_severity', 3))
-        with col2:
-             st.markdown("**Risk Probability**")
-             data['risk_probability'] = st.slider("Probability", 1, 5, value=data.get('risk_probability', 3))
-
-    # === TAB 3: ACTIONS ===
-    with tabs[2]:
-        st.subheader("Corrective & Preventive Action Plan")
-        
-        with st.expander("Corrective Actions (Fix the specific issue)", expanded=True):
-            ai_assist_field("Corrective Action Description", "ca_desc", "How will we correct the issue?", height=100, field_key="corrective_action")
-            ai_assist_field("Implementation Plan (CA)", "ca_impl", "Who will do what by when?", height=100, field_key="implementation_of_corrective_actions")
-        
-        with st.expander("Preventive Actions (Prevent recurrence)", expanded=True):
-            ai_assist_field("Preventive Action Description", "pa_desc", "How will we prevent recurrence?", height=100, field_key="preventive_action")
-            ai_assist_field("Implementation Plan (PA)", "pa_impl", "Who will do what by when?", height=100, field_key="implementation_of_preventive_actions")
-
-    # === TAB 4: VERIFICATION ===
-    with tabs[3]:
-        st.subheader("Effectiveness Check")
-        st.caption("Plan how you will verify the fix works.")
-        
-        ai_assist_field(
-            "Effectiveness Check Plan", 
-            "eff_plan", 
-            "Criteria for success?", 
-            height=100, 
-            field_key="effectiveness_verification_plan"
-        )
-        
-        st.divider()
-        st.markdown("### Post-Implementation Findings")
-        ai_assist_field(
-            "Effectiveness Check Findings", 
-            "eff_findings", 
-            "Objective evidence that the action worked.", 
-            height=150, 
-            field_key="effectiveness_check_findings"
-        )
-
-    # === TAB 5: CLOSURE ===
-    with tabs[4]:
-        st.subheader("Final Review & Sign-off")
-        
-        if not data.get('effectiveness_check_findings'):
-            st.warning("⚠️ Effectiveness findings are missing.")
-        
-        c1, c2 = st.columns(2)
-        data['closed_by'] = c1.text_input("Closed By (Principal Investigator)", value=data.get('closed_by', ''))
-        data['closure_date'] = c2.date_input("Closure Date", value=data.get('closure_date', date.today()))
-        
-        data['additional_comments'] = st.text_area("Additional Comments / Residual Risk", value=data.get('additional_comments', ''))
-
-        st.divider()
-        if st.button("🔒 FORMALLY CLOSE CAPA", type="primary", use_container_width=True):
-            is_valid, errors, _ = validate_capa_data(data)
-            if errors:
-                for e in errors: st.error(e)
-            else:
-                data['status'] = 'Closed'
-                st.balloons()
-                st.success(f"CAPA {data['capa_number']} Closed Successfully.")
-                # Log to audit trail
-                st.session_state.audit_logger.log_action(
-                    user="current_user", action="close_capa", entity="capa", details={"id": data['capa_number']}
-                )
+        Now, generate the complete project charter draft as a JSON object.
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+                max_tokens=2000,
+                response_format={"type": "json_object"}
+            )
+            raw_content = response.choices[0].message.content
+            return parse_ai_json_response(raw_content)
+        except Exception as e:
+            return {"error": f"Failed to generate project charter draft: {e}"}

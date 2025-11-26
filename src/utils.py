@@ -7,6 +7,8 @@ from datetime import date, timedelta
 import pandas as pd
 from functools import wraps
 import openai
+import json
+import re
 
 def init_session_state():
     """Initializes standard session state keys."""
@@ -39,3 +41,21 @@ def retry_with_backoff(retries=3, initial_delay=1):
             return func(*args, **kwargs)
         return wrapper
     return decorator
+
+def parse_ai_json_response(response_text: str) -> dict:
+    """
+    Parses a JSON string from an AI response, handling potential Markdown code blocks.
+    """
+    try:
+        # Strip markdown code blocks if present
+        if "```" in response_text:
+            # Regex to find the content inside ```json ... ``` or just ``` ... ```
+            match = re.search(r"```(?:json)?(.*?)```", response_text, re.DOTALL)
+            if match:
+                response_text = match.group(1)
+        
+        return json.loads(response_text.strip())
+    except json.JSONDecodeError:
+        return {"error": "Failed to parse JSON response from AI."}
+    except Exception as e:
+        return {"error": f"An unexpected error occurred during parsing: {e}"}

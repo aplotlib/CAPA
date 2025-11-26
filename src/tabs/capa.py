@@ -2,96 +2,192 @@
 
 import streamlit as st
 from datetime import date
+import pandas as pd
 from compliance import validate_capa_data
 
-def display_capa_tab():
+def ai_assist_field(label, key_suffix, help_text="", height=100, field_key=None):
     """
-    Displays an internationally compliant CAPA form, structured as a guided workflow.
-    This version includes UI fixes and better state management.
+    Helper widget that renders a text area with an optional AI Refine button.
     """
-    st.header("📝 Corrective and Preventive Action (CAPA) Workflow")
-    st.info(
-        "This guided workflow follows a risk-based CAPA process aligned with industry best practices."
-    )
+    col_main, col_ai = st.columns([5, 1])
+    
+    # Retrieve current value
+    current_val = st.session_state.capa_data.get(field_key, "")
+    
+    with col_main:
+        user_input = st.text_area(
+            label, 
+            value=current_val, 
+            height=height, 
+            help=help_text, 
+            key=f"input_{key_suffix}"
+        )
+        # Update session state immediately on change
+        st.session_state.capa_data[field_key] = user_input
 
-    # Initialize capa_data in session state if it doesn't exist
+    with col_ai:
+        st.write("") # Spacer
+        st.write("") 
+        if st.button("✨ Refine", key=f"btn_{key_suffix}", help="Use AI to polish this text"):
+            if st.session_state.api_key_missing:
+                st.error("No API Key")
+            else:
+                with st.spinner("Polishing..."):
+                    refined = st.session_state.ai_capa_helper.refine_capa_input(
+                        field_name=label,
+                        rough_input=user_input,
+                        product_context=st.session_state.product_info['name']
+                    )
+                    st.session_state.capa_data[field_key] = refined
+                    st.rerun()
+
+def display_capa_tab():
+    st.header("⚡ CAPA LIFECYCLE HUB")
+    
+    # Ensure CAPA data init
     if 'capa_data' not in st.session_state:
-        st.session_state.capa_data = {}
+        st.session_state.capa_data = {
+            'capa_number': f"CAPA-{date.today().strftime('%Y%m%d')}-001",
+            'date': date.today(),
+            'status': 'Open'
+        }
     data = st.session_state.capa_data
 
-    # --- AI Suggestions Button ---
-    if not st.session_state.get('api_key_missing', True):
-        if not st.session_state.get('analysis_results'):
-            st.warning("Run an analysis on the Dashboard tab to enable AI-powered suggestions.")
-        else:
-            if st.button("🤖 Get AI Suggestions for CAPA Form", help="Click here to use AI to populate the fields below based on the analysis results."):
-                with st.spinner("AI is generating CAPA suggestions..."):
-                    issue_summary = st.session_state.analysis_results.get('insights', 'No summary available.')
-                    suggestions = st.session_state.ai_capa_helper.generate_capa_suggestions(
-                        issue_summary, st.session_state.analysis_results
-                    )
-                    # Populate fields with suggestions, preserving existing data if a suggestion is empty
-                    if suggestions and "error" not in suggestions:
-                        data['issue_description'] = suggestions.get('issue_description', data.get('issue_description', ''))
-                        data['root_cause'] = suggestions.get('root_cause_analysis', data.get('root_cause', ''))
-                        data['corrective_action'] = suggestions.get('corrective_action', data.get('corrective_action', ''))
-                        data['preventive_action'] = suggestions.get('preventive_action', data.get('preventive_action', ''))
-                        data['effectiveness_verification_plan'] = suggestions.get('effectiveness_verification_plan', data.get('effectiveness_verification_plan', ''))
-                        st.success("✅ AI suggestions have been populated in the form below.")
-                    else:
-                        st.error("Could not retrieve AI suggestions. Please try again.")
+    # --- Status Header ---
+    status_color = {
+        'Open': 'red',
+        'Investigation': 'orange',
+        'Actions Implementation': 'yellow',
+        'Verification': 'blue',
+        'Closed': 'green'
+    }.get(data.get('status', 'Open'), 'grey')
+    
+    st.markdown(f"""
+    <div style="padding: 10px; border: 1px solid {status_color}; border-radius: 5px; background: rgba(0,0,0,0.3); display: flex; justify-content: space-between; align-items: center;">
+        <div><strong>ACTIVE CAPA:</strong> <span style="font-family:'Fira Code'; color:var(--neon-cyan);">{data.get('capa_number')}</span></div>
+        <div><strong>STATUS:</strong> <span style="color:{status_color}; font-weight:bold;">{data.get('status', 'Open').upper()}</span></div>
+    </div>
+    <br>
+    """, unsafe_allow_html=True)
 
-    # --- CAPA Form Sections ---
-    with st.expander("📂 Step 1: Initiation & Problem Description", expanded=True):
-        st.markdown("##### **1.1 Identification**")
-        col1, col2 = st.columns(2)
-        data['capa_number'] = col1.text_input("CAPA Number", value=data.get('capa_number', f"CAPA-{date.today().strftime('%Y%m%d')}-001"))
-        # Pre-fill product name from session state if available
-        product_name_default = st.session_state.product_info.get('sku', '') # Correctly get sku
-        data['product_name'] = col1.text_input("Product Name/Model", value=data.get('product_name', product_name_default))
-        data['date'] = col2.date_input("Initiation Date", value=data.get('date', date.today()))
-        data['prepared_by'] = col2.text_input("Prepared By", value=data.get('prepared_by', ''))
+    # --- Workflow Tabs ---
+    tabs = st.tabs(["1. INTAKE (Fast Track)", "2. INVESTIGATION", "3. ACTIONS", "4. VERIFICATION", "5. CLOSURE"])
 
-        st.markdown("##### **1.2 Problem Description**")
-        # Ensure source_of_issue has a default value to prevent errors
-        source_options = ['Internal Audit', 'Customer Complaint', 'Nonconforming Product', 'Management Review', 'Trend Analysis', 'Other']
-        current_source_index = source_options.index(data.get('source_of_issue', 'Customer Complaint'))
-        data['source_of_issue'] = st.selectbox("Source of Issue", source_options, index=current_source_index)
-        data['issue_description'] = st.text_area("Detailed Description of Non-conformity", value=data.get('issue_description', ''), height=150)
-
-    with st.expander("🔍 Step 2: Investigation & Root Cause Analysis"):
-        st.markdown("##### **2.1 Immediate Actions**")
-        data['immediate_actions'] = st.text_area("Immediate Actions/Corrections", value=data.get('immediate_actions', ''), height=100, help="How will we correct the issue at hand? How will we 'stop the bleeding?'")
-
-        st.markdown("##### **2.2 Risk Assessment**")
-        r_col1, r_col2 = st.columns(2)
-        data['risk_severity'] = r_col1.slider("Severity (Impact of failure)", 1, 5, value=data.get('risk_severity', 3), help="1: Insignificant, 5: Catastrophic")
-        data['risk_probability'] = r_col2.slider("Probability (Likelihood of occurrence)", 1, 5, value=data.get('risk_probability', 3), help="1: Remote, 5: Frequent")
+    # === TAB 1: INTAKE ===
+    with tabs[0]:
+        st.caption("🚀 Optimized for quick entry by Product Developers.")
         
-        # Add a place to store uploaded evidence files
-        data['evidence_files'] = st.file_uploader("Upload Evidence (Images, PDFs, Reports)", accept_multiple_files=True)
+        c1, c2 = st.columns(2)
+        with c1:
+            data['capa_number'] = st.text_input("CAPA ID", value=data.get('capa_number'))
+            data['product_name'] = st.text_input("Product/Asset", value=data.get('product_name', st.session_state.product_info['sku']))
+        with c2:
+            data['date'] = st.date_input("Initiation Date", value=data.get('date'))
+            data['prepared_by'] = st.text_input("Reporter / Prepared By", value=data.get('prepared_by', ''))
 
+        st.divider()
+        
+        source_opts = ['Internal Audit', 'Customer Complaint', 'Nonconforming Product', 'Trend Analysis', 'Other']
+        data['source_of_issue'] = st.selectbox("Source of Issue", source_opts, index=source_opts.index(data.get('source_of_issue')) if data.get('source_of_issue') in source_opts else 1)
+        
+        ai_assist_field(
+            "Issue Description", 
+            "issue_desc", 
+            "What was the issue identified? Include source details.", 
+            height=150, 
+            field_key="issue_description"
+        )
+        
+        ai_assist_field(
+            "Immediate Actions / Corrections", 
+            "imm_actions", 
+            "How will we 'stop the bleeding' immediately?", 
+            height=100, 
+            field_key="immediate_actions"
+        )
+        
+        if st.button("💾 Save Intake & Advance", type="primary"):
+            data['status'] = 'Investigation'
+            st.success("Intake saved. Proceeding to Investigation.")
 
-    with st.expander("🛠️ Step 3: Corrective & Preventive Action Plan"):
-        data['corrective_action'] = st.text_area("Corrective Action(s) to eliminate the root cause", value=data.get('corrective_action', ''), height=150)
-        data['preventive_action'] = st.text_area("Preventive Action(s) to prevent recurrence", value=data.get('preventive_action', ''), height=150)
+    # === TAB 2: INVESTIGATION (RCA) ===
+    with tabs[1]:
+        st.info("Perform Root Cause Analysis (Fishbone/5 Whys) before filling this section.")
+        
+        ai_assist_field(
+            "Root Cause Analysis Findings", 
+            "root_cause", 
+            "What is the underlying cause? Attach findings.", 
+            height=200, 
+            field_key="root_cause"
+        )
+        
+        col1, col2 = st.columns(2)
+        with col1:
+             st.markdown("**Risk Severity**")
+             data['risk_severity'] = st.slider("Severity", 1, 5, value=data.get('risk_severity', 3))
+        with col2:
+             st.markdown("**Risk Probability**")
+             data['risk_probability'] = st.slider("Probability", 1, 5, value=data.get('risk_probability', 3))
 
-    with st.expander("✅ Step 4: Verification & Closure Plan"):
-        data['effectiveness_verification_plan'] = st.text_area("Effectiveness Check Plan", value=data.get('effectiveness_verification_plan', ''), height=150, help="How will we determine if the actions taken were effective?")
+    # === TAB 3: ACTIONS ===
+    with tabs[2]:
+        st.subheader("Corrective & Preventive Action Plan")
+        
+        with st.expander("Corrective Actions (Fix the specific issue)", expanded=True):
+            ai_assist_field("Corrective Action Description", "ca_desc", "How will we correct the issue?", height=100, field_key="corrective_action")
+            ai_assist_field("Implementation Plan (CA)", "ca_impl", "Who will do what by when?", height=100, field_key="implementation_of_corrective_actions")
+        
+        with st.expander("Preventive Actions (Prevent recurrence)", expanded=True):
+            ai_assist_field("Preventive Action Description", "pa_desc", "How will we prevent recurrence?", height=100, field_key="preventive_action")
+            ai_assist_field("Implementation Plan (PA)", "pa_impl", "Who will do what by when?", height=100, field_key="implementation_of_preventive_actions")
 
-    st.divider()
-    if st.button("🚀 Proceed to Effectiveness Check", type="primary", use_container_width=True):
-        is_valid, errors, warnings = validate_capa_data(st.session_state.capa_data)
-        if errors:
-            for error in errors:
-                st.error(f"**Missing Field:** {error}")
-        else:
-            # Store the current data for the closure tab
-            st.session_state.capa_closure_data['original_capa'] = st.session_state.capa_data.copy()
-            st.session_state.capa_closure_data['original_metrics'] = st.session_state.analysis_results
-            st.success("CAPA form is valid. Please proceed to the 'CAPA Closure' tab.")
-            # Optionally, you could switch tabs programmatically if Streamlit adds support
+    # === TAB 4: VERIFICATION ===
+    with tabs[3]:
+        st.subheader("Effectiveness Check")
+        st.caption("Plan how you will verify the fix works.")
+        
+        ai_assist_field(
+            "Effectiveness Check Plan", 
+            "eff_plan", 
+            "Criteria for success?", 
+            height=100, 
+            field_key="effectiveness_verification_plan"
+        )
+        
+        st.divider()
+        st.markdown("### Post-Implementation Findings")
+        ai_assist_field(
+            "Effectiveness Check Findings", 
+            "eff_findings", 
+            "Objective evidence that the action worked.", 
+            height=150, 
+            field_key="effectiveness_check_findings"
+        )
 
-        if warnings:
-            for warning in warnings:
-                st.warning(f"**Suggestion:** {warning}")
+    # === TAB 5: CLOSURE ===
+    with tabs[4]:
+        st.subheader("Final Review & Sign-off")
+        
+        if not data.get('effectiveness_check_findings'):
+            st.warning("⚠️ Effectiveness findings are missing.")
+        
+        c1, c2 = st.columns(2)
+        data['closed_by'] = c1.text_input("Closed By (Principal Investigator)", value=data.get('closed_by', ''))
+        data['closure_date'] = c2.date_input("Closure Date", value=data.get('closure_date', date.today()))
+        
+        data['additional_comments'] = st.text_area("Additional Comments / Residual Risk", value=data.get('additional_comments', ''))
+
+        st.divider()
+        if st.button("🔒 FORMALLY CLOSE CAPA", type="primary", use_container_width=True):
+            is_valid, errors, _ = validate_capa_data(data)
+            if errors:
+                for e in errors: st.error(e)
+            else:
+                data['status'] = 'Closed'
+                st.balloons()
+                st.success(f"CAPA {data['capa_number']} Closed Successfully.")
+                # Log to audit trail
+                st.session_state.audit_logger.log_action(
+                    user="current_user", action="close_capa", entity="capa", details={"id": data['capa_number']}
+                )

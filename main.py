@@ -17,7 +17,6 @@ sys.path.insert(0, SRC_DIR)
 # Core logic imports from the src package
 from src.ai_factory import AIHelperFactory
 from src.audit_logger import AuditLogger
-# Note: Ensure init_session_state is added to src/utils.py as per the refactor plan
 from src.utils import init_session_state 
 
 # --- PAGE CONFIGURATION ---
@@ -29,16 +28,13 @@ st.set_page_config(
 )
 
 # --- ASSETS & BRANDING ---
-# Using native st.logo (v1.45+) for consistent branding across the sidebar and top bar
 LOGO_PATH = os.path.join(APP_DIR, "logo.png") 
 if os.path.exists(LOGO_PATH):
     st.logo(LOGO_PATH, icon_image=LOGO_PATH)
 else:
-    # Fallback/Placeholder if specific logo file is missing
     st.logo("https://placehold.co/200x80/0B0E14/00F3FF?text=ORION", link="https://streamlit.io")
 
 # --- INITIALIZATION ---
-# Initialize session state variables (user info, data, flags)
 init_session_state()
 
 # Load Configuration
@@ -46,15 +42,13 @@ try:
     with open("config.yaml", "r") as f:
         st.session_state.config = yaml.safe_load(f)
 except FileNotFoundError:
-    st.error("Configuration file (config.yaml) not found. Please ensure it exists in the root directory.")
+    st.error("Configuration file (config.yaml) not found.")
     st.stop()
 
 # Initialize AI & Core Components
-# We check specifically for the API key in secrets
 api_key = st.secrets.get("OPENAI_API_KEY")
 st.session_state.api_key_missing = not bool(api_key)
 
-# Initialize singleton components only once
 if not st.session_state.get('components_initialized'):
     from src.data_processing import DataProcessor
     from src.document_generator import DocumentGenerator
@@ -63,14 +57,12 @@ if not st.session_state.get('components_initialized'):
     st.session_state.doc_generator = DocumentGenerator()
     st.session_state.audit_logger = AuditLogger()
     
-    # Initialize AI helpers only if API key is present
     if api_key:
         AIHelperFactory.initialize_ai_helpers(api_key)
     
     st.session_state.components_initialized = True
 
 # --- LOGIN LOGIC ---
-# Mimics the structure of st.login() for future compatibility
 if not st.session_state.get("logged_in", False):
     st.markdown("## ORION SYSTEM ACCESS")
     st.info("Please authenticate to access the Quality Management System.")
@@ -78,17 +70,21 @@ if not st.session_state.get("logged_in", False):
     with st.form("login_form"):
         password = st.text_input("Access Code", type="password")
         if st.form_submit_button("Initialize Link", type="primary"):
-            # Check against secrets or fallback to default
             if password == st.secrets.get("APP_PASSWORD", "admin"):
                 st.session_state.logged_in = True
                 st.rerun()
             else:
                 st.toast("Access Denied: Invalid Credentials", icon="🚫")
-    # Stop execution here if not logged in
     st.stop()
 
 # --- PAGE WRAPPERS ---
-# These functions lazy-load the heavy tab modules only when the user navigates to them.
+def page_instructions():
+    from src.tabs.instructions import display_instructions_tab
+    display_instructions_tab()
+
+def page_chat_support():
+    from src.tabs.chat_support import display_chat_support_tab
+    display_chat_support_tab()
 
 def page_dashboard():
     from src.tabs.dashboard import display_dashboard
@@ -126,9 +122,12 @@ def page_exports():
     from src.tabs.exports import display_exports_tab
     display_exports_tab()
 
-# --- NAVIGATION SETUP (Streamlit v1.46+) ---
-# Defines the multi-page structure using the new native navigation
+# --- NAVIGATION SETUP ---
 pages = {
+    "Help & Guide": [
+        st.Page(page_instructions, title="Start Here", icon="📘"),
+        st.Page(page_chat_support, title="AI Assistant", icon="💬"),
+    ],
     "Mission Control": [
         st.Page(page_dashboard, title="Dashboard", icon="📊", default=True),
         st.Page(page_exports, title="Data Exports", icon="💾"),
@@ -148,13 +147,11 @@ pages = {
 
 pg = st.navigation(pages)
 
-# --- GLOBAL SIDEBAR CONTEXT ---
-# Elements here persist across all pages
+# --- GLOBAL SIDEBAR ---
 with st.sidebar:
     st.header("Active Asset")
     st.caption("Target System for Analysis")
     
-    # Persistent inputs for the active product context
     st.session_state.product_info['sku'] = st.text_input(
         "SKU", st.session_state.product_info.get('sku', '')
     )
@@ -162,7 +159,6 @@ with st.sidebar:
         "Name", st.session_state.product_info.get('name', '')
     )
     
-    # Warning if AI is disabled
     if st.session_state.api_key_missing:
         st.divider()
         st.warning("⚠️ AI features disabled (No API Key)")

@@ -90,8 +90,20 @@ def display_manual_writer_tab():
     # --- Step 2: Review & Edit Manual ---
     if st.session_state.get('manual_content'):
         st.divider()
-        st.subheader("Step 2: Review and Edit Your Manual")
+        st.subheader("Step 2: Review, Edit, and Download")
+        
+        full_manual_text = f"# User Manual for {product_info['name']}\n\n"
         
         for section, content in st.session_state.manual_content.items():
+            full_manual_text += f"## {section}\n{content}\n\n"
             with st.expander(section, expanded=False):
                 st.markdown(content)
+        
+        st.download_button(
+            label="Download Manual (Markdown)",
+            data=full_manual_text,
+            file_name=f"Manual_{product_info['name']}_{target_language}.md",
+            mime="text/markdown",
+            type="primary",
+            use_container_width=True
+        )

@@ -13,12 +13,11 @@ def display_dashboard():
     # --- R&D AUTO-CONFIGURATION ---
     with st.expander("🚀 Quick Start: R&D Auto-Configuration", expanded=False):
         st.markdown("### Upload R&D Specification")
-        st.info("Upload a Product Specification (DOCX) to auto-populate the System (SKU, Name, FMEA Risks, Costs, Requirements).")
+        st.info("Upload a Product Specification (DOCX) to auto-populate the System (All SKUs, Name, FMEA Risks, Costs, Requirements).")
         
         rd_file = st.file_uploader("Upload R&D Spec (DOCX)", type=['docx'], key="rd_uploader")
         
-        # Updated width="stretch"
-        if rd_file and st.button("✨ Auto-Configure Project", type="primary"):
+        if rd_file and st.button("✨ Auto-Configure Project", type="primary", use_container_width=True):
             if st.session_state.api_key_missing:
                 st.error("API Key required for AI processing.")
             else:
@@ -29,8 +28,13 @@ def display_dashboard():
                     if "error" in config_data:
                         st.error(config_data['error'])
                     else:
-                        # 1. Update Product Info
-                        st.session_state.product_info['sku'] = config_data.get('sku', '')
+                        # 1. Update Product Info with List of SKUs
+                        skus = config_data.get('skus', [])
+                        if isinstance(skus, list) and skus:
+                            st.session_state.product_info['sku'] = ", ".join(skus)
+                        else:
+                            st.session_state.product_info['sku'] = config_data.get('sku', '')
+
                         st.session_state.product_info['name'] = config_data.get('product_name', '')
                         st.session_state.product_info['ifu'] = config_data.get('description', '')
                         
@@ -51,14 +55,15 @@ def display_dashboard():
                         st.session_state.sales_price = config_data.get('sales_price', 150.0)
                         
                         # 4. Update Product Dev / Charter Inputs
-                        # Ensure dict exists (handled by utils.py now, but good to be safe)
                         if 'product_dev_data' not in st.session_state:
                             st.session_state.product_dev_data = {}
                             
                         st.session_state.product_dev_data['user_needs'] = config_data.get('user_needs', '')
                         st.session_state.product_dev_data['tech_requirements'] = config_data.get('tech_requirements', '')
                         
-                        st.success(f"✅ Configuration Complete! Switched to SKU: {config_data.get('sku')}")
+                        st.success(f"✅ Configuration Complete! Mapped SKUs: {st.session_state.product_info['sku']}")
+                        st.balloons()
+                        # Force rerun to update sidebar and other tabs immediately
                         st.rerun()
 
     # --- DATA UPLOAD SECTION ---
@@ -86,8 +91,7 @@ def display_dashboard():
         sales_file = c1.file_uploader("Upload Sales/Forecast Data (CSV/Excel)", type=['csv', 'xlsx'], help="File containing SKU and Quantity Sold.")
         returns_file = c2.file_uploader("Upload Returns Pivot/Report (CSV/Excel)", type=['csv', 'xlsx'], help="File containing SKU and Return Reasons/Quantities.")
         
-        # Updated width="stretch"
-        if st.button("🚀 Process Data & Run Analysis", type="primary", width="stretch"):
+        if st.button("🚀 Process Data & Run Analysis", type="primary", use_container_width=True):
             if sales_file and returns_file:
                 with st.spinner("Processing data across SKUs..."):
                     try:
@@ -146,20 +150,18 @@ def display_dashboard():
     col_export, _ = st.columns([1, 4])
     if col_export.button("💾 Export Dashboard Report", help="Download a DOCX report of these metrics."):
         doc_buffer = st.session_state.doc_generator.generate_dashboard_docx(results, st.session_state.product_info)
-        # Updated width="stretch"
         st.download_button(
             "Download Report (.docx)", 
             doc_buffer, 
             f"Dashboard_Report_{target_sku}_{date.today()}.docx",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            width="stretch"
+            use_container_width=True
         )
 
     # --- SKU SELECTION & BREAKDOWN ---
     st.divider()
     st.subheader("📊 SKU Performance Breakdown")
     with st.expander("View Full Data Table", expanded=True):
-        # Updated width="stretch"
         st.dataframe(
             return_summary,
             column_config={
@@ -169,7 +171,7 @@ def display_dashboard():
                 "return_rate": st.column_config.NumberColumn("Return Rate (%)", format="%.2f%%"),
                 "quality_status": "Status"
             },
-            width="stretch",
+            use_container_width=True,
             hide_index=True
         )
 
@@ -178,14 +180,15 @@ def display_dashboard():
     sku_list = return_summary['sku'].unique().tolist()
     
     default_idx = 0
+    # Try to match if target_sku matches one in the list (even partial)
     if target_sku in sku_list:
         default_idx = sku_list.index(target_sku)
         
     selected_sku = col_sel.selectbox("Select SKU to Analyze", sku_list, index=default_idx, help="Choose a specific product to see detailed charts and AI insights.")
     
-    if selected_sku != st.session_state.product_info.get('sku'):
-        st.session_state.product_info['sku'] = selected_sku
-
+    # Do not auto-overwrite the multi-sku list from R&D, just set it locally for display logic if needed
+    # But user might want to drill down.
+    
     summary_data = return_summary[return_summary['sku'] == selected_sku].iloc[0]
 
     # --- METRICS DISPLAY ---
@@ -229,8 +232,7 @@ def display_dashboard():
             }
         ))
         fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", font={'color': "white"}, height=300)
-        # Updated width="stretch"
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
     
     with col_ai:
         st.subheader(f"🤖 AI Insight: {selected_sku}")
@@ -254,3 +256,4 @@ def display_dashboard():
                 - Continue monitoring monthly trends.
                 - No immediate CAPA action required.
                 """)
+}

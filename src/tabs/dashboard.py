@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 from src.analysis import run_full_analysis
 
 def display_dashboard():
-    st.title(f"Mission Control: `{st.session_state.product_info['sku']}`")
+    st.title(f"Mission Control: `{st.session_state.product_info.get('sku', 'Unknown')}`")
 
     # --- DATA UPLOAD SECTION ---
     with st.expander("📂 Data Upload & Processing", expanded=not st.session_state.get('analysis_results')):
@@ -61,8 +61,8 @@ def display_dashboard():
     results = st.session_state.analysis_results
 
     # Check for error key again (redundancy safety)
-    if "error" in results:
-        st.error(results['error'])
+    if not isinstance(results, dict) or "error" in results:
+        st.error(results.get('error', 'Unknown analysis error'))
         return
 
     # Check if return_summary exists and is a valid DataFrame
@@ -78,6 +78,7 @@ def display_dashboard():
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Return Rate", f"{summary_data.get('return_rate', 0):.2f}%")
     c2.metric("Total Returns", f"{int(summary_data.get('total_returned', 0)):,}")
+    c3.metric("Total Sold", f"{int(summary_data.get('total_sold', 0)):,}")
     
     quality_metrics = results.get('quality_metrics', {})
     risk_level = quality_metrics.get('risk_level', 'Low')

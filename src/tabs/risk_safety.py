@@ -9,8 +9,7 @@ def display_risk_safety_tab():
     """
     st.header("⚠️ Risk & Safety Analysis Hub")
     if st.session_state.api_key_missing:
-        st.error("AI features are disabled. Please configure your API key.")
-        return
+        st.warning("AI features are disabled (No API Key). You can still use manual tools.", icon="⚠️")
 
     # Initialize session state keys for FMEA if they don't exist
     if 'fmea_rows' not in st.session_state:
@@ -27,74 +26,85 @@ def display_risk_safety_tab():
             - **Detection (D):** How likely you are to detect the failure (1=High, 10=Low).
             **RPN = S × O × D**. Higher RPNs are higher priorities.
             """)
-
-        st.markdown("##### Step 1: Manually Enter 1-3 Initial Failure Modes")
-        with st.form("manual_fmea_form"):
-            failure_mode = st.text_input("Potential Failure Mode")
-            effect = st.text_area("Potential Effect(s)", height=100)
-            cause = st.text_area("Potential Cause(s)", height=100)
-            if st.form_submit_button("Add Failure Mode", use_container_width=True):
-                if failure_mode:
-                    st.session_state.fmea_rows.append({
-                        "Potential Failure Mode": failure_mode,
-                        "Potential Effect(s)": effect,
-                        "Potential Cause(s)": cause,
-                        "Severity": 5, "Occurrence": 5, "Detection": 5, "RPN": 125
-                    })
-                    st.rerun()
-                else:
-                    st.warning("Potential Failure Mode is a required field.")
-
-        if st.session_state.fmea_rows:
-            st.markdown("---")
-            st.markdown("##### Current FMEA Entries")
-            for i, row in enumerate(st.session_state.fmea_rows):
-                with st.container(border=True):
-                    c1, c2, c3 = st.columns(3)
-                    row["Potential Failure Mode"] = c1.text_input("Failure Mode", value=row["Potential Failure Mode"], key=f"fm_{i}")
-                    row["Potential Effect(s)"] = c2.text_area("Effect(s)", value=row["Potential Effect(s)"], key=f"eff_{i}", height=150)
-                    row["Potential Cause(s)"] = c3.text_area("Cause(s)", value=row["Potential Cause(s)"], key=f"cause_{i}", height=150)
-                    
-                    sc1, sc2, sc3 = st.columns(3)
-                    row["Severity"] = sc1.slider("Severity", 1, 10, int(row.get("Severity", 5)), key=f"s_{i}")
-                    row["Occurrence"] = sc2.slider("Occurrence", 1, 10, int(row.get("Occurrence", 5)), key=f"o_{i}")
-                    row["Detection"] = sc3.slider("Detection", 1, 10, int(row.get("Detection", 5)), key=f"d_{i}")
-                    row["RPN"] = row["Severity"] * row["Occurrence"] * row["Detection"]
-                    st.metric("Risk Priority Number (RPN)", row["RPN"])
-            
-            st.markdown("---")
-            st.markdown("##### Step 2: Use AI to Expand Your Analysis")
-            if st.button("🤖 Suggest Additional Failure Modes with AI", use_container_width=True, type="primary"):
-                if 'fmea_generator' in st.session_state:
-                    with st.spinner("AI is brainstorming other risks..."):
-                        analysis_results = st.session_state.get('analysis_results')
-                        insights = "High return rate observed."
-                        if analysis_results:
-                            insights = analysis_results.get('insights', insights)
-
-                        suggestions = st.session_state.fmea_generator.suggest_failure_modes(
-                            st.session_state.product_info.get('ifu', insights), 
-                            analysis_results, 
-                            st.session_state.fmea_rows
-                        )
-                        for suggestion in suggestions:
-                            suggestion.update({"Severity": 5, "Occurrence": 5, "Detection": 5, "RPN": 125})
-                            st.session_state.fmea_rows.append(suggestion)
-                        
-                        # NEW: Audit logging
-                        st.session_state.audit_logger.log_action(
-                            user="current_user",
-                            action="generate_ai_fmea_suggestions",
-                            entity="fmea",
-                            details={"sku": st.session_state.product_info.get('sku'), "suggestions_added": len(suggestions)}
-                        )
-                        st.success("AI has added new failure modes for your review.")
-                        st.rerun()
-                else:
-                    st.warning("AI features are not available. Check your API key.")
         
-        if st.session_state.fmea_rows:
-            st.session_state.fmea_data = pd.DataFrame(st.session_state.fmea_rows)
+        # Prepare Data for Editor
+        if not st.session_state.fmea_rows:
+            # Default empty row structure if list is empty
+            df = pd.DataFrame(columns=["Potential Failure Mode", "Potential Effect(s)", "Potential Cause(s)", "Severity", "Occurrence", "Detection", "RPN"])
+        else:
+            df = pd.DataFrame(st.session_state.fmea_rows)
+
+        # Ensure numeric columns are strictly numeric for the editor
+        numeric_cols = ["Severity", "Occurrence", "Detection", "RPN"]
+        for col in numeric_cols:
+            if col not in df.columns:
+                df[col] = 5 if col != "RPN" else 125
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(5).astype(int)
+
+        # EDITABLE DATA TABLE
+        st.markdown("##### FMEA Worksheet")
+        edited_df = st.data_editor(
+            df,
+            num_rows="dynamic",
+            use_container_width=True,
+            column_config={
+                "Severity": st.column_config.NumberColumn(min_value=1, max_value=10, help="1-10"),
+                "Occurrence": st.column_config.NumberColumn(min_value=1, max_value=10, help="1-10"),
+                "Detection": st.column_config.NumberColumn(min_value=1, max_value=10, help="1-10 (10=Hard to Detect)"),
+                "RPN": st.column_config.NumberColumn(disabled=True, help="Calculated Risk Priority Number"),
+                "Potential Failure Mode": st.column_config.TextColumn(required=True),
+            },
+            key="fmea_editor"
+        )
+
+        # Recalculate RPN and Sync back to Session State
+        if not edited_df.equals(df):
+            edited_df['RPN'] = edited_df['Severity'] * edited_df['Occurrence'] * edited_df['Detection']
+            st.session_state.fmea_rows = edited_df.to_dict('records')
+            st.session_state.fmea_data = edited_df
+            st.rerun()
+
+        st.markdown("##### AI Assistance")
+        if st.button("🤖 Suggest Additional Failure Modes with AI", use_container_width=True, type="primary"):
+            if 'fmea_generator' in st.session_state and not st.session_state.api_key_missing:
+                with st.spinner("AI is brainstorming other risks..."):
+                    analysis_results = st.session_state.get('analysis_results')
+                    insights = "High return rate observed."
+                    if analysis_results:
+                        insights = analysis_results.get('insights', insights)
+
+                    suggestions = st.session_state.fmea_generator.suggest_failure_modes(
+                        st.session_state.product_info.get('ifu', insights), 
+                        analysis_results, 
+                        st.session_state.fmea_rows
+                    )
+                    
+                    # Add new suggestions to the rows
+                    new_rows = []
+                    for s in suggestions:
+                        s_dict = {
+                            "Potential Failure Mode": s.get("Potential Failure Mode", "New Mode"),
+                            "Potential Effect(s)": s.get("Potential Effect(s)", ""),
+                            "Potential Cause(s)": s.get("Potential Cause(s)", ""),
+                            "Severity": 5, "Occurrence": 5, "Detection": 5, "RPN": 125
+                        }
+                        new_rows.append(s_dict)
+                    
+                    st.session_state.fmea_rows.extend(new_rows)
+                    
+                    # Log action
+                    st.session_state.audit_logger.log_action(
+                        user="current_user",
+                        action="generate_ai_fmea_suggestions",
+                        entity="fmea",
+                        details={"sku": st.session_state.product_info.get('sku'), "suggestions_added": len(new_rows)}
+                    )
+                    st.success(f"AI added {len(new_rows)} new failure modes.")
+                    st.rerun()
+            elif st.session_state.api_key_missing:
+                st.error("Please provide an API Key to use AI features.")
+            else:
+                st.error("AI Generator not initialized.")
     
     st.write("") 
     
@@ -116,7 +126,7 @@ def display_risk_safety_tab():
                 urra_env_other = st.text_input("Please specify the 'Other' environment:", key="urra_env_other_text")
 
             if st.form_submit_button("Generate URRA", type="primary", use_container_width=True):
-                if 'urra_generator' in st.session_state:
+                if 'urra_generator' in st.session_state and not st.session_state.api_key_missing:
                     final_environments = list(urra_env_selection)
                     if "Other" in final_environments:
                         final_environments.remove("Other")
@@ -128,10 +138,11 @@ def display_risk_safety_tab():
                     if all([urra_product_name, urra_product_desc, urra_user, env_string]):
                         with st.spinner("AI is generating the URRA..."):
                             st.session_state.urra = st.session_state.urra_generator.generate_urra(urra_product_name, urra_product_desc, urra_user, env_string)
+                            st.rerun()
                     else:
                         st.warning("Please fill in all fields to generate the URRA.")
                 else:
-                    st.error("URRA Generator is not available. Check API key.")
+                    st.error("AI features disabled or unavailable.")
 
         if st.session_state.get('urra'):
             st.markdown("### Use-Related Risk Analysis Results")

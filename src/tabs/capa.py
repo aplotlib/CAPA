@@ -29,11 +29,10 @@ def ai_assist_field(label, key_suffix, help_text="", height=100, field_key=None)
         st.session_state.capa_data[field_key] = user_input
 
     with col_ai:
-        if st.button("✨ Refine", key=f"btn_{key_suffix}", help="Polish grammar and tone (Fast AI)"):
+        if st.button("✨ Refine", key=f"btn_{key_suffix}", help="Click to have AI polish your grammar and tone."):
             if st.session_state.api_key_missing:
                 st.toast("AI API Key Missing", icon="⚠️")
             else:
-                # Use st.status for better feedback on background tasks
                 with st.status("Polishing text...", expanded=False) as status:
                     refined = st.session_state.ai_capa_helper.refine_capa_input(
                         field_name=label,
@@ -48,16 +47,13 @@ def ai_assist_field(label, key_suffix, help_text="", height=100, field_key=None)
 def display_capa_workflow():
     st.title("⚡ CAPA Lifecycle Hub")
     
-    # --- DATA ROBUST INITIALIZATION ---
-    # Fix: Ensure capa_data exists
     if 'capa_data' not in st.session_state:
         st.session_state.capa_data = {}
     
-    # Fix: Ensure required keys exist (prevents KeyError if dict was created empty)
     defaults = {
         'capa_number': f"CAPA-{date.today().strftime('%Y%m%d')}-001",
         'date': date.today(),
-        'status': 'Draft', # Draft, Investigation, Implementation, Verification, Closed
+        'status': 'Draft',
         'issue_description': '',
         'root_cause': '',
         'risk_severity': 3,
@@ -72,39 +68,31 @@ def display_capa_workflow():
 
     data = st.session_state.capa_data
 
-    # --- PROGRESS INDICATOR (UX Improvement) ---
-    # Instead of strict steps, we show progress but allow free navigation
+    # --- PROGRESS INDICATOR ---
     phases = ["Draft", "Investigation", "Implementation", "Verification", "Closed"]
     phase_icons = ["📝", "🔍", "🛠️", "✅", "🔒"]
     
-    # Determine current index based on status
     try:
         current_phase_idx = phases.index(data.get('status', 'Draft'))
     except ValueError:
         current_phase_idx = 0
 
-    # Render a visual progress bar
     st.write("")
     progress_cols = st.columns(len(phases))
     for i, phase in enumerate(phases):
         icon = phase_icons[i]
         if i < current_phase_idx:
-            # Completed phases
             progress_cols[i].markdown(f"**{icon} {phase}**")
             progress_cols[i].progress(100)
         elif i == current_phase_idx:
-            # Current phase
             progress_cols[i].markdown(f":blue[**{icon} {phase}**]")
             progress_cols[i].progress(50)
         else:
-            # Future phases
             progress_cols[i].markdown(f":grey[{icon} {phase}]")
             progress_cols[i].progress(0)
             
     st.divider()
 
-    # --- TABS FOR NAVIGATION (Non-Linear Workflow) ---
-    # This allows the user to jump between sections to fix things without being locked out
     tab_intake, tab_investigation, tab_action, tab_closure = st.tabs([
         "1. Intake & Definition", 
         "2. Root Cause Analysis", 
@@ -116,7 +104,6 @@ def display_capa_workflow():
     with tab_intake:
         st.subheader("📝 Incident Definition")
         
-        # Voice Input Section
         with st.expander("🎙️ Voice Quick-Entry", expanded=False):
             audio_val = st.audio_input("Record Issue Description")
             if audio_val:
@@ -134,19 +121,23 @@ def display_capa_workflow():
 
         c1, c2 = st.columns(2)
         with c1:
-            data['capa_number'] = st.text_input("CAPA ID", value=data.get('capa_number'))
-            data['product_name'] = st.text_input("Product", value=data.get('product_name', st.session_state.product_info['sku']))
+            data['capa_number'] = st.text_input("CAPA ID", value=data.get('capa_number'), help="Unique identifier for this corrective action.")
+            data['product_name'] = st.text_input("Product", value=data.get('product_name', st.session_state.product_info['sku']), help="SKU or Name of the affected product.")
         with c2:
-            data['date'] = st.date_input("Initiation Date", value=data.get('date'))
+            data['date'] = st.date_input("Initiation Date", value=data.get('date'), help="Date the issue was identified.")
             source_opts = ['Customer Complaint', 'Internal Audit', 'Nonconforming Product', 'Trend Analysis']
             current_source = data.get('source_of_issue')
-            # Handle case where saved source might not be in options list
             idx = source_opts.index(current_source) if current_source in source_opts else 0
-            data['source_of_issue'] = st.selectbox("Source", source_opts, index=idx)
+            data['source_of_issue'] = st.selectbox("Source", source_opts, index=idx, help="Where did this issue originate?")
 
-        ai_assist_field("Detailed Description", "issue_desc", "Details of the non-conformity...", height=150, field_key="issue_description")
+        ai_assist_field(
+            "Detailed Description", 
+            "issue_desc", 
+            "Describe the non-conformance. Include 'What, Where, When, and How Much'.", 
+            height=150, 
+            field_key="issue_description"
+        )
         
-        # Status Advance Button
         if data['status'] == 'Draft':
             st.write("")
             if st.button("🚀 Advance to Investigation", type="primary", use_container_width=True):
@@ -164,15 +155,21 @@ def display_capa_workflow():
         c1, c2 = st.columns(2)
         with c1:
              st.info("Risk Assessment")
-             data['risk_severity'] = st.slider("Severity", 1, 5, value=data.get('risk_severity', 3))
-             data['risk_probability'] = st.slider("Probability", 1, 5, value=data.get('risk_probability', 3))
+             data['risk_severity'] = st.slider("Severity", 1, 5, value=data.get('risk_severity', 3), help="1=Minor, 5=Critical/Hazardous")
+             data['risk_probability'] = st.slider("Probability", 1, 5, value=data.get('risk_probability', 3), help="1=Rare, 5=Frequent")
              st.caption(f"Risk Score: {data['risk_severity'] * data['risk_probability']}")
 
         with c2:
             st.info("Tools")
             st.markdown("Use the **Root Cause Tools** page in the sidebar for 5 Whys / Fishbone, then paste findings below.")
 
-        ai_assist_field("Root Cause Analysis Findings", "root_cause", "What is the underlying cause?", height=200, field_key="root_cause")
+        ai_assist_field(
+            "Root Cause Analysis Findings", 
+            "root_cause", 
+            "What is the fundamental reason the problem occurred? (e.g., 'Operator error' is usually not a root cause).", 
+            height=200, 
+            field_key="root_cause"
+        )
         
         if data['status'] == 'Investigation':
             st.write("")
@@ -188,15 +185,13 @@ def display_capa_workflow():
     with tab_action:
         st.subheader("🛠️ Corrective & Preventive Actions")
         
-        # AI Generator for Actions
-        if st.button("🤖 Auto-Draft Actions from Root Cause", help="Uses 'Reasoning' Model"):
+        if st.button("🤖 Auto-Draft Actions from Root Cause", help="AI will suggest actions based on your root cause."):
             if not data.get('root_cause'):
                 st.error("Root Cause required.")
             elif st.session_state.api_key_missing:
                 st.error("AI API Key is missing.")
             else:
                 with st.status("AI is analyzing root cause and drafting actions...", expanded=True) as status:
-                    # Mocking an analysis result object for the helper if real one missing
                     mock_analysis = st.session_state.get('analysis_results', {'return_summary': None})
                     suggestions = st.session_state.ai_capa_helper.generate_capa_suggestions(data['root_cause'], mock_analysis)
                     
@@ -207,9 +202,9 @@ def display_capa_workflow():
                         status.update(label="Drafting Complete!", state="complete")
                         st.rerun()
 
-        ai_assist_field("Corrective Action (Fix)", "ca_desc", height=100, field_key="corrective_action")
-        ai_assist_field("Preventive Action (Prevent)", "pa_desc", height=100, field_key="preventive_action")
-        ai_assist_field("Implementation Plan (Who/When)", "impl_plan", height=100, field_key="implementation_of_corrective_actions")
+        ai_assist_field("Corrective Action (Fix)", "ca_desc", "Immediate action to fix the specific problem.", height=100, field_key="corrective_action")
+        ai_assist_field("Preventive Action (Prevent)", "pa_desc", "Long-term action to prevent recurrence.", height=100, field_key="preventive_action")
+        ai_assist_field("Implementation Plan (Who/When)", "impl_plan", "Details on responsibilities and timeline.", height=100, field_key="implementation_of_corrective_actions")
 
         if data['status'] == 'Implementation':
             st.write("")
@@ -222,12 +217,12 @@ def display_capa_workflow():
     with tab_closure:
         st.subheader("🔒 Effectiveness & Closure")
         
-        ai_assist_field("Effectiveness Check Plan", "eff_plan", height=100, field_key="effectiveness_verification_plan")
-        ai_assist_field("Effectiveness Findings / Evidence", "eff_findings", height=150, field_key="effectiveness_check_findings")
+        ai_assist_field("Effectiveness Check Plan", "eff_plan", "How will you prove the fix worked?", height=100, field_key="effectiveness_verification_plan")
+        ai_assist_field("Effectiveness Findings / Evidence", "eff_findings", "Results of the check (e.g., 'Retested 50 units, 0 failures').", height=150, field_key="effectiveness_check_findings")
 
         st.divider()
         c1, c2 = st.columns(2)
-        data['closed_by'] = c1.text_input("Closed By", value=data.get('closed_by', ''))
+        data['closed_by'] = c1.text_input("Closed By", value=data.get('closed_by', ''), help="Name of the Quality Manager closing the file.")
         data['closure_date'] = c2.date_input("Closure Date", value=data.get('closure_date', date.today()))
 
         if data['status'] != 'Closed':

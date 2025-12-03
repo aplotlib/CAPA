@@ -10,19 +10,19 @@ def display_dashboard():
     target_sku = st.session_state.product_info.get('sku', 'Unknown')
     st.title(f"Mission Control")
 
-    # --- R&D AUTO-CONFIGURATION (NEW) ---
+    # --- R&D AUTO-CONFIGURATION ---
     with st.expander("🚀 Quick Start: R&D Auto-Configuration", expanded=False):
         st.markdown("### Upload R&D Specification")
         st.info("Upload a Product Specification (DOCX) to auto-populate the System (SKU, Name, FMEA Risks, Costs, Requirements).")
         
         rd_file = st.file_uploader("Upload R&D Spec (DOCX)", type=['docx'], key="rd_uploader")
         
+        # Updated width="stretch"
         if rd_file and st.button("✨ Auto-Configure Project", type="primary"):
             if st.session_state.api_key_missing:
                 st.error("API Key required for AI processing.")
             else:
                 with st.spinner("AI is analyzing R&D document... This may take a minute."):
-                    # Initialize parser locally or via factory
                     parser = AIFileParser(st.secrets.get("OPENAI_API_KEY"))
                     config_data = parser.parse_rd_document(rd_file)
                     
@@ -50,7 +50,11 @@ def display_dashboard():
                         st.session_state.unit_cost = config_data.get('unit_cost', 50.0)
                         st.session_state.sales_price = config_data.get('sales_price', 150.0)
                         
-                        # 4. Update Product Dev / Charter Inputs (partial)
+                        # 4. Update Product Dev / Charter Inputs
+                        # Ensure dict exists (handled by utils.py now, but good to be safe)
+                        if 'product_dev_data' not in st.session_state:
+                            st.session_state.product_dev_data = {}
+                            
                         st.session_state.product_dev_data['user_needs'] = config_data.get('user_needs', '')
                         st.session_state.product_dev_data['tech_requirements'] = config_data.get('tech_requirements', '')
                         
@@ -61,7 +65,6 @@ def display_dashboard():
     with st.expander("📂 Sales & Returns Data", expanded=not st.session_state.get('analysis_results')):
         st.markdown("### Define Reporting Period & Upload Data")
         
-        # Date Range Inputs
         d_col1, d_col2 = st.columns(2)
         start_date = d_col1.date_input(
             "Start Date", 
@@ -83,7 +86,8 @@ def display_dashboard():
         sales_file = c1.file_uploader("Upload Sales/Forecast Data (CSV/Excel)", type=['csv', 'xlsx'], help="File containing SKU and Quantity Sold.")
         returns_file = c2.file_uploader("Upload Returns Pivot/Report (CSV/Excel)", type=['csv', 'xlsx'], help="File containing SKU and Return Reasons/Quantities.")
         
-        if st.button("🚀 Process Data & Run Analysis", type="primary", use_container_width=True):
+        # Updated width="stretch"
+        if st.button("🚀 Process Data & Run Analysis", type="primary", width="stretch"):
             if sales_file and returns_file:
                 with st.spinner("Processing data across SKUs..."):
                     try:
@@ -99,7 +103,6 @@ def display_dashboard():
                         duration_days = (end_date - start_date).days
                         if duration_days < 1: duration_days = 1
                         
-                        # Use session state costs (potentially from R&D upload)
                         u_cost = st.session_state.get('unit_cost', 50.0)
                         s_price = st.session_state.get('sales_price', 150.0)
 
@@ -139,22 +142,24 @@ def display_dashboard():
         st.warning("⚠️ Analysis ran, but no valid return data was generated.")
         return
 
-    # --- EXPORT BUTTON (NEW) ---
+    # --- EXPORT BUTTON ---
     col_export, _ = st.columns([1, 4])
     if col_export.button("💾 Export Dashboard Report", help="Download a DOCX report of these metrics."):
         doc_buffer = st.session_state.doc_generator.generate_dashboard_docx(results, st.session_state.product_info)
+        # Updated width="stretch"
         st.download_button(
             "Download Report (.docx)", 
             doc_buffer, 
             f"Dashboard_Report_{target_sku}_{date.today()}.docx",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            use_container_width=True
+            width="stretch"
         )
 
     # --- SKU SELECTION & BREAKDOWN ---
     st.divider()
     st.subheader("📊 SKU Performance Breakdown")
     with st.expander("View Full Data Table", expanded=True):
+        # Updated width="stretch"
         st.dataframe(
             return_summary,
             column_config={
@@ -164,7 +169,7 @@ def display_dashboard():
                 "return_rate": st.column_config.NumberColumn("Return Rate (%)", format="%.2f%%"),
                 "quality_status": "Status"
             },
-            use_container_width=True,
+            width="stretch",
             hide_index=True
         )
 
@@ -183,7 +188,7 @@ def display_dashboard():
 
     summary_data = return_summary[return_summary['sku'] == selected_sku].iloc[0]
 
-    # --- METRICS DISPLAY (Selected SKU) ---
+    # --- METRICS DISPLAY ---
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Return Rate", f"{summary_data.get('return_rate', 0):.2f}%", help="Percentage of sold units returned.")
     c2.metric("Total Returns", f"{int(summary_data.get('total_returned', 0)):,}")
@@ -224,7 +229,8 @@ def display_dashboard():
             }
         ))
         fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", font={'color': "white"}, height=300)
-        st.plotly_chart(fig, use_container_width=True)
+        # Updated width="stretch"
+        st.plotly_chart(fig, width="stretch")
     
     with col_ai:
         st.subheader(f"🤖 AI Insight: {selected_sku}")

@@ -1,5 +1,6 @@
 import openai
 import json
+import pandas as pd
 from src.utils import retry_with_backoff
 
 class BaseAIProcessor:
@@ -34,12 +35,38 @@ class DesignControlsTriager(BaseAIProcessor):
 class UrraGenerator(BaseAIProcessor):
     @retry_with_backoff()
     def generate_urra(self, name, desc, user, env):
-        if not self.client: return "API Key missing"
-        prompt = f"Create a Use-Related Risk Analysis (URRA) table (Markdown) for {name}. User: {user}. Env: {env}. Desc: {desc}."
-        res = self.client.chat.completions.create(
-            model=self.model, messages=[{"role": "user", "content": prompt}]
-        )
-        return res.choices[0].message.content
+        if not self.client: return {"error": "API Key missing"}
+        
+        system_prompt = """
+        You are a Risk Management expert for medical devices (ISO 14971 / IEC 62366).
+        Generate a Use-Related Risk Analysis (URRA) table.
+        
+        Return a JSON object with a single key 'urra_rows', which contains a list of objects.
+        Each object MUST have the following keys:
+        - "Task": The user task being performed.
+        - "Hazard": The potential hazard.
+        - "Hazardous Situation": The sequence of events leading to harm.
+        - "Harm": The potential injury or damage.
+        - "Severity": Integer (1-5).
+        - "Probability": Integer (1-5).
+        - "Risk Level": String (e.g., "Low", "Medium", "High").
+        - "Mitigation": Proposed risk control measure.
+        """
+        
+        user_prompt = f"Product: {name}\nDescription: {desc}\nUser: {user}\nEnvironment: {env}\n\nGenerate 5-7 key use-related risks."
+        
+        try:
+            res = self.client.chat.completions.create(
+                model=self.model, 
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                response_format={"type": "json_object"}
+            )
+            return json.loads(res.choices[0].message.content)
+        except Exception as e:
+            return {"error": str(e)}
 
 class ManualWriter(BaseAIProcessor):
     @retry_with_backoff()
@@ -97,3 +124,4 @@ class MedicalDeviceClassifier(BaseAIProcessor):
             )
             return json.loads(res.choices[0].message.content)
         except Exception as e: return {"error": str(e)}
+}

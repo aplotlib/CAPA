@@ -48,18 +48,34 @@ def ai_assist_field(label, key_suffix, help_text="", height=100, field_key=None)
 def display_capa_workflow():
     st.title("⚡ CAPA Lifecycle Hub")
     
-    # --- DATA INITIALIZATION ---
+    # --- DATA ROBUST INITIALIZATION ---
+    # Fix: Ensure capa_data exists
     if 'capa_data' not in st.session_state:
-        st.session_state.capa_data = {
-            'capa_number': f"CAPA-{date.today().strftime('%Y%m%d')}-001",
-            'date': date.today(),
-            'status': 'Draft' # Draft, Investigation, Implementation, Verification, Closed
-        }
+        st.session_state.capa_data = {}
+    
+    # Fix: Ensure required keys exist (prevents KeyError if dict was created empty)
+    defaults = {
+        'capa_number': f"CAPA-{date.today().strftime('%Y%m%d')}-001",
+        'date': date.today(),
+        'status': 'Draft', # Draft, Investigation, Implementation, Verification, Closed
+        'issue_description': '',
+        'root_cause': '',
+        'risk_severity': 3,
+        'risk_probability': 3,
+        'source_of_issue': 'Customer Complaint',
+        'product_name': st.session_state.product_info.get('sku', '')
+    }
+    
+    for k, v in defaults.items():
+        if k not in st.session_state.capa_data:
+            st.session_state.capa_data[k] = v
+
     data = st.session_state.capa_data
 
     # --- PROGRESS INDICATOR (UX Improvement) ---
     # Instead of strict steps, we show progress but allow free navigation
     phases = ["Draft", "Investigation", "Implementation", "Verification", "Closed"]
+    phase_icons = ["📝", "🔍", "🛠️", "✅", "🔒"]
     
     # Determine current index based on status
     try:
@@ -68,13 +84,22 @@ def display_capa_workflow():
         current_phase_idx = 0
 
     # Render a visual progress bar
+    st.write("")
     progress_cols = st.columns(len(phases))
     for i, phase in enumerate(phases):
-        color = "green" if i <= current_phase_idx else "grey"
-        if i == current_phase_idx:
-            progress_cols[i].markdown(f":blue-background[**{phase}**]")
+        icon = phase_icons[i]
+        if i < current_phase_idx:
+            # Completed phases
+            progress_cols[i].markdown(f"**{icon} {phase}**")
+            progress_cols[i].progress(100)
+        elif i == current_phase_idx:
+            # Current phase
+            progress_cols[i].markdown(f":blue[**{icon} {phase}**]")
+            progress_cols[i].progress(50)
         else:
-            progress_cols[i].markdown(f":grey[{phase}]")
+            # Future phases
+            progress_cols[i].markdown(f":grey[{icon} {phase}]")
+            progress_cols[i].progress(0)
             
     st.divider()
 
@@ -97,11 +122,15 @@ def display_capa_workflow():
             if audio_val:
                 if st.session_state.get("last_audio_id") != id(audio_val):
                     with st.status("Transcribing and processing...", expanded=True) as status:
-                        text = st.session_state.ai_capa_helper.transcribe_audio(audio_val)
-                        st.session_state.capa_data['issue_description'] = text
-                        st.session_state.last_audio_id = id(audio_val)
-                        status.update(label="Transcription Complete", state="complete")
-                        st.rerun()
+                        if st.session_state.api_key_missing:
+                            status.update(label="API Key Missing - Cannot Transcribe", state="error")
+                            st.error("Please provide an OpenAI API Key to use voice features.")
+                        else:
+                            text = st.session_state.ai_capa_helper.transcribe_audio(audio_val)
+                            st.session_state.capa_data['issue_description'] = text
+                            st.session_state.last_audio_id = id(audio_val)
+                            status.update(label="Transcription Complete", state="complete")
+                            st.rerun()
 
         c1, c2 = st.columns(2)
         with c1:
@@ -110,16 +139,23 @@ def display_capa_workflow():
         with c2:
             data['date'] = st.date_input("Initiation Date", value=data.get('date'))
             source_opts = ['Customer Complaint', 'Internal Audit', 'Nonconforming Product', 'Trend Analysis']
-            data['source_of_issue'] = st.selectbox("Source", source_opts, index=0 if not data.get('source_of_issue') else source_opts.index(data.get('source_of_issue')))
+            current_source = data.get('source_of_issue')
+            # Handle case where saved source might not be in options list
+            idx = source_opts.index(current_source) if current_source in source_opts else 0
+            data['source_of_issue'] = st.selectbox("Source", source_opts, index=idx)
 
         ai_assist_field("Detailed Description", "issue_desc", "Details of the non-conformity...", height=150, field_key="issue_description")
         
         # Status Advance Button
         if data['status'] == 'Draft':
-            if st.button("🚀 Advance to Investigation", type="primary"):
-                data['status'] = 'Investigation'
-                st.toast("Status updated: Investigation", icon="🔍")
-                st.rerun()
+            st.write("")
+            if st.button("🚀 Advance to Investigation", type="primary", use_container_width=True):
+                if not data.get('issue_description'):
+                    st.error("Please provide an issue description before proceeding.")
+                else:
+                    data['status'] = 'Investigation'
+                    st.toast("Status updated: Investigation", icon="🔍")
+                    st.rerun()
 
     # === TAB 2: INVESTIGATION ===
     with tab_investigation:
@@ -139,7 +175,8 @@ def display_capa_workflow():
         ai_assist_field("Root Cause Analysis Findings", "root_cause", "What is the underlying cause?", height=200, field_key="root_cause")
         
         if data['status'] == 'Investigation':
-            if st.button("🚀 Advance to Implementation", type="primary"):
+            st.write("")
+            if st.button("🚀 Advance to Implementation", type="primary", use_container_width=True):
                 if data.get('root_cause'):
                     data['status'] = 'Implementation'
                     st.toast("Status updated: Implementation", icon="🛠️")
@@ -155,10 +192,12 @@ def display_capa_workflow():
         if st.button("🤖 Auto-Draft Actions from Root Cause", help="Uses 'Reasoning' Model"):
             if not data.get('root_cause'):
                 st.error("Root Cause required.")
+            elif st.session_state.api_key_missing:
+                st.error("AI API Key is missing.")
             else:
                 with st.status("AI is analyzing root cause and drafting actions...", expanded=True) as status:
-                    # Mocking an analysis result object for the helper
-                    mock_analysis = {'return_summary': None} 
+                    # Mocking an analysis result object for the helper if real one missing
+                    mock_analysis = st.session_state.get('analysis_results', {'return_summary': None})
                     suggestions = st.session_state.ai_capa_helper.generate_capa_suggestions(data['root_cause'], mock_analysis)
                     
                     if suggestions:
@@ -173,7 +212,8 @@ def display_capa_workflow():
         ai_assist_field("Implementation Plan (Who/When)", "impl_plan", height=100, field_key="implementation_of_corrective_actions")
 
         if data['status'] == 'Implementation':
-            if st.button("🚀 Advance to Verification", type="primary"):
+            st.write("")
+            if st.button("🚀 Advance to Verification", type="primary", use_container_width=True):
                 data['status'] = 'Verification'
                 st.toast("Status updated: Verification", icon="✅")
                 st.rerun()
@@ -191,6 +231,7 @@ def display_capa_workflow():
         data['closure_date'] = c2.date_input("Closure Date", value=data.get('closure_date', date.today()))
 
         if data['status'] != 'Closed':
+            st.write("")
             if st.button("🔒 Verify & Close CAPA", type="primary", use_container_width=True):
                 is_valid, errors, _ = validate_capa_data(data)
                 if errors:

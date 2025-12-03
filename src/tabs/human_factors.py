@@ -1,3 +1,7 @@
+{
+type: uploaded file
+fileName: aplotlib/capa/CAPA-main/src/tabs/human_factors.py
+fullContent:
 # src/tabs/human_factors.py
 
 import streamlit as st
@@ -12,10 +16,19 @@ def display_human_factors_tab():
     if 'human_factors_data' not in st.session_state:
         st.session_state.human_factors_data = {}
     data = st.session_state.human_factors_data
+    
+    # --- Context Display ---
+    # Explicitly confirm the data flow from R&D/Dashboard
+    active_skus = st.session_state.product_info.get('sku', 'None')
+    active_name = st.session_state.product_info.get('name', 'None')
+    
+    st.caption(f"**Active Context from R&D:** {active_name} | **SKUs:** {active_skus}")
 
     # --- NEW: AI-first workflow ---
     with st.container(border=True):
         st.subheader("Step 1: Answer Key Questions for AI Draft")
+        st.markdown("We will use the R&D information uploaded in the Dashboard to help contextually draft this report.")
+        
         with st.form("hf_questions_form"):
             q1 = st.text_area(
                 "**1. Who is the primary user of this device, and in what environment will they use it?**",
@@ -74,3 +87,4 @@ def display_human_factors_tab():
             data['critical_tasks'] = st.text_area("**Description and Categorization of Critical Tasks**", value=data.get('critical_tasks', ''), height=200, key="hf_tasks")
         with st.expander("Section 8: Validation Testing"):
             data['validation_testing'] = st.text_area("**Details of Human Factors Validation Testing**", value=data.get('validation_testing', ''), height=300, key="hf_validation")
+}

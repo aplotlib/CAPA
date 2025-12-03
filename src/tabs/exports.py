@@ -5,25 +5,26 @@ from datetime import date
 from src.audit_logger import AuditLogger
 
 def display_exports_tab():
-    st.header("📄 Document Exports & Audit Trail")
+    st.header("塘 Document Exports & Audit Trail")
     st.info("Generate project reports, export tracker-friendly data, and download the audit trail for this session.")
     
     logger = AuditLogger()
     doc_generator = st.session_state.doc_generator
 
-    # NEW: Project Charter Export
+    # Project Charter Export
     if st.session_state.get('project_charter_data'):
         with st.container(border=True):
             st.subheader("Project Charter")
             charter_data = st.session_state.project_charter_data
-            if st.button("Generate Project Charter Document", use_container_width=True):
+            # Updated width="stretch"
+            if st.button("Generate Project Charter Document", width="stretch"):
                 with st.spinner("Generating charter..."):
                     doc_buffer = doc_generator.generate_project_charter_docx(charter_data)
                     st.download_button(
-                        "📥 Download Project Charter (.docx)", doc_buffer,
+                        "踏 Download Project Charter (.docx)", doc_buffer,
                         f"Project_Charter_{charter_data.get('project_name', 'project').replace(' ', '_')}_{date.today()}.docx",
                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        use_container_width=True,
+                        width="stretch",
                         type="primary"
                     )
                     logger.log_action(
@@ -41,17 +42,18 @@ def display_exports_tab():
             default=["CAPA Form", "CAPA Closure", "FMEA", "URRA"]
         )
 
-        if st.button("Generate Project Summary Report", type="primary", use_container_width=True):
+        # Updated width="stretch"
+        if st.button("Generate Project Summary Report", type="primary", width="stretch"):
             if not st.session_state.capa_data.get('issue_description') and "CAPA Form" in export_options:
                 st.warning("Please fill out the CAPA form before generating a report that includes it.")
             else:
                 with st.spinner("Generating comprehensive report..."):
                     doc_buffer = doc_generator.generate_summary_docx(st.session_state, export_options)
                     st.download_button(
-                        "📥 Download Project Summary (.docx)", doc_buffer,
+                        "踏 Download Project Summary (.docx)", doc_buffer,
                         f"Project_Summary_{st.session_state.product_info['sku']}_{date.today()}.docx",
                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        use_container_width=True
+                        width="stretch"
                     )
                     logger.log_action(
                         user="current_user",
@@ -65,19 +67,20 @@ def display_exports_tab():
     c1, c2 = st.columns(2)
 
     with c1:
-        if st.button("Generate CAPA Tracker Data", use_container_width=True):
+        # Updated width="stretch"
+        if st.button("Generate CAPA Tracker Data", width="stretch"):
             if not st.session_state.capa_data.get('issue_description'):
                 st.warning("Please fill out the CAPA form first to generate tracker data.")
             else:
                 with st.spinner("Generating tracker data..."):
                     excel_buffer = doc_generator.generate_capa_tracker_excel(st.session_state)
                     st.download_button(
-                        "📥 Download Tracker Data (.xlsx)",
+                        "踏 Download Tracker Data (.xlsx)",
                         data=excel_buffer,
                         file_name=f"CAPA_Tracker_{st.session_state.product_info['sku']}_{date.today()}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True,
-                        key="download_tracker" # Unique key
+                        width="stretch",
+                        key="download_tracker"
                     )
                     logger.log_action(
                         user="current_user",
@@ -93,5 +96,5 @@ def display_exports_tab():
             data=audit_log_csv,
             file_name=f"audit_trail_{date.today()}.csv",
             mime="text/csv",
-            use_container_width=True
+            width="stretch"
         )

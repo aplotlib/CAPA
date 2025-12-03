@@ -5,7 +5,7 @@ import pandas as pd
 
 def display_risk_safety_tab():
     """
-    Displays the Risk & Safety Analysis Hub with updated tooltips.
+    Displays the Risk & Safety Analysis Hub with updated tooltips and structured tables.
     """
     st.header("⚠️ Risk & Safety Analysis Hub")
     if st.session_state.api_key_missing:
@@ -40,11 +40,10 @@ def display_risk_safety_tab():
         st.markdown("##### FMEA Worksheet")
         st.caption("Double-click a cell to edit. RPN is calculated automatically.")
         
-        # Updated width="stretch"
         edited_df = st.data_editor(
             df,
             num_rows="dynamic",
-            width="stretch",
+            use_container_width=True,
             column_config={
                 "Severity": st.column_config.NumberColumn(min_value=1, max_value=10, help="1 (Minor) to 10 (Hazardous)"),
                 "Occurrence": st.column_config.NumberColumn(min_value=1, max_value=10, help="1 (Remote) to 10 (Frequent)"),
@@ -64,8 +63,7 @@ def display_risk_safety_tab():
             st.rerun()
 
         st.markdown("##### AI Assistance")
-        # Updated width="stretch"
-        if st.button("🤖 Suggest Additional Failure Modes with AI", width="stretch", type="primary", help="AI will brainstorm risks based on your product SKU."):
+        if st.button("🤖 Suggest Additional Failure Modes with AI", use_container_width=True, type="primary", help="AI will brainstorm risks based on your product SKU."):
             if 'fmea_generator' in st.session_state and not st.session_state.api_key_missing:
                 with st.spinner("AI is brainstorming other risks..."):
                     analysis_results = st.session_state.get('analysis_results')
@@ -99,9 +97,10 @@ def display_risk_safety_tab():
     
     # --- Tool 2: URRA ---
     with st.container(border=True):
-        st.subheader("Use-Related Risk Analysis (URRA) Generator")
+        st.subheader("Use-Related Risk Analysis (URRA)")
+        st.info("Generates a URRA table (IEC 62366) to identify risks associated with product usability.")
+        
         with st.form("urra_form"):
-            st.info("Generates a URRA based on IEC 62366 to identify risks associated with product usability.")
             product_info = st.session_state.product_info
             urra_product_name = st.text_input("Product Name", product_info.get('name', ''), key="urra_name", help="Name of the device.")
             urra_product_desc = st.text_area("Product Description & Intended Use", value=product_info.get('ifu', ''), height=100, key="urra_desc", help="What does it do and who is it for?")
@@ -114,8 +113,7 @@ def display_risk_safety_tab():
             if "Other" in urra_env_selection:
                 urra_env_other = st.text_input("Please specify the 'Other' environment:", key="urra_env_other_text")
 
-            # Updated width="stretch"
-            if st.form_submit_button("Generate URRA", type="primary", width="stretch", help="Generate a usability risk table."):
+            if st.form_submit_button("Generate Structured URRA Table", type="primary", use_container_width=True, help="Generate a usability risk table."):
                 if 'urra_generator' in st.session_state and not st.session_state.api_key_missing:
                     final_environments = list(urra_env_selection)
                     if "Other" in final_environments:
@@ -126,12 +124,42 @@ def display_risk_safety_tab():
                     env_string = ", ".join(final_environments)
 
                     if all([urra_product_name, urra_product_desc, urra_user, env_string]):
-                        with st.spinner("AI is generating the URRA..."):
-                            st.session_state.urra = st.session_state.urra_generator.generate_urra(urra_product_name, urra_product_desc, urra_user, env_string)
-                            st.rerun()
+                        with st.spinner("AI is analyzing usability risks..."):
+                            response_data = st.session_state.urra_generator.generate_urra(urra_product_name, urra_product_desc, urra_user, env_string)
+                            
+                            if "error" in response_data:
+                                st.error(response_data['error'])
+                            elif "urra_rows" in response_data:
+                                # Convert rows to DataFrame
+                                df_urra = pd.DataFrame(response_data['urra_rows'])
+                                st.session_state.urra_df = df_urra
+                                # For backward compatibility with simpler displays if needed, but we prefer df now
+                                st.session_state.urra = "URRA Table Generated Successfully" 
+                                st.rerun()
+                            else:
+                                st.error("AI response format invalid.")
                     else:
                         st.warning("Please fill in all fields to generate the URRA.")
 
-        if st.session_state.get('urra'):
-            st.markdown("### Use-Related Risk Analysis Results")
-            st.markdown(st.session_state.urra, unsafe_allow_html=True)
+        # Display Result as Table
+        if 'urra_df' in st.session_state and isinstance(st.session_state.urra_df, pd.DataFrame):
+            st.markdown("### URRA Results")
+            st.markdown("Review and edit the risks below. This table will be exported to your final report.")
+            
+            edited_urra = st.data_editor(
+                st.session_state.urra_df,
+                num_rows="dynamic",
+                use_container_width=True,
+                column_config={
+                    "Severity": st.column_config.NumberColumn(min_value=1, max_value=5),
+                    "Probability": st.column_config.NumberColumn(min_value=1, max_value=5),
+                    "Risk Level": st.column_config.SelectboxColumn(options=["Low", "Medium", "High"]),
+                    "Task": st.column_config.TextColumn(width="medium"),
+                    "Hazard": st.column_config.TextColumn(width="medium"),
+                    "Mitigation": st.column_config.TextColumn(width="large"),
+                },
+                key="urra_editor"
+            )
+            # Save edits back to session state
+            st.session_state.urra_df = edited_urra
+}

@@ -122,8 +122,12 @@ class DocumentGenerator:
         if "ISO 14971 Assessment" in selected_sections and session_data.get('risk_assessment'):
             self._parse_and_add_markdown_table(doc, session_data['risk_assessment'], "ISO 14971 Risk Assessment")
             
-        if "URRA" in selected_sections and session_data.get('urra'):
-            self._parse_and_add_markdown_table(doc, session_data['urra'], "Use-Related Risk Analysis (URRA)")
+        if "URRA" in selected_sections:
+            # Prefer DataFrame, fallback to markdown
+            if isinstance(session_data.get('urra_df'), pd.DataFrame):
+                self._add_df_as_table(doc, session_data['urra_df'], "Use-Related Risk Analysis (URRA)")
+            elif session_data.get('urra'):
+                self._parse_and_add_markdown_table(doc, session_data['urra'], "Use-Related Risk Analysis (URRA)")
 
         if "Vendor Email Draft" in selected_sections and session_data.get('vendor_email_draft'):
             self._add_markdown_text(doc, session_data['vendor_email_draft'], "Vendor Communication Draft")
@@ -269,3 +273,4 @@ class DocumentGenerator:
         doc.save(buffer)
         buffer.seek(0)
         return buffer
+}

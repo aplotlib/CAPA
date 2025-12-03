@@ -5,8 +5,7 @@ import json
 
 def display_product_development_tab():
     """
-    Displays the Product Development workflow, including Design Controls Triage,
-    Project Charter, R&D Hub, and AI-powered Design Controls creation.
+    Displays the Product Development workflow.
     """
     st.header("🚀 Product Development Lifecycle Hub")
     st.info(
@@ -27,17 +26,24 @@ def display_product_development_tab():
         st.markdown("Provide the core requirements for your device. This information will be used by the AI to generate your design control documentation.")
         
         with st.form("ai_dc_form"):
+            # Pre-fill from R&D upload if available
+            default_needs = data.get('user_needs', '')
+            default_reqs = data.get('tech_requirements', '')
+            
             user_needs = st.text_area("1. What are the core **User Needs** the device must meet?",
-                                      placeholder="Example: The user needs to easily and accurately measure their blood pressure at home without assistance. The device must be comfortable and provide a clear, easy-to-read result.",
+                                      value=default_needs,
+                                      placeholder="Example: The user needs to easily and accurately measure their blood pressure...",
                                       height=150)
             tech_reqs = st.text_area("2. What are the key **Technical & Functional Requirements**?",
-                                     placeholder="Example: Must comply with AAMI standards for accuracy. Cuff must fit arm circumferences from 9-17 inches. Battery must last for at least 200 measurements. Must sync with an iOS/Android app via Bluetooth.",
+                                     value=default_reqs,
+                                     placeholder="Example: Must comply with AAMI standards. Cuff fit 9-17 inches...",
                                      height=150)
             risks = st.text_area("3. What are the most significant **Known Risks or Failure Modes**?",
-                                 placeholder="Example: Risk of inaccurate readings leading to improper medical decisions. Risk of cuff over-inflation causing discomfort. Risk of software malfunction or data breach.",
+                                 placeholder="Example: Risk of inaccurate readings...",
                                  height=150)
             
-            submitted_dc = st.form_submit_button("🤖 Generate Design Controls & Traceability Matrix", use_container_width=True, type="primary")
+            # Updated width="stretch"
+            submitted_dc = st.form_submit_button("🤖 Generate Design Controls & Traceability Matrix", width="stretch", type="primary")
             if submitted_dc and not st.session_state.api_key_missing:
                 if all([user_needs, tech_reqs, risks]):
                     with st.spinner("AI is drafting the Design Controls and Traceability Matrix..."):

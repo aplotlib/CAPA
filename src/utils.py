@@ -15,6 +15,7 @@ def init_session_state():
         'start_date': date.today() - timedelta(days=30),
         'end_date': date.today(),
         'capa_data': {},
+        'product_dev_data': {},  # Fixed: Added to prevent KeyError in dashboard
         'analysis_results': None,
         'logged_in': False,
     }

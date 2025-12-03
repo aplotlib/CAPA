@@ -1,20 +1,45 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+from datetime import date
 from src.analysis import run_full_analysis
 
 def display_dashboard():
-    st.title(f"Mission Control: `{st.session_state.product_info.get('sku', 'Unknown')}`")
+    # --- HEADER & CONTEXT ---
+    # We display the currently selected SKU in the title if available
+    target_sku = st.session_state.product_info.get('sku', 'Unknown')
+    st.title(f"Mission Control")
 
     # --- DATA UPLOAD SECTION ---
     with st.expander("📂 Data Upload & Processing", expanded=not st.session_state.get('analysis_results')):
+        st.markdown("### 1. Define Reporting Period")
+        st.info("📅 **Important:** Ensure your uploaded Sales and Returns files cover the **same date range** selected below (e.g., Jan 1 - Dec 31).")
+        
+        # Date Range Inputs
+        d_col1, d_col2 = st.columns(2)
+        start_date = d_col1.date_input(
+            "Start Date", 
+            value=st.session_state.get('start_date', date.today().replace(day=1)),
+            key="dash_start_date"
+        )
+        end_date = d_col2.date_input(
+            "End Date", 
+            value=st.session_state.get('end_date', date.today()),
+            key="dash_end_date"
+        )
+        
+        # Store dates in session state
+        st.session_state.start_date = start_date
+        st.session_state.end_date = end_date
+
+        st.markdown("### 2. Upload Data")
         c1, c2 = st.columns(2)
-        sales_file = c1.file_uploader("Upload Sales Data (CSV/Excel)", type=['csv', 'xlsx'])
-        returns_file = c2.file_uploader("Upload Returns Data (CSV/Excel)", type=['csv', 'xlsx'])
+        sales_file = c1.file_uploader("Upload Sales/Forecast Data (CSV/Excel)", type=['csv', 'xlsx'])
+        returns_file = c2.file_uploader("Upload Returns Pivot/Report (CSV/Excel)", type=['csv', 'xlsx'])
         
         if st.button("🚀 Process Data & Run Analysis", type="primary", use_container_width=True):
             if sales_file and returns_file:
-                with st.spinner("Processing data..."):
+                with st.spinner("Processing data across SKUs..."):
                     try:
                         # Load Data
                         if sales_file.name.endswith('.csv'):
@@ -27,16 +52,20 @@ def display_dashboard():
                         else:
                             returns_df = pd.read_excel(returns_file)
                             
-                        # Process Data
+                        # Process Data (Aggregates by SKU)
                         proc_sales = st.session_state.data_processor.process_sales_data(sales_df)
                         proc_returns = st.session_state.data_processor.process_returns_data(returns_df)
+                        
+                        # Calculate Duration
+                        duration_days = (end_date - start_date).days
+                        if duration_days < 1: duration_days = 1
                         
                         # Run Analysis
                         analysis_output = run_full_analysis(
                             proc_sales, proc_returns, 
-                            report_period_days=30, # Defaulting to 30 days
-                            unit_cost=50.0, # Placeholder or add input field
-                            sales_price=150.0 # Placeholder or add input field
+                            report_period_days=duration_days,
+                            unit_cost=50.0, # Default, can be improved with inputs
+                            sales_price=150.0 
                         )
                         
                         # Validate output before saving to session state
@@ -60,7 +89,7 @@ def display_dashboard():
 
     results = st.session_state.analysis_results
 
-    # Check for error key again (redundancy safety)
+    # Check for error key again
     if not isinstance(results, dict) or "error" in results:
         st.error(results.get('error', 'Unknown analysis error'))
         return
@@ -71,42 +100,115 @@ def display_dashboard():
         st.warning("⚠️ Analysis ran, but no valid return data was generated. Please ensure your files contain matching SKUs.")
         return
 
-    # Safe to access iloc now
-    summary_data = return_summary.iloc[0]
+    # --- SKU SELECTION & BREAKDOWN ---
+    st.divider()
     
-    # Metrics
+    # 1. Full Breakdown Table
+    st.subheader("📊 SKU Performance Breakdown")
+    with st.expander("View Full Data Table", expanded=True):
+        st.dataframe(
+            return_summary,
+            column_config={
+                "sku": "SKU",
+                "total_sold": st.column_config.NumberColumn("Total Sales", format="%d"),
+                "total_returned": st.column_config.NumberColumn("Total Returns", format="%d"),
+                "return_rate": st.column_config.NumberColumn("Return Rate (%)", format="%.2f%%"),
+                "quality_status": "Status"
+            },
+            use_container_width=True,
+            hide_index=True
+        )
+
+    # 2. Select SKU for Detailed View
+    st.subheader("🔎 Detailed Analysis")
+    col_sel, col_blank = st.columns([1, 2])
+    sku_list = return_summary['sku'].unique().tolist()
+    
+    # Try to set default index to previously selected SKU
+    default_idx = 0
+    if target_sku in sku_list:
+        default_idx = sku_list.index(target_sku)
+        
+    selected_sku = col_sel.selectbox("Select SKU to Analyze", sku_list, index=default_idx)
+    
+    # Update global product info when selection changes
+    if selected_sku != st.session_state.product_info.get('sku'):
+        st.session_state.product_info['sku'] = selected_sku
+        # We don't rerun immediately to avoid flickering, but the next action will use this SKU
+
+    # Filter data for the selected SKU
+    summary_data = return_summary[return_summary['sku'] == selected_sku].iloc[0]
+
+    # --- METRICS DISPLAY (Selected SKU) ---
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Return Rate", f"{summary_data.get('return_rate', 0):.2f}%")
     c2.metric("Total Returns", f"{int(summary_data.get('total_returned', 0)):,}")
     c3.metric("Total Sold", f"{int(summary_data.get('total_sold', 0)):,}")
     
-    quality_metrics = results.get('quality_metrics', {})
-    risk_level = quality_metrics.get('risk_level', 'Low')
-    quality_score = quality_metrics.get('quality_score', 0)
-    
+    # Re-calculate quality score dynamically for the selected SKU (simple logic)
+    rr = summary_data.get('return_rate', 0)
+    if rr > 15: 
+        risk_level = "High"
+        quality_score = max(0, 30 - (rr - 20) * 3)
+    elif rr > 10: 
+        risk_level = "Medium"
+        quality_score = 50 + (15 - rr) * 4
+    else: 
+        risk_level = "Low"
+        quality_score = 90 + (5 - rr) * 2
+        
     delta_color = "inverse" if risk_level in ["Medium", "High"] else "normal"
-    c4.metric("Quality Score", f"{quality_score}/100", delta=risk_level, delta_color=delta_color)
+    c4.metric("Quality Score", f"{int(quality_score)}/100", delta=risk_level, delta_color=delta_color)
 
-    st.divider()
+    st.write("")
 
-    # Gauge Chart
-    fig = go.Figure(go.Indicator(
-        mode = "gauge+number",
-        value = summary_data.get('return_rate', 0),
-        title = {'text': "Return Rate (%)"},
-        gauge = {
-            'axis': {'range': [None, 20]},
-            'bar': {'color': "#00F3FF"},
-            'steps': [
-                {'range': [0, 5], 'color': "gray"},
-                {'range': [5, 10], 'color': "lightgray"},
-                {'range': [10, 20], 'color': "red"}
-            ],
-        }
-    ))
-    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", font={'color': "white"})
-    st.plotly_chart(fig, use_container_width=True)
+    # --- GAUGE CHART & INSIGHTS ---
+    col_chart, col_ai = st.columns([1, 1])
     
-    # AI Insights
-    st.subheader("🤖 AI Analysis")
-    st.container(border=True).markdown(results.get('insights', 'No detailed insights available.'))
+    with col_chart:
+        # Gauge Chart
+        fig = go.Figure(go.Indicator(
+            mode = "gauge+number",
+            value = summary_data.get('return_rate', 0),
+            title = {'text': f"Return Rate: {selected_sku}"},
+            gauge = {
+                'axis': {'range': [None, max(20, rr + 5)]}, # Dynamic max range
+                'bar': {'color': "#00F3FF"},
+                'steps': [
+                    {'range': [0, 5], 'color': "gray"},
+                    {'range': [5, 10], 'color': "lightgray"},
+                    {'range': [10, 100], 'color': "red"}
+                ],
+            }
+        ))
+        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", font={'color': "white"}, height=300)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col_ai:
+        st.subheader(f"🤖 AI Insight: {selected_sku}")
+        # Note: The original 'insights' in results is likely just for the first SKU.
+        # Ideally, we would re-generate insights here, but to save API calls, we display a static template 
+        # or the generic insight if available.
+        
+        with st.container(border=True):
+            if rr > 10:
+                st.markdown(f"""
+                **Analysis for {selected_sku}:**
+                
+                The return rate of **{rr:.2f}%** is above the warning threshold. 
+                
+                **Recommendations:**
+                1. Navigate to the **CAPA Lifecycle** tab to initiate an investigation.
+                2. Check the **Returns** file for specific reason codes associated with this SKU.
+                3. Review **Risk & Safety** (FMEA) to see if this failure mode was anticipated.
+                """)
+            else:
+                st.markdown(f"""
+                **Analysis for {selected_sku}:**
+                
+                The return rate of **{rr:.2f}%** is within acceptable limits.
+                
+                **Recommendations:**
+                - Continue monitoring monthly trends.
+                - No immediate CAPA action required.
+                """)

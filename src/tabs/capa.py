@@ -25,7 +25,6 @@ def ai_assist_field(label, key_suffix, help_text="", height=100, field_key=None)
             help=help_text, 
             key=f"input_{key_suffix}"
         )
-        # Sync input back to session state
         st.session_state.capa_data[field_key] = user_input
 
     with col_ai:
@@ -68,7 +67,6 @@ def display_capa_workflow():
 
     data = st.session_state.capa_data
 
-    # --- PROGRESS INDICATOR ---
     phases = ["Draft", "Investigation", "Implementation", "Verification", "Closed"]
     phase_icons = ["📝", "🔍", "🛠️", "✅", "🔒"]
     
@@ -100,7 +98,6 @@ def display_capa_workflow():
         "4. Effectiveness & Closure"
     ])
 
-    # === TAB 1: INTAKE ===
     with tab_intake:
         st.subheader("📝 Incident Definition")
         
@@ -140,7 +137,8 @@ def display_capa_workflow():
         
         if data['status'] == 'Draft':
             st.write("")
-            if st.button("🚀 Advance to Investigation", type="primary", use_container_width=True):
+            # Updated width="stretch"
+            if st.button("🚀 Advance to Investigation", type="primary", width="stretch"):
                 if not data.get('issue_description'):
                     st.error("Please provide an issue description before proceeding.")
                 else:
@@ -148,7 +146,6 @@ def display_capa_workflow():
                     st.toast("Status updated: Investigation", icon="🔍")
                     st.rerun()
 
-    # === TAB 2: INVESTIGATION ===
     with tab_investigation:
         st.subheader("🔍 Investigation & Risk")
         
@@ -173,7 +170,8 @@ def display_capa_workflow():
         
         if data['status'] == 'Investigation':
             st.write("")
-            if st.button("🚀 Advance to Implementation", type="primary", use_container_width=True):
+            # Updated width="stretch"
+            if st.button("🚀 Advance to Implementation", type="primary", width="stretch"):
                 if data.get('root_cause'):
                     data['status'] = 'Implementation'
                     st.toast("Status updated: Implementation", icon="🛠️")
@@ -181,7 +179,6 @@ def display_capa_workflow():
                 else:
                     st.error("Please define a Root Cause before proceeding.")
 
-    # === TAB 3: ACTION PLAN ===
     with tab_action:
         st.subheader("🛠️ Corrective & Preventive Actions")
         
@@ -208,12 +205,12 @@ def display_capa_workflow():
 
         if data['status'] == 'Implementation':
             st.write("")
-            if st.button("🚀 Advance to Verification", type="primary", use_container_width=True):
+            # Updated width="stretch"
+            if st.button("🚀 Advance to Verification", type="primary", width="stretch"):
                 data['status'] = 'Verification'
                 st.toast("Status updated: Verification", icon="✅")
                 st.rerun()
 
-    # === TAB 4: CLOSURE ===
     with tab_closure:
         st.subheader("🔒 Effectiveness & Closure")
         
@@ -227,7 +224,8 @@ def display_capa_workflow():
 
         if data['status'] != 'Closed':
             st.write("")
-            if st.button("🔒 Verify & Close CAPA", type="primary", use_container_width=True):
+            # Updated width="stretch"
+            if st.button("🔒 Verify & Close CAPA", type="primary", width="stretch"):
                 is_valid, errors, _ = validate_capa_data(data)
                 if errors:
                     for e in errors: st.error(e)

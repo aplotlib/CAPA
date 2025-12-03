@@ -46,70 +46,72 @@ class DocumentGenerator:
             return
         doc.add_page_break()
         doc.add_heading(title, level=2)
-        # Simple cleaning of markdown for paragraph text
         cleaned_text = text.replace('**', '').replace('`', '').replace('###', '').replace('##', '')
         doc.add_paragraph(cleaned_text)
-
+    
     def _parse_and_add_markdown_table(self, doc, markdown_text: str, title: str):
-        """
-        Parses a Markdown table string and adds it as a proper table to the document,
-        cleaning up formatting artifacts.
-        """
-        if not markdown_text:
-            return
-        
+        """Parses Markdown table and adds to doc."""
+        if not markdown_text: return
         doc.add_page_break()
         doc.add_heading(title, level=2)
-        
         lines = [line.strip() for line in markdown_text.strip().split('\n') if line.strip() and not line.strip().startswith(('###', '##'))]
-        
         if not lines or '|' not in lines[0]:
-            doc.add_paragraph(markdown_text) # Fallback for non-table content
+            doc.add_paragraph(markdown_text) 
             return
-            
         header_line = lines[0]
         headers = [h.strip() for h in header_line.strip('|').split('|')]
-        
         table = doc.add_table(rows=1, cols=len(headers))
         table.style = 'Table Grid'
         hdr_cells = table.rows[0].cells
-        for i, header in enumerate(headers):
-            hdr_cells[i].text = header.replace('**', '')
-
+        for i, header in enumerate(headers): hdr_cells[i].text = header.replace('**', '')
         data_lines = [line for line in lines if '|' in line and '---' not in line and line != header_line]
-
         for line in data_lines:
             row_cells = table.add_row().cells
             cells = [c.strip().replace('**', '').replace('`', '') for c in line.strip('|').split('|')]
             for i, cell_text in enumerate(cells):
-                if i < len(row_cells):
-                    row_cells[i].text = cell_text
+                if i < len(row_cells): row_cells[i].text = cell_text
+
+    def generate_dashboard_docx(self, analysis_results: Dict[str, Any], product_info: Dict[str, str]) -> BytesIO:
+        """
+        Generates a report of the Dashboard / Mission Control metrics.
+        """
+        doc = Document()
+        doc.add_heading("Dashboard Analytics Report", level=1)
+        doc.add_paragraph(f"Date: {date.today().strftime('%Y-%m-%d')}")
+        doc.add_paragraph(f"Product: {product_info.get('name', 'N/A')} (SKU: {product_info.get('sku', 'N/A')})")
         
-    def _generate_executive_summary(self, session_data: Dict[str, Any]) -> str:
-        """Uses AI to generate a high-level executive summary."""
-        ai_context_helper = session_data.get('ai_context_helper')
-        if ai_context_helper:
-            prompt = (
-                "Based on the full application context, generate a concise, professional executive summary for a final project report. "
-                "The summary should briefly outline the problem, key findings from the analyses (like top risks from FMEA), and the planned corrective actions. "
-                "Conclude with a 'Recommendations' section suggesting the next logical steps."
-            )
-            try:
-                return ai_context_helper.generate_response(prompt)
-            except Exception:
-                return "Could not generate AI summary."
-        return "AI helper not available."
+        if analysis_results:
+            # Insights
+            if 'insights' in analysis_results:
+                self._add_markdown_text(doc, analysis_results['insights'], "AI Analysis Insights")
+            
+            # Summary Table
+            summary_df = analysis_results.get('return_summary')
+            if summary_df is not None and not summary_df.empty:
+                self._add_df_as_table(doc, summary_df, "SKU Performance Summary")
+                
+            # Quality Metrics
+            metrics = analysis_results.get('quality_metrics')
+            if metrics:
+                doc.add_heading("Quality Metrics", level=2)
+                doc.add_paragraph(f"Risk Level: {metrics.get('risk_level', 'N/A')}")
+                doc.add_paragraph(f"Quality Score: {metrics.get('quality_score', 'N/A')}/100")
+        else:
+            doc.add_paragraph("No analysis results available to export.")
+            
+        buffer = BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+        return buffer
 
     def generate_summary_docx(self, session_data: Dict[str, Any], selected_sections: List[str]) -> BytesIO:
-        """
-        Generates a single comprehensive report based on selected sections.
-        """
+        """Generates a single comprehensive report based on selected sections."""
         doc = Document()
         doc.add_heading("ORION Project Summary Report", level=1)
         
-        summary_text = self._generate_executive_summary(session_data)
-        doc.add_heading("Executive Summary", level=2)
-        doc.add_paragraph(summary_text)
+        # Add Executive Summary if available
+        if session_data.get('final_review_summary'):
+             self._add_markdown_text(doc, session_data['final_review_summary'], "Executive Summary")
         
         if "CAPA Form" in selected_sections and session_data.get('capa_data'):
             self._generate_capa_form_section(doc, session_data['capa_data'])
@@ -135,13 +137,10 @@ class DocumentGenerator:
         return buffer
 
     def _generate_capa_form_section(self, doc: Document, capa_data: Dict[str, Any]):
-        """
-        Generates the CAPA section based on the Greenlight Guru style template.
-        """
+        """Generates the CAPA section."""
         doc.add_page_break()
         doc.add_heading("CAPA Report", level=1)
         
-        # Header Info
         table_info = doc.add_table(rows=0, cols=2)
         table_info.style = 'Table Grid'
         self._add_main_table_row(table_info, "CAPA Number:", capa_data.get('capa_number', ''))
@@ -150,8 +149,6 @@ class DocumentGenerator:
         self._add_main_table_row(table_info, "Product:", capa_data.get('product_name', ''))
         
         doc.add_paragraph() 
-
-        # Main Body - Matching the PDF template structure specifically
         table = doc.add_table(rows=0, cols=2)
         table.style = 'Table Grid'
         table.autofit = False 
@@ -174,25 +171,9 @@ class DocumentGenerator:
         for label, key in fields:
             self._add_main_table_row(table, label, capa_data.get(key, ""))
 
-        # Signatures
         doc.add_paragraph()
         doc.add_paragraph("__________________________\nSignature, Principal Investigator")
         doc.add_paragraph(f"Date: {capa_data.get('closure_date', '___________')}")
-
-    def _generate_capa_closure_section(self, doc: Document, closure_data: Dict[str, Any]):
-        """
-        Legacy closure section generator. Superseded by _generate_capa_form_section but kept for compatibility.
-        """
-        if not closure_data.get('original_capa'): return
-        doc.add_page_break()
-        doc.add_heading("CAPA Effectiveness Check & Closure", level=2)
-        table = doc.add_table(rows=0, cols=2, style='Table Grid')
-        table.columns[0].width = Inches(2.0)
-        table.columns[1].width = Inches(5.5)
-        self._add_main_table_row(table, "Effectiveness Check Findings", closure_data.get('effectiveness_summary', ''))
-        self._add_main_table_row(table, "Closed By", closure_data.get('closed_by', ''))
-        closure_date = closure_data.get('closure_date')
-        self._add_main_table_row(table, "Closure Date", closure_date.strftime('%Y-%m-%d') if closure_date else '')
 
     def _generate_human_factors_section(self, doc: Document, hf_data: Dict[str, Any]):
         doc.add_page_break()
@@ -208,14 +189,10 @@ class DocumentGenerator:
             doc.add_paragraph(str(hf_data.get(key, "No data provided.")))
 
     def _add_section_heading(self, doc, text: str):
-        """Helper to add a bolded section heading."""
         p = doc.add_paragraph()
         p.add_run(text).bold = True
 
     def generate_project_charter_docx(self, charter_data: Dict[str, Any]) -> BytesIO:
-        """
-        Generates a project charter Word document.
-        """
         doc = Document()
         doc.add_heading(charter_data.get('project_name', 'Project Charter'), level=1)
         doc.add_paragraph(f"Date: {date.today().strftime('%Y-%m-%d')}")
@@ -248,9 +225,6 @@ class DocumentGenerator:
         return buffer
 
     def generate_capa_tracker_excel(self, session_data: Dict[str, Any]) -> BytesIO:
-        """
-        Generates an Excel file with key CAPA data for tracking in a master sheet.
-        """
         capa_data = session_data.get('capa_data', {})
         status = "Closed" if capa_data.get('closure_date') else "Open"
         
@@ -280,7 +254,6 @@ class DocumentGenerator:
         return output
         
     def generate_scar_docx(self, capa_data: Dict[str, Any], vendor_name: str) -> BytesIO:
-        """Generates a Supplier Corrective Action Request (SCAR) document."""
         doc = Document()
         doc.add_heading(f"SCAR: {vendor_name}", level=1)
         doc.add_paragraph(f"Date: {date.today()}")

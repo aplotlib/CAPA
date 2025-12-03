@@ -40,10 +40,11 @@ def display_risk_safety_tab():
         st.markdown("##### FMEA Worksheet")
         st.caption("Double-click a cell to edit. RPN is calculated automatically.")
         
+        # Updated width="stretch"
         edited_df = st.data_editor(
             df,
             num_rows="dynamic",
-            use_container_width=True,
+            width="stretch",
             column_config={
                 "Severity": st.column_config.NumberColumn(min_value=1, max_value=10, help="1 (Minor) to 10 (Hazardous)"),
                 "Occurrence": st.column_config.NumberColumn(min_value=1, max_value=10, help="1 (Remote) to 10 (Frequent)"),
@@ -63,7 +64,8 @@ def display_risk_safety_tab():
             st.rerun()
 
         st.markdown("##### AI Assistance")
-        if st.button("🤖 Suggest Additional Failure Modes with AI", use_container_width=True, type="primary", help="AI will brainstorm risks based on your product SKU."):
+        # Updated width="stretch"
+        if st.button("🤖 Suggest Additional Failure Modes with AI", width="stretch", type="primary", help="AI will brainstorm risks based on your product SKU."):
             if 'fmea_generator' in st.session_state and not st.session_state.api_key_missing:
                 with st.spinner("AI is brainstorming other risks..."):
                     analysis_results = st.session_state.get('analysis_results')
@@ -112,7 +114,8 @@ def display_risk_safety_tab():
             if "Other" in urra_env_selection:
                 urra_env_other = st.text_input("Please specify the 'Other' environment:", key="urra_env_other_text")
 
-            if st.form_submit_button("Generate URRA", type="primary", use_container_width=True, help="Generate a usability risk table."):
+            # Updated width="stretch"
+            if st.form_submit_button("Generate URRA", type="primary", width="stretch", help="Generate a usability risk table."):
                 if 'urra_generator' in st.session_state and not st.session_state.api_key_missing:
                     final_environments = list(urra_env_selection)
                     if "Other" in final_environments:

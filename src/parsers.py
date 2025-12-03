@@ -77,13 +77,13 @@ class AIFileParser:
         if not text_content or "Error" in text_content[:20]:
             return {"error": f"Could not extract text: {text_content}"}
 
-        # Truncate if too long (approx 15k chars) to fit context window, though 4o handles large context
+        # Truncate if too long (approx 50k chars) to fit context window
         text_content = text_content[:50000]
 
         system_prompt = """
         You are a MedTech Product Manager. Analyze the provided R&D Product Specification document.
         Extract the following structured data to configure a Quality Management System:
-        1. **Product Info**: Name, SKU, Description (Intended Use/Features).
+        1. **Product Info**: Name, ALL SKUs associated with the product (as a list), Description (Intended Use/Features).
         2. **Financials**: Unit Cost, Sales Price (if found).
         3. **Risks**: Identify a list of risks for FMEA (Failure Mode, Effect, Cause).
         4. **Requirements**: Core User Needs and Technical Requirements.
@@ -91,7 +91,7 @@ class AIFileParser:
         Return ONLY a valid JSON object with the following keys:
         {
             "product_name": "...",
-            "sku": "...",
+            "skus": ["SKU1", "SKU2", ...],
             "description": "...",
             "unit_cost": 0.0,
             "sales_price": 0.0,
@@ -128,7 +128,6 @@ class AIFileParser:
         
         if file_extension == 'docx':
              # Special handling if a DOCX is uploaded in the generic uploader
-             # We assume standard analysis, but text extraction is different
              preview = self._extract_text_from_docx(file)[:2000]
         elif file_extension in ['png', 'jpg', 'jpeg']:
             ocr_text = self._extract_text_from_image(file)
@@ -205,3 +204,4 @@ class AIFileParser:
             print(f"Fallback parsing failed for {file.name}: {e}")
 
         return None
+}

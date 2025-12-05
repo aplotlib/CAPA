@@ -121,12 +121,21 @@ def page_manual():
 def page_exports():
     from src.tabs.exports import display_exports_tab
     display_exports_tab()
+    
+def page_qmsr():
+    from src.tabs.qmsr_transition import display_qmsr_transition_tab
+    display_qmsr_transition_tab()
+
+    
 
 # --- NAVIGATION SETUP ---
 pages = {
     "Help & Guide": [
         st.Page(page_instructions, title="Start Here", icon="📘"),
         st.Page(page_chat_support, title="AI Assistant", icon="💬"),
+    ],
+    "Compliance & Strategy": [  # <--- NEW CATEGORY
+        st.Page(page_qmsr, title="QMSR Transition Portal", icon="🌐"), 
     ],
     "Mission Control": [
         st.Page(page_dashboard, title="Dashboard", icon="📊", default=True),

@@ -18,6 +18,7 @@ class DocumentGenerator:
         row_cells = table.add_row().cells
         p = row_cells[0].paragraphs[0]
         p.add_run(heading).bold = True
+        # FIX: Handle None values gracefully
         row_cells[1].text = str(content) if content is not None else ''
 
     def _add_df_as_table(self, doc, df: pd.DataFrame, title: str):
@@ -38,7 +39,8 @@ class DocumentGenerator:
         for _, row in df.iterrows():
             row_cells = table.add_row().cells
             for i, cell_value in enumerate(row):
-                row_cells[i].text = str(cell_value)
+                # FIX: Handle None/NaN in dataframe cells
+                row_cells[i].text = str(cell_value) if pd.notna(cell_value) else ""
 
     def _add_markdown_text(self, doc, text: str, title: str):
         """Adds text, potentially in Markdown, as a new section."""

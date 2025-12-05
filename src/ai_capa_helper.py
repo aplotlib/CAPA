@@ -3,7 +3,8 @@
 import json
 from typing import Dict, Optional
 import openai
-from utils import retry_with_backoff
+# FIX: Absolute import
+from src.utils import retry_with_backoff
 import src.prompts as prompts  # Import the new prompts file
 
 class AICAPAHelper:

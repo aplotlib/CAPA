@@ -21,7 +21,7 @@ def display_vendor_comm_tab():
         contact_name = c2.text_input("Contact Name")
         english_ability = st.slider("Recipient's English Proficiency", 1, 5, 3, help="1: Low, 5: High")
         
-        if st.form_submit_button("Draft Email", type="primary", use_container_width=True):
+        if st.form_submit_button("Draft Email", type="primary", width="stretch"):
             with st.spinner("AI is drafting email..."):
                 # FIX: Correctly access the SKU from product_info
                 sku = st.session_state.product_info['sku']
@@ -41,7 +41,7 @@ def display_vendor_comm_tab():
                 data=scar_buffer,
                 file_name=f"SCAR_{st.session_state.product_info['sku']}_{date.today()}.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True
+                 width="stretch"
             )
         else:
             st.warning("Please fill out the CAPA form before generating a SCAR.")

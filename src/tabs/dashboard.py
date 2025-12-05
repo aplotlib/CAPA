@@ -256,4 +256,3 @@ def display_dashboard():
                 - Continue monitoring monthly trends.
                 - No immediate CAPA action required.
                 """)
-}

@@ -35,7 +35,7 @@ def display_final_review_tab():
             st.warning("There is no data to analyze yet. Please complete sections in other tabs first.")
             return
 
-        if st.button("🤖 Generate AI Executive Summary & Analysis", type="primary", use_container_width=True):
+        if st.button("🤖 Generate AI Executive Summary & Analysis", type="primary", width="stretch"):
             with st.spinner("AI is performing a holistic analysis of the entire project..."):
                 prompt = (
                     "You are a Director of Quality and Product Development. Synthesize all the provided context "

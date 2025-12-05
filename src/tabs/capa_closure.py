@@ -75,7 +75,7 @@ def display_capa_closure_tab():
             new_sales = c1.text_input("New Sales Data (Post-CAPA)", placeholder="e.g., 8500")
             new_returns = c2.text_input("New Returns Data (Post-CAPA)", placeholder="e.g., 50")
             
-            submitted = st.form_submit_button("📊 Analyze Effectiveness", type="primary", use_container_width=True)
+            submitted = st.form_submit_button("📊 Analyze Effectiveness", type="primary", width="stretch")
             if submitted:
                 if new_sales:
                     sku = st.session_state.product_info['sku']
@@ -130,7 +130,7 @@ def display_capa_closure_tab():
                     c1.metric("Initial Return Rate", f"{original_rate_val:.2f}%")
                     c2.metric("New Return Rate", f"{new_rate:.2f}%", delta=f"{-improvement:.2f}%", delta_color="inverse")
                     
-                    if st.button("🤖 Generate AI Effectiveness Summary", use_container_width=True, type="primary"):
+                    if st.button("🤖 Generate AI Effectiveness Summary", width="stretch", type="primary"):
                         with st.spinner("AI is generating the summary..."):
                             prompt = f"""
                             Analyze the effectiveness of a CAPA implementation based on the following data:
@@ -158,7 +158,7 @@ def display_capa_closure_tab():
             data['closed_by'] = c1.text_input("Closed By", key="closed_by")
             data['closure_date'] = c2.date_input("Closure Date", value=date.today(), key="closure_date")
             
-            if st.button("✔️ Formally Close CAPA", type="primary", use_container_width=True):
+           if st.button("✔️ Formally Close CAPA", type="primary", width="stretch"):
                 st.session_state.capa_data['effectiveness_check_findings'] = data.get('effectiveness_summary', 'Effectiveness confirmed.')
                 st.session_state.capa_data['closed_by'] = data.get('closed_by')
                 st.session_state.capa_data['closure_date'] = data.get('closure_date')

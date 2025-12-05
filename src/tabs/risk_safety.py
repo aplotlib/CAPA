@@ -26,6 +26,7 @@ def display_risk_safety_tab():
             **RPN = S × O × D**. Higher RPNs are higher priorities.
             """)
         
+        # Initialize DataFrame from rows
         if not st.session_state.fmea_rows:
             df = pd.DataFrame(columns=["Potential Failure Mode", "Potential Effect(s)", "Potential Cause(s)", "Severity", "Occurrence", "Detection", "RPN"])
         else:
@@ -56,11 +57,16 @@ def display_risk_safety_tab():
             key="fmea_editor"
         )
 
+        # Detect changes and update State
         if not edited_df.equals(df):
             edited_df['RPN'] = edited_df['Severity'] * edited_df['Occurrence'] * edited_df['Detection']
             st.session_state.fmea_rows = edited_df.to_dict('records')
             st.session_state.fmea_data = edited_df
             st.rerun()
+            
+        # Ensure fmea_data exists even if no edits yet (for Export tab)
+        if 'fmea_data' not in st.session_state:
+             st.session_state.fmea_data = df
 
         st.markdown("##### AI Assistance")
         if st.button("🤖 Suggest Additional Failure Modes with AI", use_container_width=True, type="primary", help="AI will brainstorm risks based on your product SKU."):
@@ -88,6 +94,8 @@ def display_risk_safety_tab():
                         new_rows.append(s_dict)
                     
                     st.session_state.fmea_rows.extend(new_rows)
+                    # FIX: Sync the DataFrame for Export immediately
+                    st.session_state.fmea_data = pd.DataFrame(st.session_state.fmea_rows)
                     st.success(f"AI added {len(new_rows)} new failure modes.")
                     st.rerun()
             elif st.session_state.api_key_missing:
@@ -162,4 +170,3 @@ def display_risk_safety_tab():
             )
             # Save edits back to session state
             st.session_state.urra_df = edited_urra
-}

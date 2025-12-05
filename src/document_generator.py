@@ -273,4 +273,3 @@ class DocumentGenerator:
         doc.save(buffer)
         buffer.seek(0)
         return buffer
-}

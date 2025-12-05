@@ -91,7 +91,7 @@ def display_dashboard():
         sales_file = c1.file_uploader("Upload Sales/Forecast Data (CSV/Excel)", type=['csv', 'xlsx'], help="File containing SKU and Quantity Sold.")
         returns_file = c2.file_uploader("Upload Returns Pivot/Report (CSV/Excel)", type=['csv', 'xlsx'], help="File containing SKU and Return Reasons/Quantities.")
         
-        if st.button("🚀 Process Data & Run Analysis", type="primary", use_container_width=True):
+        if st.button("🚀 Process Data & Run Analysis", type="primary", width="stretch"):
             if sales_file and returns_file:
                 with st.spinner("Processing data across SKUs..."):
                     try:
@@ -151,11 +151,11 @@ def display_dashboard():
     if col_export.button("💾 Export Dashboard Report", help="Download a DOCX report of these metrics."):
         doc_buffer = st.session_state.doc_generator.generate_dashboard_docx(results, st.session_state.product_info)
         st.download_button(
-            "Download Report (.docx)", 
-            doc_buffer, 
+            "Download Report (.docx)",
+            doc_buffer,
             f"Dashboard_Report_{target_sku}_{date.today()}.docx",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            use_container_width=True
+            width="stretch"
         )
 
     # --- SKU SELECTION & BREAKDOWN ---
@@ -171,7 +171,7 @@ def display_dashboard():
                 "return_rate": st.column_config.NumberColumn("Return Rate (%)", format="%.2f%%"),
                 "quality_status": "Status"
             },
-            use_container_width=True,
+            width="stretch",
             hide_index=True
         )
 
@@ -232,7 +232,7 @@ def display_dashboard():
             }
         ))
         fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", font={'color': "white"}, height=300)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     
     with col_ai:
         st.subheader(f"🤖 AI Insight: {selected_sku}")

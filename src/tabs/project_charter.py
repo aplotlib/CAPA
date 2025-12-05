@@ -27,7 +27,7 @@ def display_project_charter_tab():
             target_user = st.text_input("Who is the primary target user?",
                                         placeholder="e.g., Physical therapists and post-operative orthopedic patients.")
             
-            submitted = st.form_submit_button("Generate AI Charter Draft", type="primary", use_container_width=True)
+            submitted = st.form_submit_button("Generate AI Charter Draft", type="primary", width="stretch")
             if submitted:
                 if st.session_state.api_key_missing:
                     st.error("AI features are disabled. Please configure your API key.")
@@ -73,6 +73,6 @@ def display_project_charter_tab():
             with st.expander("3. Key Stakeholders", expanded=True):
                 data['stakeholders'] = st.text_input("Key Stakeholders", value=data.get('stakeholders', ''))
 
-            if st.form_submit_button("Save Final Charter Data", use_container_width=True):
+            if st.form_submit_button("Save Final Charter Data", width="stretch"):
                 st.session_state.project_charter_data = data
                 st.success("Charter data saved! You can now download the document from the 'Exports' tab.")

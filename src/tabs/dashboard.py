@@ -17,7 +17,7 @@ def display_dashboard():
         
         rd_file = st.file_uploader("Upload R&D Spec (DOCX)", type=['docx'], key="rd_uploader")
         
-        if rd_file and st.button("✨ Auto-Configure Project", type="primary", use_container_width=True):
+        if rd_file and st.button("✨ Auto-Configure Project", type="primary", width="stretch"):
             if st.session_state.api_key_missing:
                 st.error("API Key required for AI processing.")
             else:

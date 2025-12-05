@@ -13,7 +13,7 @@ def display_compliance_tab():
         st.subheader("Medical Device Classification")
         with st.form("classification_form"):
             device_desc = st.text_area("Device's intended use:", height=150, placeholder="e.g., A foam cushion for comfort in a wheelchair.")
-            if st.form_submit_button("Classify Device", type="primary", use_container_width=True):
+            if st.form_submit_button("Classify Device", type="primary", width="stretch"):
                 if device_desc:
                     with st.spinner("AI is classifying..."):
                         st.session_state.medical_device_classification = st.session_state.medical_device_classifier.classify_device(device_desc)
@@ -30,7 +30,7 @@ def display_compliance_tab():
     with col2, st.container(border=True):
         st.subheader("Pre-Mortem Analysis")
         scenario = st.text_input("Define failure scenario:", "Our new product launch failed.")
-        if st.button("Generate Pre-Mortem Questions", use_container_width=True):
+        if st.button("Generate Pre-Mortem Questions", width="stretch"):
             with st.spinner("AI is generating questions..."):
                 st.session_state.pre_mortem_questions = st.session_state.pre_mortem_generator.generate_questions(scenario)
         
@@ -43,7 +43,7 @@ def display_compliance_tab():
                     answers[q] = st.text_area(f"Question {i+1}", value=q, key=f"q_{i}", disabled=True, label_visibility="collapsed")
                     answers[f"ans_{i}"] = st.text_area("Your Answer", key=f"ans_{i}")
 
-            if st.button("Summarize Pre-Mortem Analysis", use_container_width=True):
+            if st.button("Summarize Pre-Mortem Analysis", width="stretch"):
                 qa_list = []
                 if isinstance(questions, list):
                     for i, q in enumerate(questions):

@@ -21,12 +21,14 @@ class DataProcessor:
         - MOB1027 -> MOB1027
         - AC-500-RED -> AC-500
         """
+        if pd.isna(sku):
+            return "UNKNOWN"
+
         if not isinstance(sku, str):
             sku = str(sku)
             
         sku = sku.strip().upper()
-        
-        # Remove common wrapper characters just in case
+        # Remove common wrapper characters
         sku = sku.strip("[](){}<> ")
 
         # Regex: Start with 1+ Letters, optional hyphen, 1+ Digits.
@@ -34,6 +36,11 @@ class DataProcessor:
         match = re.match(r'^([A-Z]+-?\d+)', sku)
         if match:
             return match.group(1)
+        
+        # FIX: Fallback logic for SKUs that don't match the specific regex (e.g. numeric SKUs)
+        # We assume if there's a space, the first part is the ID
+        if ' ' in sku:
+            return sku.split(' ')[0]
             
         return sku
 
@@ -86,8 +93,9 @@ class DataProcessor:
                 sales_df.rename(columns={'total units': 'quantity'}, inplace=True)
 
         if 'sku' not in sales_df.columns or 'quantity' not in sales_df.columns:
+            # Return empty but with correct columns to prevent downstream errors
             print("Error: Sales DataFrame missing 'sku' or 'quantity' column.")
-            return pd.DataFrame()
+            return pd.DataFrame(columns=['sku', 'quantity'])
 
         # 3. SKU Normalization & Aggregation
         sales_df['sku'] = sales_df['sku'].apply(self._normalize_sku)

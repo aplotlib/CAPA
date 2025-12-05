@@ -1,7 +1,3 @@
-{
-type: uploaded file
-fileName: aplotlib/capa/CAPA-main/src/tabs/human_factors.py
-fullContent:
 # src/tabs/human_factors.py
 
 import streamlit as st
@@ -46,7 +42,7 @@ def display_human_factors_tab():
                 key="hf_q3"
             )
             
-            submitted = st.form_submit_button("✍️ Generate Full HFE Report with AI", use_container_width=True, type="primary")
+            submitted = st.form_submit_button("✍️ Generate Full HFE Report with AI", width="stretch", type="primary")
             if submitted:
                 if st.session_state.api_key_missing:
                     st.error("AI features are disabled. Please configure your API key.")
@@ -86,5 +82,5 @@ def display_human_factors_tab():
         with st.expander("Section 7: Critical Tasks"):
             data['critical_tasks'] = st.text_area("**Description and Categorization of Critical Tasks**", value=data.get('critical_tasks', ''), height=200, key="hf_tasks")
         with st.expander("Section 8: Validation Testing"):
-            data['validation_testing'] = st.text_area("**Details of Human Factors Validation Testing**", value=data.get('validation_testing', ''), height=300, key="hf_validation")
-}
+            else:
+        st.info("Answer the questions above to generate an AI-assisted draft of your Human Factors report.")

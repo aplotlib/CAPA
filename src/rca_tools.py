@@ -3,8 +3,8 @@
 from typing import Dict, List
 import openai
 import json
-# FIX: Changed relative import to absolute import
-from utils import retry_with_backoff
+# FIX: Use absolute import to prevent ModuleNotFoundError
+from src.utils import retry_with_backoff
 
 class RootCauseAnalyzer:
     """

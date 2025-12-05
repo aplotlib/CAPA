@@ -50,7 +50,7 @@ def display_manual_writer_tab():
             ]
             target_language = st.selectbox("Select Target Language", languages)
 
-            submitted = st.form_submit_button("Generate Full Manual Draft", type="primary", use_container_width=True)
+            submitted = st.form_submit_button("Generate Full Manual Draft", type="primary", width="stretch")
             if submitted:
                 if all(user_inputs.values()):
                     with st.spinner(f"AI is writing the manual in {target_language}... This may take a moment."):
@@ -105,5 +105,5 @@ def display_manual_writer_tab():
             file_name=f"Manual_{product_info['name']}_{target_language}.md",
             mime="text/markdown",
             type="primary",
-            use_container_width=True
+            width="stretch"
         )

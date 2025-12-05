@@ -204,4 +204,3 @@ class AIFileParser:
             print(f"Fallback parsing failed for {file.name}: {e}")
 
         return None
-}

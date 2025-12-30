@@ -1,5 +1,4 @@
 import streamlit as st
-import os
 
 def init_session_state():
     """Initialize all session state variables."""
@@ -37,5 +36,4 @@ def _load_api_keys():
 
     if google_key:
         st.session_state.api_key = google_key
-    else:
-        st.warning("⚠️ No API Key found in secrets. Please add GOOGLE_API_KEY to .streamlit/secrets.toml")
+    # Note: We don't warn here to avoid UI clutter; warning happens on AI usage if key is missing.

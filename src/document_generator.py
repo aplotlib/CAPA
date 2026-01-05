@@ -271,8 +271,13 @@ class DocumentGenerator:
         doc.add_heading("Requirement", level=2)
         doc.add_paragraph("Please investigate the root cause of this issue and provide a corrective action plan within 14 days.")
         
+        buffer = BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+        return buffer
+
     def generate_regulatory_report_docx(self, df: pd.DataFrame, query: str, log: dict) -> BytesIO:
-        """Generates a formal Regulatory Intelligence Report."""
+        """Generates a formal Regulatory Intelligence Report with AI Screening Data."""
         doc = Document()
         doc.add_heading("Regulatory Intelligence Report", level=1)
         doc.add_paragraph(f"Search Query: {query}")
@@ -298,15 +303,34 @@ class DocumentGenerator:
         # Detailed Findings
         if not df.empty:
             doc.add_heading("Detailed Findings", level=2)
+            
+            # Check if AI data exists in DataFrame
+            has_ai = "AI_Analysis" in df.columns
+            
             # Limit to top 50 to avoid massive docs
             top_df = df.head(50)
             
             for _, row in top_df.iterrows():
+                # Prepare Risk Header
+                risk_prefix = ""
+                if has_ai:
+                    risk_level = str(row.get('AI_Risk_Level', 'N/A')).upper()
+                    risk_prefix = f"[{risk_level} RISK] "
+                
                 p = doc.add_paragraph()
-                p.add_run(f"[{row['Date']}] {row['Source']}").bold = True
+                p.add_run(f"{risk_prefix}{row['Date']} | {row['Source']}").bold = True
+                
                 doc.add_paragraph(f"Product: {row['Product']}")
-                doc.add_paragraph(f"Reason: {row['Reason']}")
                 doc.add_paragraph(f"Firm: {row['Firm']}")
+                doc.add_paragraph(f"Reason: {row['Reason']}")
+                
+                # Add AI Analysis Paragraph if available
+                if has_ai and row.get("AI_Analysis"):
+                    ai_p = doc.add_paragraph()
+                    ai_p.add_run("AI Analysis: ").bold = True
+                    ai_p.add_run(str(row["AI_Analysis"]))
+                
+                doc.add_paragraph(f"Link: {row.get('Link', 'N/A')}")
                 doc.add_paragraph(f"Status: {row['Status']}")
                 doc.add_paragraph("___________________________________________________")
                 

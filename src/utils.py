@@ -34,6 +34,7 @@ def init_session_state():
     defaults = {
         "logged_in": False,
         "api_key": None,
+        "provider": "openai", # Default to openai, will update in _load_api_keys
         "product_info": {},
         "capa_records": [],
         "components_initialized": False,
@@ -55,34 +56,46 @@ def init_session_state():
     _load_api_keys()
 
 def _load_api_keys():
-    """Robustly loads API keys from Environment Variables or Secrets."""
+    """Robustly loads API keys and determines the provider."""
     found_key = None
-    
-    # 1. Check Environment Variables
-    env_vars = ["GOOGLE_API_KEY", "GEMINI_API_KEY", "API_KEY"]
-    for var in env_vars:
-        if os.environ.get(var):
-            found_key = os.environ.get(var)
-            break
-            
-    # 2. Check Streamlit Secrets
-    if not found_key:
-        try:
-            secret_keys = ["GOOGLE_API_KEY", "GEMINI_API_KEY", "API_KEY", "OPENAI_API_KEY"]
-            for key in secret_keys:
-                if key in st.secrets:
-                    found_key = st.secrets[key]
-                    break
-            
-            if not found_key and "google" in st.secrets:
-                 if "api_key" in st.secrets["google"]:
-                     found_key = st.secrets["google"]["api_key"]
-        except:
-            pass
+    provider = "openai" # Default
 
-    # 3. Update Session State
+    # Helper to check sources
+    def check_key(name):
+        # 1. Env Var
+        if os.environ.get(name): return os.environ.get(name)
+        # 2. Streamlit Secrets
+        if name in st.secrets: return st.secrets[name]
+        return None
+
+    # 1. Try OpenAI First
+    openai_key = check_key("OPENAI_API_KEY")
+    if openai_key:
+        found_key = openai_key
+        provider = "openai"
+    
+    # 2. Try Google/Gemini Second (if no OpenAI key)
+    if not found_key:
+        google_key = check_key("GOOGLE_API_KEY") or check_key("GEMINI_API_KEY")
+        if google_key:
+            found_key = google_key
+            provider = "google"
+            
+    # 3. Generic Fallback
+    if not found_key:
+        generic_key = check_key("API_KEY")
+        if generic_key:
+            found_key = generic_key
+            # Guess provider based on key format if possible, otherwise default to openai
+            if generic_key.startswith("AIza"): 
+                provider = "google"
+            else:
+                provider = "openai"
+
+    # 4. Update Session State
     if found_key:
         st.session_state.api_key = found_key
+        st.session_state.provider = provider
         st.session_state.api_key_missing = False
     else:
         st.session_state.api_key_missing = True
@@ -91,8 +104,6 @@ def initialize_ai_services():
     """Instantiates all helper classes and stores them in session state."""
     
     # --- MOVED IMPORTS HERE TO PREVENT CIRCULAR DEPENDENCY ---
-    # These modules import 'retry_with_backoff' from this file (src.utils),
-    # so we must delay importing them until this file is fully initialized.
     from src.ai_services import (
         AIService, DesignControlsTriager, UrraGenerator, ManualWriter, 
         ProjectCharterHelper, VendorEmailDrafter, HumanFactorsHelper, 

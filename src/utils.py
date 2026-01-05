@@ -3,6 +3,7 @@ import time
 import random
 import functools
 import logging
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -48,10 +49,9 @@ def init_session_state():
         "analysis_results": None,
         "fmea_rows": [],
         "ai_helpers_initialized": False,
-        # Fix: Added missing keys to prevent AttributeError
         "capa_data": {},
         "project_charter_data": {},
-        "api_key_missing": False  # Added flag for safer UI checks
+        "api_key_missing": False
     }
     
     for key, value in defaults.items():
@@ -62,21 +62,32 @@ def init_session_state():
 
 def _load_api_keys():
     """
-    Loads API keys from Streamlit secrets.
-    Prioritizes 'GOOGLE_API_KEY'. 
-    Falls back to 'OPENAI_API_KEY' if that's where you pasted the Gemini key.
+    Loads API keys from Environment Variables or Streamlit secrets.
+    Prioritizes 'GOOGLE_API_KEY' from the environment (Standard for Python/Containers).
     """
-    # 1. Check for the proper name first
-    google_key = st.secrets.get("GOOGLE_API_KEY")
-    
-    # 2. Fallback: Check other common names if the user stored it there
-    if not google_key:
-        google_key = st.secrets.get("OPENAI_API_KEY")
+    # 1. Check Environment Variables (Best practice for Containers/Cloud)
+    google_key = os.environ.get("GOOGLE_API_KEY")
     
     if not google_key:
-        google_key = st.secrets.get("API_KEY")
+        google_key = os.environ.get("GEMINI_API_KEY")
+        
+    if not google_key:
+        google_key = os.environ.get("API_KEY")
+
+    # 2. Fallback to Streamlit Secrets (Local Dev)
+    if not google_key:
+        try:
+            google_key = st.secrets.get("GOOGLE_API_KEY")
+            if not google_key:
+                google_key = st.secrets.get("OPENAI_API_KEY") # Check legacy key name
+            if not google_key:
+                google_key = st.secrets.get("API_KEY")
+        except FileNotFoundError:
+            pass # No secrets file found
 
     if google_key:
         st.session_state.api_key = google_key
+        st.session_state.api_key_missing = False
     else:
         st.session_state.api_key_missing = True
+        logger.warning("No API Key found in Environment Variables or Secrets.")

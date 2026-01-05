@@ -42,11 +42,23 @@ class RegulatoryService:
 
     @staticmethod
     def _fetch_openfda(term: str, category: str, limit: int) -> list:
-        """Generic handler for FDA Device/Drug/Food APIs."""
+        """
+        Generic handler for FDA Device/Drug/Food APIs.
+        USES SMART KEYWORD SEARCH (AND Logic) instead of PHRASE SEARCH.
+        """
+        if not term.strip():
+            return []
+
         url = f"{RegulatoryService.FDA_BASE}/{category}/enforcement.json"
-        sanitized = term.strip().replace(" ", "+")
-        # Search in product description or reason
-        search_query = f'(product_description:"{sanitized}"+OR+reason_for_recall:"{sanitized}")'
+        
+        # FIX: Split query into words to allow "AND" logic
+        # e.g., "Heart Valve" becomes (product_description:(Heart+AND+Valve) ...)
+        # This finds "Valve, Heart" AND "Heart Valve"
+        words = term.strip().split()
+        joined_term = "+AND+".join(words)
+        
+        # Construct flexible query: (Product matches A+B OR Reason matches A+B)
+        search_query = f'(product_description:({joined_term})+OR+reason_for_recall:({joined_term}))'
         
         params = {
             'search': search_query,
@@ -56,8 +68,11 @@ class RegulatoryService:
         
         out = []
         try:
+            # We must pass the search query carefully. Requests usually encodes spaces, 
+            # but we already constructed the syntax with '+'.
             res = requests.get(url, params=params, timeout=5)
             data = res.json()
+            
             if "results" in data:
                 for item in data["results"]:
                     out.append({
@@ -78,6 +93,12 @@ class RegulatoryService:
     def _fetch_cpsc(term: str) -> list:
         """Handler for CPSC SaferProducts API."""
         # CPSC uses 'RecallTitle' or 'Description' for filtering
+        # Note: CPSC API is simpler and does not support complex boolean operators easily in one param.
+        # We search RecallTitle first.
+        
+        if not term.strip():
+            return []
+            
         params = {'format': 'json', 'RecallTitle': term}
         out = []
         try:

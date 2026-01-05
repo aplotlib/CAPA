@@ -3,28 +3,35 @@ from google import genai
 from google.genai import types
 from typing import Optional, Dict, Any, List
 import json
-import os
 import logging
 
 # Setup Logger
 logger = logging.getLogger(__name__)
 
 class AIServiceBase:
-    """Base class for all AI Services to handle client initialization and common methods."""
+    """Base class for all AI Services using Google GenAI SDK."""
     def __init__(self, api_key: str):
         if not api_key:
-            raise ValueError("API Key is required for AI Services.")
-        
-        self.client = genai.Client(api_key=api_key)
-        
-        # Models Configuration
-        # Defaulting to 2.0 Flash as it is the current workhorse for high-speed tasks
+            # Don't crash immediately, allow graceful degradation
+            self.client = None
+            logger.warning("AIService initialized without API Key.")
+            return
+
+        try:
+            self.client = genai.Client(api_key=api_key)
+        except Exception as e:
+            logger.error(f"Failed to initialize GenAI Client: {e}")
+            self.client = None
+            
+        # Model Configuration
         self.fast_model = "gemini-2.0-flash-exp" 
-        # Using Flash Thinking (or Pro) for reasoning tasks
         self.reasoning_model = "gemini-2.0-flash-thinking-exp"
 
     def _generate_json(self, prompt: str, system_instruction: str = None) -> Dict[str, Any]:
         """Helper to generate JSON responses safely."""
+        if not self.client:
+            return {"error": "AI Client not initialized (Missing API Key)."}
+
         try:
             config = types.GenerateContentConfig(
                 system_instruction=system_instruction,
@@ -43,6 +50,9 @@ class AIServiceBase:
 
     def _generate_text(self, prompt: str, system_instruction: str = None) -> str:
         """Helper to generate text responses."""
+        if not self.client:
+            return "Error: AI Client not initialized (Missing API Key)."
+
         try:
             config = types.GenerateContentConfig(
                 system_instruction=system_instruction,
@@ -58,12 +68,16 @@ class AIServiceBase:
             logger.error(f"AI Text Generation Error: {e}")
             return f"Error: {str(e)}"
 
-# --- Main Service Class ---
+# --- Specialized Services ---
+
 class AIService(AIServiceBase):
     def analyze_text(self, prompt: str, system_instruction: str = None) -> str:
         return self._generate_text(prompt, system_instruction)
 
     def transcribe_and_structure(self, audio_bytes: bytes, context: str = "") -> Dict[str, str]:
+        if not self.client:
+             return {"error": "AI Client not initialized."}
+
         prompt_text = f"""
         You are a Quality Assurance Assistant. 
         Listen to this dictation regarding a potential Quality Event or CAPA.
@@ -94,8 +108,6 @@ class AIService(AIServiceBase):
         system = "You are a Regulatory Expert. Screen device against FDA/MDR recall databases."
         user = f"Screen this device: {product_description}. List common recall reasons and keywords."
         return self._generate_text(user, system)
-
-# --- Consolidated Service Classes ---
 
 class DesignControlsTriager(AIServiceBase):
     def generate_design_controls(self, name: str, ifu: str, user_needs: str, tech_reqs: str, risks: str) -> Dict[str, str]:
@@ -195,6 +207,11 @@ class MedicalDeviceClassifier(AIServiceBase):
 
 # Singleton management for the main service
 def get_ai_service():
-    if 'ai_service' not in st.session_state and st.session_state.get('api_key'):
-        st.session_state.ai_service = AIService(st.session_state.api_key)
+    if 'ai_service' not in st.session_state:
+        # Try to initialize if key is present
+        api_key = st.session_state.get('api_key')
+        if api_key:
+            st.session_state.ai_service = AIService(api_key)
+        else:
+            return None
     return st.session_state.get('ai_service')

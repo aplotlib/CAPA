@@ -41,7 +41,8 @@ def display_recalls_tab():
             agent_firm = st.text_input("My Firm Name", value=default_manufacturer, placeholder="e.g. Acme MedCorp", key="agent_firm")
         with c3:
             st.write("") 
-            start_btn = st.button("🚀 Launch Agent", type="primary", use_container_width=True)
+            # FIX: width="stretch"
+            start_btn = st.button("🚀 Launch Agent", type="primary", width="stretch")
 
         if start_btn:
             if not ai:
@@ -135,7 +136,8 @@ def display_recalls_tab():
 
         auto_expand = st.checkbox("🤖 AI-Expanded Search (Synonyms)", value=True)
         
-        if st.button("🚀 Run Deep Scan (Manual)", type="secondary", use_container_width=True):
+        # FIX: width="stretch"
+        if st.button("🚀 Run Deep Scan (Manual)", type="secondary", width="stretch"):
             if not p_name:
                 st.error("Enter a search query.")
             else:
@@ -152,8 +154,9 @@ def display_recalls_tab():
         with c_act1: st.subheader(f"Findings: {len(df)} Records")
         with c_act2:
             if "AI_Risk_Level" not in df.columns:
-                if st.button("🤖 AI Screen for Relevance", type="secondary", use_container_width=True):
-                    if not ai or not ai.model:
+                # FIX: width="stretch"
+                if st.button("🤖 AI Screen for Relevance", type="secondary", width="stretch"):
+                    if not ai or not ai.client:
                         st.error("AI Service not available.")
                     else:
                         with st.spinner(f"AI is screening {len(df)} records..."):
@@ -195,12 +198,11 @@ def display_recalls_tab():
                             st.caption("Click 'AI Screen for Relevance' to analyze this record.")
         
         with tab_raw:
-            st.dataframe(df, column_config={"Link": st.column_config.LinkColumn("Source Link")}, use_container_width=True)
+            st.dataframe(df, column_config={"Link": st.column_config.LinkColumn("Source Link")}, width=1200)
 
-# ... [Keep existing run_search_logic and run_ai_screening functions] ...
 def run_search_logic(term, start, end, auto_expand, ai):
     terms = [term]
-    if auto_expand and ai and ai.model:
+    if auto_expand and ai and ai.client:
         try:
             kws = ai.generate_search_keywords(term, "")
             if kws:

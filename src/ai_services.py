@@ -4,6 +4,8 @@ from google.genai import types
 from typing import Optional, Dict, Any, List
 import json
 import logging
+# [Change 1] Import the retry decorator
+from src.utils import retry_with_backoff
 
 # Setup Logger
 logger = logging.getLogger(__name__)
@@ -27,6 +29,16 @@ class AIServiceBase:
         self.fast_model = "gemini-2.0-flash-exp" 
         self.reasoning_model = "gemini-2.0-flash-thinking-exp"
 
+    # [Change 2] Internal helper that raises exceptions so retries work
+    @retry_with_backoff(retries=5, backoff_in_seconds=4)
+    def _generate_with_retry(self, model: str, contents: Any, config: types.GenerateContentConfig):
+        """Internal method to execute generation with retries."""
+        return self.client.models.generate_content(
+            model=model,
+            contents=contents,
+            config=config
+        )
+
     def _generate_json(self, prompt: str, system_instruction: str = None) -> Dict[str, Any]:
         """Helper to generate JSON responses safely."""
         if not self.client:
@@ -38,7 +50,9 @@ class AIServiceBase:
                 temperature=0.3,
                 response_mime_type="application/json"
             )
-            response = self.client.models.generate_content(
+            
+            # [Change 3] Call the retry-enabled helper
+            response = self._generate_with_retry(
                 model=self.fast_model,
                 contents=prompt,
                 config=config
@@ -46,6 +60,7 @@ class AIServiceBase:
             return json.loads(response.text)
         except Exception as e:
             logger.error(f"AI Generation Error: {e}")
+            # If retries fail after all attempts, return the error
             return {"error": str(e)}
 
     def _generate_text(self, prompt: str, system_instruction: str = None) -> str:
@@ -58,7 +73,9 @@ class AIServiceBase:
                 system_instruction=system_instruction,
                 temperature=0.4
             )
-            response = self.client.models.generate_content(
+            
+            # [Change 4] Call the retry-enabled helper
+            response = self._generate_with_retry(
                 model=self.fast_model,
                 contents=prompt,
                 config=config
@@ -87,6 +104,8 @@ class AIService(AIServiceBase):
         2. Extract fields: Issue Description, Root Cause, Immediate Actions.
         """
         try:
+            # Note: Multimodal uploads can be large, so we might want retries here too
+            # For now, we use the direct call or you can wrap this similarly
             response = self.client.models.generate_content(
                 model=self.fast_model,
                 contents=[

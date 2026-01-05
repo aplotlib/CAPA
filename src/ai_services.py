@@ -10,22 +10,33 @@ from src.utils import retry_with_backoff
 logger = logging.getLogger(__name__)
 
 class AIServiceBase:
-    """Base class for all AI Services using OpenAI SDK."""
+    """Base class for all AI Services using OpenAI SDK (compatible with Gemini)."""
     def __init__(self, api_key: str):
         if not api_key:
             self.client = None
             logger.warning("AIService initialized without API Key.")
             return
 
+        self.provider = st.session_state.get("provider", "openai")
+
         try:
-            self.client = openai.OpenAI(api_key=api_key)
+            if self.provider == "google":
+                # Route through Google's OpenAI-compatible endpoint
+                self.client = openai.OpenAI(
+                    api_key=api_key,
+                    base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+                )
+                self.fast_model = "gemini-1.5-flash"
+                self.reasoning_model = "gemini-1.5-pro"
+            else:
+                # Default OpenAI
+                self.client = openai.OpenAI(api_key=api_key)
+                self.fast_model = "gpt-4o-mini"
+                self.reasoning_model = "gpt-4o"
+                
         except Exception as e:
-            logger.error(f"Failed to initialize OpenAI Client: {e}")
+            logger.error(f"Failed to initialize AI Client ({self.provider}): {e}")
             self.client = None
-            
-        # Model Configuration
-        self.fast_model = "gpt-4o-mini" 
-        self.reasoning_model = "gpt-4o"
 
     @retry_with_backoff(retries=3, backoff_in_seconds=2)
     def _generate_with_retry(self, model: str, messages: List[Dict[str, str]], response_format=None, temperature=0.7):
@@ -47,7 +58,7 @@ class AIServiceBase:
 
         messages = []
         
-        # FAILSAFE: The OpenAI API strictly requires the word "JSON" in the prompt 
+        # FAILSAFE: The API strictly requires the word "JSON" in the prompt 
         # when response_format is set to json_object.
         if system_instruction:
             if "json" not in system_instruction.lower():
@@ -106,7 +117,11 @@ class AIService(AIServiceBase):
         if not self.client:
              return {"error": "AI Client not initialized."}
 
-        # 1. Transcribe with Whisper
+        # 1. Transcribe (Note: Google compatible endpoint doesn't support 'whisper-1' usually, 
+        # so this might fail if using Google Key. We add a check.)
+        if self.provider == 'google':
+             return {"error": "Audio transcription is currently optimized for OpenAI keys only."}
+
         try:
             audio_file = io.BytesIO(audio_bytes)
             audio_file.name = "audio.wav" 
@@ -168,7 +183,6 @@ class AIService(AIServiceBase):
         system = "You are a Regulatory Expert. Screen device against FDA/MDR recall databases."
         user = f"Screen this device: {product_description}. List common recall reasons and keywords."
         return self._generate_text(user, system)
-    # Add this method to your AIService class in src/ai_services.py
 
     def generate_search_keywords(self, product_name: str, description: str) -> list:
         system = "You are a Regulatory Search Expert. Generate search terms for recall databases."
@@ -187,7 +201,6 @@ class AIService(AIServiceBase):
         return response.get('keywords', [])
 
     def assess_relevance(self, product_desc: str, recall_text: str) -> str:
-        """Returns a short relevance explanation."""
         system = "You are a Safety Engineer. Assess if a recall is relevant to our product."
         prompt = f"""
         Our Product: {product_desc}
@@ -200,7 +213,6 @@ class AIService(AIServiceBase):
 
 class DesignControlsTriager(AIServiceBase):
     def generate_design_controls(self, name: str, ifu: str, user_needs: str, tech_reqs: str, risks: str) -> Dict[str, str]:
-        # Explicitly mention JSON in system prompt
         system = "You are a Medical Device Systems Engineer (ISO 13485). Generate Design Control documentation in JSON format."
         prompt = f"""
         Product: {name}

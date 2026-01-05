@@ -48,9 +48,10 @@ def init_session_state():
         "analysis_results": None,
         "fmea_rows": [],
         "ai_helpers_initialized": False,
-        # Fix: Initializing these dictionaries prevents AttributeError in exports/tabs
+        # Fix: Added missing keys to prevent AttributeError
         "capa_data": {},
-        "project_charter_data": {}
+        "project_charter_data": {},
+        "api_key_missing": False  # Added flag for safer UI checks
     }
     
     for key, value in defaults.items():
@@ -77,3 +78,5 @@ def _load_api_keys():
 
     if google_key:
         st.session_state.api_key = google_key
+    else:
+        st.session_state.api_key_missing = True

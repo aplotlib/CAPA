@@ -15,7 +15,8 @@ class AICAPAHelper:
         Initialize with Google Gemini API key.
         """
         self.client = None
-        self.fast_model = "gemini-2.0-flash-exp"
+        # Switch to 1.5-flash for better stability and quota handling
+        self.fast_model = "gemini-1.5-flash" 
         self.reasoning_model = "gemini-2.0-flash-thinking-exp"
 
         if api_key:
@@ -24,14 +25,21 @@ class AICAPAHelper:
             except Exception as e:
                 print(f"Failed to initialize AI helper: {e}")
 
-    @retry_with_backoff()
+    @retry_with_backoff(retries=5, backoff_in_seconds=2)
+    def _generate_unsafe(self, model, contents, config=None):
+        """Internal retriable method."""
+        return self.client.models.generate_content(
+            model=model,
+            contents=contents,
+            config=config
+        )
+
     def transcribe_audio(self, audio_file) -> str:
         """Transcribes audio input using Gemini (Multimodal capabilities)."""
         if not self.client:
             return "Error: AI client not initialized."
         
         try:
-            # Gemini 2.0 Flash is multimodal and can handle audio directly
             prompt = "Transcribe the following audio file accurately."
             
             # Need to read file bytes if not already bytes
@@ -40,18 +48,22 @@ class AICAPAHelper:
             else:
                 audio_bytes = audio_file
 
-            response = self.client.models.generate_content(
+            contents = [
+                types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"),
+                prompt
+            ]
+            
+            # Use retriable internal method
+            response = self._generate_unsafe(
                 model=self.fast_model,
-                contents=[
-                    types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"),
-                    prompt
-                ]
+                contents=contents
             )
             return response.text
         except Exception as e:
+            if "429" in str(e):
+                return "Error: API Quota Exceeded (429). Please try again later."
             return f"Error transcribing audio: {e}"
 
-    @retry_with_backoff()
     def refine_capa_input(self, field_name: str, rough_input: str, product_context: str) -> str:
         """
         Uses the FAST model to quickly polish text.
@@ -74,16 +86,17 @@ class AICAPAHelper:
                 max_output_tokens=500
             )
             
-            response = self.client.models.generate_content(
+            response = self._generate_unsafe(
                 model=self.fast_model,
                 contents=user_prompt,
                 config=config
             )
             return response.text.strip()
         except Exception as e:
+            if "429" in str(e):
+                return "Error: Quota exceeded (429)."
             return f"Error refining input: {e}"
 
-    @retry_with_backoff()
     def generate_capa_suggestions(self, issue_summary: str, analysis_results: Dict) -> Dict[str, str]:
         """
         Uses the REASONING model for complex synthesis.
@@ -105,7 +118,10 @@ class AICAPAHelper:
                 response_mime_type="application/json"
             )
             
-            response = self.client.models.generate_content(
+            # Using reasoning model here, which might be more prone to 429
+            # Fallback to fast model if reasoning fails? 
+            # For now, just retry.
+            response = self._generate_unsafe(
                 model=self.reasoning_model,
                 contents=user_prompt,
                 config=config
@@ -113,4 +129,6 @@ class AICAPAHelper:
             return json.loads(response.text)
         except Exception as e:
             print(f"Error generating CAPA suggestions: {e}")
+            if "429" in str(e):
+                return {"error": "API Quota Exceeded (429). Please try again in a minute."}
             return {"error": f"Failed to generate CAPA suggestions: {e}"}

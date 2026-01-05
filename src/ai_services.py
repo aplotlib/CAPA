@@ -1,17 +1,17 @@
 import streamlit as st
-from google import genai
-from google.genai import types
+import openai
 from typing import Optional, Dict, Any, List
 import json
 import logging
-# [Change 1] Import the retry decorator
+import io
+# Import the retry decorator from your utils
 from src.utils import retry_with_backoff
 
 # Setup Logger
 logger = logging.getLogger(__name__)
 
 class AIServiceBase:
-    """Base class for all AI Services using Google GenAI SDK."""
+    """Base class for all AI Services using OpenAI SDK."""
     def __init__(self, api_key: str):
         if not api_key:
             # Don't crash immediately, allow graceful degradation
@@ -20,47 +20,48 @@ class AIServiceBase:
             return
 
         try:
-            self.client = genai.Client(api_key=api_key)
+            self.client = openai.OpenAI(api_key=api_key)
         except Exception as e:
-            logger.error(f"Failed to initialize GenAI Client: {e}")
+            logger.error(f"Failed to initialize OpenAI Client: {e}")
             self.client = None
             
         # Model Configuration
-        self.fast_model = "gemini-2.0-flash-exp" 
-        self.reasoning_model = "gemini-2.0-flash-thinking-exp"
+        self.fast_model = "gpt-4o-mini" 
+        self.reasoning_model = "gpt-4o"
 
-    # [Change 2] Internal helper that raises exceptions so retries work
-    @retry_with_backoff(retries=5, backoff_in_seconds=4)
-    def _generate_with_retry(self, model: str, contents: Any, config: types.GenerateContentConfig):
+    @retry_with_backoff(retries=3, backoff_in_seconds=2)
+    def _generate_with_retry(self, model: str, messages: List[Dict[str, str]], response_format=None, temperature=0.7):
         """Internal method to execute generation with retries."""
-        return self.client.models.generate_content(
-            model=model,
-            contents=contents,
-            config=config
-        )
+        kwargs = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature
+        }
+        if response_format:
+            kwargs["response_format"] = response_format
+            
+        return self.client.chat.completions.create(**kwargs)
 
     def _generate_json(self, prompt: str, system_instruction: str = None) -> Dict[str, Any]:
         """Helper to generate JSON responses safely."""
         if not self.client:
             return {"error": "AI Client not initialized (Missing API Key)."}
 
+        messages = []
+        if system_instruction:
+            messages.append({"role": "system", "content": system_instruction})
+        messages.append({"role": "user", "content": prompt})
+
         try:
-            config = types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.3,
-                response_mime_type="application/json"
-            )
-            
-            # [Change 3] Call the retry-enabled helper
             response = self._generate_with_retry(
                 model=self.fast_model,
-                contents=prompt,
-                config=config
+                messages=messages,
+                response_format={"type": "json_object"},
+                temperature=0.3
             )
-            return json.loads(response.text)
+            return json.loads(response.choices[0].message.content)
         except Exception as e:
             logger.error(f"AI Generation Error: {e}")
-            # If retries fail after all attempts, return the error
             return {"error": str(e)}
 
     def _generate_text(self, prompt: str, system_instruction: str = None) -> str:
@@ -68,19 +69,18 @@ class AIServiceBase:
         if not self.client:
             return "Error: AI Client not initialized (Missing API Key)."
 
+        messages = []
+        if system_instruction:
+            messages.append({"role": "system", "content": system_instruction})
+        messages.append({"role": "user", "content": prompt})
+
         try:
-            config = types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.4
-            )
-            
-            # [Change 4] Call the retry-enabled helper
             response = self._generate_with_retry(
                 model=self.fast_model,
-                contents=prompt,
-                config=config
+                messages=messages,
+                temperature=0.4
             )
-            return response.text
+            return response.choices[0].message.content
         except Exception as e:
             logger.error(f"AI Text Generation Error: {e}")
             return f"Error: {str(e)}"
@@ -95,28 +95,32 @@ class AIService(AIServiceBase):
         if not self.client:
              return {"error": "AI Client not initialized."}
 
-        prompt_text = f"""
-        You are a Quality Assurance Assistant. 
-        Listen to this dictation regarding a potential Quality Event or CAPA.
-        CONTEXT: {context}
-        TASK:
-        1. Transcribe the audio accurately.
-        2. Extract fields: Issue Description, Root Cause, Immediate Actions.
-        """
+        # 1. Transcribe with Whisper
         try:
-            # Note: Multimodal uploads can be large, so we might want retries here too
-            # For now, we use the direct call or you can wrap this similarly
-            response = self.client.models.generate_content(
-                model=self.fast_model,
-                contents=[
-                    types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"),
-                    prompt_text
-                ],
-                config=types.GenerateContentConfig(response_mime_type="application/json")
+            # Create a file-like object for the API
+            audio_file = io.BytesIO(audio_bytes)
+            audio_file.name = "audio.wav" 
+            
+            transcript_response = self.client.audio.transcriptions.create(
+                model="whisper-1", 
+                file=audio_file
             )
-            return json.loads(response.text)
+            transcript_text = transcript_response.text
         except Exception as e:
-            return {"error": str(e)}
+            return {"error": f"Transcription failed: {str(e)}"}
+
+        # 2. Extract Structure with LLM
+        system_prompt = "You are a Quality Assurance Assistant. Extract fields from the transcript."
+        user_prompt = f"""
+        CONTEXT: {context}
+        TRANSCRIPT: {transcript_text}
+        
+        TASK:
+        1. Parse the transcript.
+        2. Extract fields: Issue Description, Root Cause, Immediate Actions.
+        Return JSON.
+        """
+        return self._generate_json(user_prompt, system_prompt)
 
     def analyze_meeting_transcript(self, transcript_text: str) -> Dict[str, str]:
         system_prompt = "You are a QA Expert. Extract CAPA details (issue, root cause, actions) from notes."

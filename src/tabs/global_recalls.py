@@ -24,22 +24,22 @@ def display_recalls_tab():
         st.session_state.recall_hits = pd.DataFrame()
     if 'recall_log' not in st.session_state: 
         st.session_state.recall_log = {}
-    if 'batch_results' not in st.session_state:
-        st.session_state.batch_results = pd.DataFrame()
 
     p_info = st.session_state.get('product_info', {})
     default_name = p_info.get('name', '')
     default_manufacturer = p_info.get('manufacturer', '')
     default_model = p_info.get('model', '')
 
-    # --- 🤖 AGENT SECTION ---
-    with st.expander("🤖 Autonomous Safety & Media Agent", expanded=True):
-        
-        tab_single, tab_batch = st.tabs(["🎯 Single Target Mission", "🚀 Batch Surveillance (Multi-SKU)"])
-        
-        # --- TAB A: SINGLE TARGET ---
-        with tab_single:
+    # --- TABS FOR MODES ---
+    tab_single, tab_bulk = st.tabs(["🤖 Single Agent Mode", "🚀 Bulk Fleet Surveillance"])
+
+    # =========================================================================
+    # TAB 1: SINGLE AGENT (Existing Logic)
+    # =========================================================================
+    with tab_single:
+        with st.expander("🤖 Autonomous Safety & Media Agent", expanded=True):
             st.info("The Agent scans Recalls, Adverse Events, and Global News. It drafts CAPAs for safety risks and PR Statements for media risks.")
+            
             c1, c2, c3 = st.columns([2, 2, 1])
             with c1:
                 agent_term = st.text_input("Surveillance Target", value=default_name, placeholder="e.g. Infusion Pump", key="agent_term")
@@ -47,7 +47,7 @@ def display_recalls_tab():
                 agent_firm = st.text_input("My Firm Name", value=default_manufacturer, placeholder="e.g. Acme MedCorp", key="agent_firm")
             with c3:
                 st.write("") 
-                start_btn = st.button("🚀 Launch Mission", type="primary", width="stretch")
+                start_btn = st.button("🚀 Launch Agent", type="primary", width="stretch")
 
             if start_btn:
                 if not ai:
@@ -71,241 +71,255 @@ def display_recalls_tab():
                     st.session_state.agent_artifacts = artifacts
                     st.success("Mission Complete!")
 
-        # --- TAB B: BATCH SURVEILLANCE ---
-        with tab_batch:
-            st.info("Upload a spreadsheet to scan multiple products at once. The Agent uses Fuzzy Matching to flag relevant risks.")
+        # --- SINGLE AGENT RESULTS ---
+        if 'agent_artifacts' in st.session_state and st.session_state.agent_artifacts:
+            st.divider()
+            st.subheader(f"📦 Agent Action Packages ({len(st.session_state.agent_artifacts)})")
             
-            bc1, bc2 = st.columns([1, 1])
-            with bc1:
-                uploaded_file = st.file_uploader("Upload Product List (XLSX/CSV)", type=['xlsx', 'csv'], help="Column A: SKU, Column B: Product Name")
-            
-            with bc2:
-                st.subheader("Timeframe Logic")
-                time_range = st.selectbox(
-                    "Search Horizon", 
-                    ["Last 30 Days", "Last 60 Days", "Last 90 Days", "Last 180 Days", "Last 365 Days", "Custom Range"],
-                    index=2
-                )
+            for i, art in enumerate(st.session_state.agent_artifacts):
+                rec = art['source_record']
+                source_type = art.get('source_type', 'Unknown')
+                risk_analysis = art.get('risk_analysis', 'N/A')
                 
-                start_date = datetime.now() - timedelta(days=90) # Default
-                end_date = datetime.now()
+                icon = "📰" if "Media" in source_type else "💀" if "MAUDE" in source_type else "🚨"
                 
-                if time_range == "Last 30 Days": start_date = datetime.now() - timedelta(days=30)
-                elif time_range == "Last 60 Days": start_date = datetime.now() - timedelta(days=60)
-                elif time_range == "Last 90 Days": start_date = datetime.now() - timedelta(days=90)
-                elif time_range == "Last 180 Days": start_date = datetime.now() - timedelta(days=180)
-                elif time_range == "Last 365 Days": start_date = datetime.now() - timedelta(days=365)
-                elif time_range == "Custom Range":
-                    c_d1, c_d2 = st.columns(2)
-                    start_date = c_d1.date_input("Start", value=datetime.now() - timedelta(days=90))
-                    end_date = c_d2.date_input("End", value=datetime.now())
-
-                # Convert to datetime for service if it's a date object
-                if isinstance(start_date, date): start_date = datetime.combine(start_date, datetime.min.time())
-                if isinstance(end_date, date): end_date = datetime.combine(end_date, datetime.min.time())
-
-            if uploaded_file and st.button("🚀 Run Batch Scan", type="primary", width="stretch"):
-                if not ai:
-                    st.error("AI Service not connected.")
-                else:
-                    try:
-                        # Load File
-                        if uploaded_file.name.endswith('.csv'):
-                            df_batch = pd.read_csv(uploaded_file)
-                        else:
-                            df_batch = pd.read_excel(uploaded_file)
-                        
-                        # Validate Columns (flexible check)
-                        if len(df_batch.columns) < 2:
-                            st.error("File must have at least 2 columns (SKU, Product Name).")
-                        else:
-                            # Normalize headers for internal use
-                            df_batch.rename(columns={df_batch.columns[0]: 'SKU', df_batch.columns[1]: 'Product Name'}, inplace=True)
-                            
-                            agent = RecallResponseAgent()
-                            progress_bar = st.progress(0, "Initializing Batch Scan...")
-                            status_text = st.empty()
-                            
-                            results = agent.run_batch_mission(
-                                df_batch, 
-                                start_date, 
-                                end_date, 
-                                progress_callback=lambda p, msg: (progress_bar.progress(p), status_text.text(msg))
-                            )
-                            
-                            st.session_state.batch_results = results
-                            progress_bar.empty()
-                            status_text.success("Batch Scan Complete!")
-                            
-                    except Exception as e:
-                        st.error(f"Error processing file: {e}")
-
-            # --- BATCH RESULTS DISPLAY ---
-            if 'batch_results' in st.session_state and not st.session_state.batch_results.empty:
-                res_df = st.session_state.batch_results
-                
-                # Metrics
-                total_scanned = len(res_df['SKU'].unique())
-                issues_found = len(res_df[res_df['Risk Level'].isin(['High', 'Medium'])])
-                
-                st.divider()
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Products Scanned", total_scanned)
-                m2.metric("Issues Flagged", issues_found)
-                m3.download_button(
-                    "📥 Download Report", 
-                    data=res_df.to_csv(index=False), 
-                    file_name=f"Batch_Risk_Report_{datetime.now().date()}.csv", 
-                    mime="text/csv"
-                )
-                
-                st.subheader("🚩 Flagged Issues")
-                # Filter to show only hits first
-                hits_df = res_df[res_df['Match Score'] > 0].sort_values(by='Risk Level', ascending=True) # High/Med sort
-                
-                if not hits_df.empty:
-                    for i, row in hits_df.iterrows():
-                        risk_color = "🔴" if row['Risk Level'] == "High" else "🟠" if row['Risk Level'] == "Medium" else "⚪"
-                        with st.expander(f"{risk_color} {row['Product Name']} (SKU: {row['SKU']}) - {row['Risk Level']} Risk"):
-                            st.write(f"**Source:** {row['Source']}")
-                            st.write(f"**Issue:** {row['Issue Description']}")
-                            st.write(f"**Match Confidence:** {row['Match Score']}% (Fuzzy Match)")
-                            st.caption(f"Date: {row['Date']}")
-                            st.markdown(f"[View Link]({row['Link']})")
-                else:
-                    st.success("No significant issues found for the selected date range.")
-
-    # --- 📦 AGENT ARTIFACTS (Single Mission) ---
-    if 'agent_artifacts' in st.session_state and st.session_state.agent_artifacts:
-        st.divider()
-        st.subheader(f"📦 Agent Action Packages ({len(st.session_state.agent_artifacts)})")
-        
-        for i, art in enumerate(st.session_state.agent_artifacts):
-            rec = art['source_record']
-            source_type = art.get('source_type', 'Unknown')
-            risk_analysis = art.get('risk_analysis', 'N/A')
-            
-            icon = "📰" if "Media" in source_type else "💀" if "MAUDE" in source_type else "🚨"
-            
-            with st.expander(f"{icon} ALERT [{source_type}]: {rec['Product'][:60]}...", expanded=True):
-                col_left, col_right = st.columns(2)
-                
-                with col_left:
-                    st.markdown("### ⚠️ Threat Detected")
-                    st.error(f"**Risk Analysis:** {risk_analysis}")
-                    st.write(f"**Issue:** {rec['Reason']}")
-                    st.write(f"**Source:** {rec['Source']}")
-                
-                with col_right:
-                    st.markdown("### 🤖 Generated Assets")
+                with st.expander(f"{icon} ALERT [{source_type}]: {rec['Product'][:60]}...", expanded=True):
+                    col_left, col_right = st.columns(2)
                     
-                    if art.get('capa_draft'):
-                        if st.button(f"📥 Save Draft CAPA", key=f"btn_capa_{i}"):
-                            if 'capa_records' not in st.session_state: st.session_state.capa_records = []
-                            cd = art['capa_draft']
-                            new_capa = {
-                                "id": f"AUTO-{len(st.session_state.capa_records)+1:03d}",
-                                "issue": cd.get('issue_description', 'Auto-generated'),
-                                "root_cause": cd.get('root_cause_investigation_plan', 'TBD'),
-                                "actions": cd.get('containment_action', 'TBD'),
-                                "date": str(datetime.now().date())
-                            }
-                            st.session_state.capa_records.append(new_capa)
-                            st.toast("CAPA saved!")
+                    with col_left:
+                        st.markdown("### ⚠️ Threat Detected")
+                        st.error(f"**Risk Analysis:** {risk_analysis}")
+                        st.write(f"**Issue:** {rec['Reason']}")
+                        st.write(f"**Source:** {rec['Source']}")
+                    
+                    with col_right:
+                        st.markdown("### 🤖 Generated Assets")
+                        
+                        if art.get('capa_draft'):
+                            if st.button(f"📥 Save Draft CAPA", key=f"btn_capa_{i}"):
+                                if 'capa_records' not in st.session_state: st.session_state.capa_records = []
+                                cd = art['capa_draft']
+                                new_capa = {
+                                    "id": f"AUTO-{len(st.session_state.capa_records)+1:03d}",
+                                    "issue": cd.get('issue_description', 'Auto-generated'),
+                                    "root_cause": cd.get('root_cause_investigation_plan', 'TBD'),
+                                    "actions": cd.get('containment_action', 'TBD'),
+                                    "date": str(datetime.now().date())
+                                }
+                                st.session_state.capa_records.append(new_capa)
+                                st.toast("CAPA saved!")
 
-                    if art.get('email_draft'):
-                        with st.popover("✉️ View Vendor Email"):
-                            st.text_area("Subject: Urgent Inquiry", value=art['email_draft'], height=200, key=f"email_{i}")
+                        if art.get('email_draft'):
+                            with st.popover("✉️ View Vendor Email"):
+                                st.text_area("Subject: Urgent Inquiry", value=art['email_draft'], height=200, key=f"email_{i}")
 
-                    if art.get('pr_draft'):
-                        with st.popover("🎤 View PR Statement"):
-                            st.info("Holding Statement for Media Inquiries:")
-                            st.text_area("PR Draft", value=art['pr_draft'], height=200, key=f"pr_{i}")
+                        if art.get('pr_draft'):
+                            with st.popover("🎤 View PR Statement"):
+                                st.info("Holding Statement for Media Inquiries:")
+                                st.text_area("PR Draft", value=art['pr_draft'], height=200, key=f"pr_{i}")
 
-    st.divider()
+        # --- MANUAL SEARCH SECTION (Moved inside Tab 1) ---
+        st.divider()
+        with st.expander("🛠️ Manual Search & Screening Configuration", expanded=False):
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                st.subheader("1. Search Criteria")
+                p_name = st.text_input("Search Term / Product Type", value=default_name, placeholder="e.g. Infusion Pump", key="manual_search_term")
+                
+                # Date Presets logic
+                st.write("Date Range Presets:")
+                d_cols = st.columns(5)
+                days_lookup = {0: 30, 1: 60, 2: 90, 3: 180, 4: 365}
+                preset_clicked = None
+                
+                for idx, days in days_lookup.items():
+                     if d_cols[idx].button(f"{days}D", key=f"d_btn_{days}"):
+                         preset_clicked = days
+                
+                if 'manual_start_date' not in st.session_state: st.session_state.manual_start_date = datetime.now() - timedelta(days=90)
+                if 'manual_end_date' not in st.session_state: st.session_state.manual_end_date = datetime.now()
 
-    # --- 🛠️ MANUAL TOOLS ---
-    with st.expander("🛠️ Manual Search & Screening Configuration", expanded=False):
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            st.subheader("1. Search Criteria")
-            p_name = st.text_input("Search Term / Product Type", value=default_name, placeholder="e.g. Infusion Pump", key="manual_search_term")
-            c_d1, c_d2 = st.columns(2)
-            start_date_m = c_d1.date_input("Start Date", value=datetime.now() - timedelta(days=365*3), key="manual_start")
-            end_date_m = c_d2.date_input("End Date", value=datetime.now(), key="manual_end")
+                if preset_clicked:
+                    st.session_state.manual_start_date = datetime.now() - timedelta(days=preset_clicked)
+                    st.session_state.manual_end_date = datetime.now()
+                    st.rerun()
 
-        with col2:
-            st.subheader("2. 'My Product' Match Criteria")
-            my_firm = st.text_input("My Manufacturer Name", value=default_manufacturer, placeholder="e.g. Acme MedCorp", key="manual_firm")
-            my_model = st.text_input("My Model Number/ID", value=default_model, placeholder="e.g. Model X-500", key="manual_model")
+                c_d1, c_d2 = st.columns(2)
+                start_date = c_d1.date_input("Start Date", value=st.session_state.manual_start_date, key="man_start")
+                end_date = c_d2.date_input("End Date", value=st.session_state.manual_end_date, key="man_end")
 
-        auto_expand = st.checkbox("🤖 AI-Expanded Search (Synonyms)", value=True, key="manual_expand")
+            with col2:
+                st.subheader("2. 'My Product' Match Criteria")
+                my_firm = st.text_input("My Manufacturer Name", value=default_manufacturer, placeholder="e.g. Acme MedCorp", key="manual_firm")
+                my_model = st.text_input("My Model Number/ID", value=default_model, placeholder="e.g. Model X-500", key="manual_model")
+
+            auto_expand = st.checkbox("🤖 AI-Expanded Search (Synonyms)", value=True)
+            
+            if st.button("🚀 Run Deep Scan (Manual)", type="secondary", width="stretch"):
+                if not p_name:
+                    st.error("Enter a search query.")
+                else:
+                    st.session_state.recall_hits = pd.DataFrame()
+                    st.session_state.recall_log = {}
+                    run_search_logic(p_name, start_date, end_date, auto_expand, ai)
+                    st.rerun()
+
+        if not st.session_state.recall_hits.empty:
+            df = st.session_state.recall_hits
+            
+            st.divider()
+            c_act1, c_act2 = st.columns([2, 1])
+            with c_act1: st.subheader(f"Findings: {len(df)} Records")
+            with c_act2:
+                if "AI_Risk_Level" not in df.columns:
+                    if st.button("🤖 AI Screen for Relevance", type="secondary", width="stretch"):
+                        if not ai or not ai.client:
+                            st.error("AI Service not available.")
+                        else:
+                            with st.spinner(f"AI is screening {len(df)} records..."):
+                                df = run_ai_screening(df, ai, my_firm, my_model, p_name)
+                                st.session_state.recall_hits = df
+                                st.rerun()
+
+            tab_smart, tab_raw = st.tabs(["⚡ Smart Analysis View", "📊 Raw Data & Links"])
+            with tab_smart:
+                if "AI_Risk_Level" in df.columns:
+                    risk_order = {"High": 0, "Medium": 1, "Low": 2, "TBD": 3}
+                    df['sort_key'] = df['AI_Risk_Level'].map(risk_order).fillna(3)
+                    df = df.sort_values('sort_key')
+                    
+                for index, row in df.iterrows():
+                    risk = row.get("AI_Risk_Level", "Unscreened")
+                    risk_color = "🔴" if risk == "High" else "🟠" if risk == "Medium" else "🟢" if risk == "Low" else "⚪"
+                    src = row['Source']
+                    icon = "📰" if "Media" in src else "💀" if "MAUDE" in src else "🏛️"
+                    prod_name = str(row['Product'])[:60]
+                    label = f"{risk_color} {icon} [{risk}] {row['Date']} | {src} | {prod_name}..."
+                    
+                    with st.expander(label):
+                        c1, c2 = st.columns([3, 2])
+                        with c1:
+                            st.markdown(f"**Product:** {row['Product']}")
+                            st.markdown(f"**Firm:** {row['Firm']}")
+                            st.info(f"**Reason/Problem:** {row['Reason']}")
+                            if row.get('Link') and row.get('Link') != "N/A":
+                                st.markdown(f"👉 [**Open Official Source Record**]({row['Link']})")
+                        with c2:
+                            if "AI_Analysis" in row and row["AI_Analysis"]:
+                                st.markdown("### 🤖 AI Analysis")
+                                st.success(row["AI_Analysis"])
+                            else:
+                                st.caption("Click 'AI Screen for Relevance' to analyze this record.")
+            with tab_raw:
+                st.dataframe(df, column_config={"Link": st.column_config.LinkColumn("Source Link")}, width=1200)
+
+    # =========================================================================
+    # TAB 2: BULK SURVEILLANCE
+    # =========================================================================
+    with tab_bulk:
+        st.subheader("🚀 Bulk Fleet Surveillance")
+        st.info("Upload a list of products (SKU & Name) to scan regulatory databases for the entire fleet at once.")
+
+        c_file, c_conf = st.columns([1, 1])
         
-        if st.button("🚀 Run Deep Scan (Manual)", type="secondary", width="stretch"):
-            if not p_name:
-                st.error("Enter a search query.")
-            else:
-                st.session_state.recall_hits = pd.DataFrame()
-                st.session_state.recall_log = {}
-                run_search_logic(p_name, start_date_m, end_date_m, auto_expand, ai)
+        with c_file:
+            uploaded_file = st.file_uploader("Upload Product List (Excel/CSV)", type=['xlsx', 'csv'], help="Column A: SKU, Column B: Product Name")
+            if uploaded_file:
+                st.success(f"Loaded: {uploaded_file.name}")
+
+        with c_conf:
+            st.markdown("**Search Date Range**")
+            # Presets for Bulk
+            b_cols = st.columns(5)
+            bulk_days_map = {0: 30, 1: 60, 2: 90, 3: 180, 4: 365}
+            bulk_preset = None
+            for idx, days in bulk_days_map.items():
+                if b_cols[idx].button(f"{days}d", key=f"b_d_{days}"):
+                    bulk_preset = days
+            
+            if 'bulk_lookback' not in st.session_state: st.session_state.bulk_lookback = 90
+            if bulk_preset: 
+                st.session_state.bulk_lookback = bulk_preset
                 st.rerun()
 
-    if not st.session_state.recall_hits.empty:
-        df = st.session_state.recall_hits
-        
-        st.divider()
-        c_act1, c_act2 = st.columns([2, 1])
-        with c_act1: st.subheader(f"Findings: {len(df)} Records")
-        with c_act2:
-            if "AI_Risk_Level" not in df.columns:
-                if st.button("🤖 AI Screen for Relevance", type="secondary", width="stretch"):
-                    if not ai:
-                        st.error("AI Service not available.")
-                    else:
-                        with st.spinner(f"AI is screening {len(df)} records..."):
-                            df = run_ai_screening(df, ai, my_firm, my_model, p_name)
-                            st.session_state.recall_hits = df
-                            st.rerun()
+            lookback = st.number_input("Lookback Period (Days)", value=st.session_state.bulk_lookback, min_value=1, max_value=3650)
+            
+            fuzzy_threshold = st.slider("Fuzzy Match Sensitivity", 0.0, 1.0, 0.6, 0.1, help="Higher = Stricter matching between your product name and the recall description.")
 
-        tab_smart, tab_raw = st.tabs(["⚡ Smart Analysis View", "📊 Raw Data & Links"])
+        st.divider()
         
-        with tab_smart:
-            if "AI_Risk_Level" in df.columns:
-                risk_order = {"High": 0, "Medium": 1, "Low": 2, "TBD": 3}
-                df['sort_key'] = df['AI_Risk_Level'].map(risk_order).fillna(3)
-                df = df.sort_values('sort_key')
+        if st.button("🚀 Run Bulk Fleet Scan", type="primary", width="stretch"):
+            if not uploaded_file:
+                st.error("Please upload a file first.")
+            else:
+                agent = RecallResponseAgent()
+                progress_bar = st.progress(0, "Initializing Bulk Scan...")
+                status_text = st.empty()
                 
-            for index, row in df.iterrows():
-                risk = row.get("AI_Risk_Level", "Unscreened")
-                risk_color = "🔴" if risk == "High" else "🟠" if risk == "Medium" else "🟢" if risk == "Low" else "⚪"
+                # Calculate start date
+                b_start = datetime.now() - timedelta(days=lookback)
                 
-                src = row['Source']
-                icon = "📰" if "Media" in src else "💀" if "MAUDE" in src else "🏛️"
+                with st.spinner("Processing fleet... This may take time based on fleet size."):
+                    results_df, audit_log = agent.run_bulk_scan(
+                        uploaded_file, 
+                        b_start, 
+                        datetime.now(),
+                        fuzzy_threshold,
+                        progress_callback=lambda p, msg: (progress_bar.progress(p), status_text.text(msg))
+                    )
                 
-                prod_name = str(row['Product'])[:60]
-                label = f"{risk_color} {icon} [{risk}] {row['Date']} | {src} | {prod_name}..."
-                
-                with st.expander(label):
-                    c1, c2 = st.columns([3, 2])
-                    with c1:
-                        st.markdown(f"**Product:** {row['Product']}")
-                        st.markdown(f"**Firm:** {row['Firm']}")
-                        st.info(f"**Reason/Problem:** {row['Reason']}")
-                        if row.get('Link') and row.get('Link') != "N/A":
-                             st.markdown(f"👉 [**Open Official Source Record**]({row['Link']})")
-                    with c2:
-                        if "AI_Analysis" in row and row["AI_Analysis"]:
-                            st.markdown("### 🤖 AI Analysis")
-                            st.success(row["AI_Analysis"])
-                        else:
-                            st.caption("Click 'AI Screen for Relevance' to analyze this record.")
-        
-        with tab_raw:
-            st.dataframe(df, column_config={"Link": st.column_config.LinkColumn("Source Link")}, width=1200)
+                progress_bar.empty()
+                status_text.success("Bulk Scan Complete!")
+                st.session_state.bulk_results = results_df
+                st.balloons()
+
+        # --- BULK RESULTS ---
+        if 'bulk_results' in st.session_state and not st.session_state.bulk_results.empty:
+            res = st.session_state.bulk_results
+            
+            st.subheader("📊 Fleet Scan Results")
+            
+            # KPI Cards
+            k1, k2, k3 = st.columns(3)
+            total_scanned = res['My SKU'].nunique()
+            total_hits = len(res)
+            high_risk = len(res[res['Risk Level'] == 'High'])
+            
+            k1.metric("Products Scanned", total_scanned)
+            k2.metric("Total Matches Found", total_hits)
+            k3.metric("High Risk Flags", high_risk)
+            
+            # Interactive Dataframe
+            st.dataframe(
+                res,
+                column_config={
+                    "Link": st.column_config.LinkColumn("Source Link"),
+                    "Risk Level": st.column_config.Column(
+                        "Risk",
+                        help="Calculated based on source and keyword match",
+                        width="small"
+                    )
+                },
+                width=1200
+            )
+            
+            # CSV Download
+            csv = res.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                "💾 Download Full Surveillance Report (CSV)",
+                data=csv,
+                file_name=f"Fleet_Surveillance_Report_{datetime.now().date()}.csv",
+                mime="text/csv",
+                type="primary",
+                width="stretch"
+            )
+        elif 'bulk_results' in st.session_state:
+            st.info("No relevant regulatory events found for the uploaded fleet in this time period.")
+
 
 def run_search_logic(term, start, end, auto_expand, ai):
     terms = [term]
-    if auto_expand and ai:
+    if auto_expand and ai and ai.client:
         try:
             kws = ai.generate_search_keywords(term, "")
             if kws:

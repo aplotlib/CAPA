@@ -1,5 +1,3 @@
-# src/services/regulatory_service.py
-
 import requests
 import pandas as pd
 import re
@@ -99,10 +97,8 @@ class RegulatoryService:
                         if category == 'device' and event_id:
                             link = f"https://www.accessdata.fda.gov/scripts/cdrh/cfdocs/cfRES/res.cfm?id={event_id}"
                         elif category == 'drug' and rid != "N/A":
-                             # Fallback to search if direct link fails
                              link = f"https://www.accessdata.fda.gov/scripts/cder/daf/index.cfm?event=BasicSearch.process"
                         else:
-                            # Generic Fallback Search Link
                             q_safe = quote(item.get("product_description", "")[:50])
                             link = f"https://www.google.com/search?q=FDA+Recall+{rid}+{q_safe}"
 
@@ -110,10 +106,10 @@ class RegulatoryService:
                             "Source": f"FDA {category.capitalize()}",
                             "Date": item.get("recall_initiation_date"),
                             "Product": item.get("product_description"),
-                            "Description": item.get("product_description"), # Alias for AI
+                            "Description": item.get("product_description"),
                             "Reason": item.get("reason_for_recall"),
                             "Firm": item.get("recalling_firm"),
-                            "Model Info": item.get("code_info", "N/A"), # Important for matching
+                            "Model Info": item.get("code_info", "N/A"),
                             "ID": rid,
                             "Link": link,
                             "Status": item.get("status")
@@ -199,11 +195,8 @@ class RegulatoryService:
                         date_val = item.get('date_published', '')
                         if str(date_val).isdigit():
                              date_val = datetime.fromtimestamp(int(date_val)).strftime('%Y-%m-%d')
-                        
-                        # Canada Link is usually in 'url'
                         link = item.get('url', 'https://recalls-rappels.canada.ca/en')
                         if link.startswith('/'): link = f"https://recalls-rappels.canada.ca{link}"
-
                         out.append({
                             "Source": "Health Canada",
                             "Date": date_val,

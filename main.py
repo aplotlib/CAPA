@@ -1,115 +1,207 @@
 import streamlit as st
-import sys
-import os
+import requests
+import json
+from openai import OpenAI
 
-# 1. Setup Python Path to include the 'src' directory
-# This ensures Python can find your modules regardless of where the script is run
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# ==========================================
+# 1. SETUP & CONFIGURATION
+# ==========================================
+st.set_page_config(page_title="CAPA Regulatory AI", layout="wide")
 
-# --- CORRECTED IMPORTS ---
-# Based on your file structure:
-from src.tabs.global_recalls import display_recalls_tab  # Located in src/tabs/
-from src.document_generator import DocumentGenerator     # Located in src/
+# Retrieve keys from Streamlit Secrets
 try:
-    from src.ai_services import get_ai_service           # Located in src/
-except ImportError:
-    # Fallback in case the function is named differently in your version
-    from src.ai_services import AIService as get_ai_service
+    # Use the existing OpenAI key you already had in secrets
+    OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
+    
+    # Use the new Google keys we just added
+    GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
+    GOOGLE_CX_ID = st.secrets["GOOGLE_CX_ID"]
+except KeyError as e:
+    st.error(f"Missing API Key in secrets: {e}. Please check your secrets.toml file.")
+    st.stop()
 
-# Import other tabs as needed (uncomment as you build them)
-# from src.tabs.capa import display_capa_tab
-# from src.tabs.risk_safety import display_risk_tab
+client = OpenAI(api_key=OPENAI_API_KEY)
 
-def main():
-    # --- PAGE CONFIGURATION ---
-    st.set_page_config(
-        page_title="CAPA Agent & Regulatory Intel",
-        page_icon="🛡️",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
+# ==========================================
+# 2. SEARCH TOOLS
+# ==========================================
 
-    # --- SESSION STATE INITIALIZATION ---
-    if 'ai_service' not in st.session_state:
-        try:
-            st.session_state.ai_service = get_ai_service()
-        except Exception as e:
-            st.warning(f"AI Service could not be initialized: {e}")
-            st.session_state.ai_service = None
-
-    if 'product_info' not in st.session_state:
-        st.session_state.product_info = {
-            "name": "General Device",
-            "manufacturer": "MyCompany",
-            "model": "Model-X"
-        }
-
-    # --- SIDEBAR SETTINGS ---
-    with st.sidebar:
-        st.title("⚙️ Settings")
-        st.subheader("Context")
+def search_openfda(device_name, manufacturer=None):
+    """Queries the official US FDA database for enforcement reports."""
+    base_url = "https://api.fda.gov/device/enforcement.json"
+    
+    # Construct query
+    query_parts = [f'product_description:"{device_name}"']
+    if manufacturer:
+        query_parts.append(f'recalling_firm:"{manufacturer}"')
+    
+    search_query = " AND ".join(query_parts)
+    params = {'search': search_query, 'limit': 5}
+    
+    try:
+        response = requests.get(base_url, params=params)
+        data = response.json()
         
-        # User inputs to guide the Agent
-        p_name = st.text_input("Product Name", value=st.session_state.product_info['name'])
-        p_mfg = st.text_input("Manufacturer", value=st.session_state.product_info['manufacturer'])
-        p_model = st.text_input("Model Number", value=st.session_state.product_info['model'])
-        
-        # Update session state on change
-        if p_name != st.session_state.product_info['name']:
-            st.session_state.product_info['name'] = p_name
-        if p_mfg != st.session_state.product_info['manufacturer']:
-            st.session_state.product_info['manufacturer'] = p_mfg
-        if p_model != st.session_state.product_info['model']:
-            st.session_state.product_info['model'] = p_model
+        if "error" in data:
+            return [] # Return empty list if no hits
             
-        st.divider()
-        st.info("System Status: Online 🟢")
+        results = []
+        for item in data.get('results', []):
+            results.append({
+                "source": "US FDA (Structured)",
+                "recall_number": item.get('recall_number'),
+                "reason": item.get('reason_for_recall'),
+                "status": item.get('status'),
+                "date": item.get('report_date')
+            })
+        return results
+    except Exception as e:
+        return [f"Error querying OpenFDA: {str(e)}"]
 
-    # --- MAIN CONTENT ---
-    st.title("🛡️ Quality & Regulatory Command Center")
-    st.markdown("Autonomous surveillance, risk detection, and CAPA management.")
+def search_google(query, category="general"):
+    """Uses Google Programmable Search to find Global Regs & Media."""
+    url = "https://www.googleapis.com/customsearch/v1"
+    
+    # Define site filters for regulatory bodies
+    regulatory_sites = [
+        "site:gov.uk",           # UK MHRA
+        "site:europa.eu",        # EU EMA/EUDAMED
+        "site:anvisa.gov.br",    # Brazil ANVISA
+        "site:cofepris.gob.mx",  # Mexico
+        "site:fda.gov",          # US FDA (Web)
+        "site:tga.gov.au",       # Australia TGA
+        "site:hc-sc.gc.ca"       # Health Canada
+    ]
+    
+    final_query = query
+    
+    if category == "regulatory":
+        # Force Google to look at specific government domains
+        site_string = " OR ".join(regulatory_sites)
+        final_query = f"({site_string}) {query} recall OR alert OR safety"
+    elif category == "media":
+        # Look for news
+        final_query = f"{query} medical device recall news problem lawsuit"
 
-    # Create the main navigation tabs
-    # You can add more tabs here as you develop them (e.g., "CAPA Workflow", "Risk Management")
-    tab_intel, tab_docs, tab_admin = st.tabs([
-        "🌍 Regulatory Intelligence", 
-        "📄 Document Generation", 
-        "🔧 Admin"
-    ])
+    params = {
+        'key': GOOGLE_API_KEY,
+        'cx': GOOGLE_CX_ID,
+        'q': final_query,
+        'num': 5
+    }
 
-    # --- TAB 1: GLOBAL RECALLS & INTELLIGENCE ---
-    with tab_intel:
-        # This calls the updated function with Agentic capabilities
-        display_recalls_tab()
-
-    # --- TAB 2: DOCUMENT GENERATION ---
-    with tab_docs:
-        st.header("Document Generator")
-        st.caption("Generate Standard Operating Procedures (SOPs) and Forms.")
+    try:
+        response = requests.get(url, params=params)
+        data = response.json()
         
-        doc_gen = DocumentGenerator()
-        
-        doc_type = st.selectbox("Select Document Type", ["SOP", "Work Instruction", "Form"])
-        topic = st.text_input("Document Topic", placeholder="e.g. Non-Conformance Handling")
-        
-        if st.button("Generate Draft"):
-            if not topic:
-                st.error("Please enter a topic.")
-            else:
-                with st.spinner("Drafting document..."):
-                    # specific method depends on your DocumentGenerator implementation
-                    # Assuming a generic 'generate' method exists:
-                    try:
-                        draft = doc_gen.generate_sop(topic) # or similar method
-                        st.text_area("Draft Content", value=draft, height=400)
-                    except AttributeError:
-                        st.warning("Document Generator method not found. Please check src/document_generator.py")
+        results = []
+        if 'items' in data:
+            for item in data['items']:
+                results.append({
+                    "source": "Web/Media",
+                    "title": item.get('title'),
+                    "link": item.get('link'),
+                    "snippet": item.get('snippet')
+                })
+        return results
+    except Exception as e:
+        return [f"Error querying Google: {str(e)}"]
 
-    # --- TAB 3: ADMIN ---
-    with tab_admin:
-        st.write("System Logs and Configuration")
-        if st.checkbox("Show Session State"):
-            st.json(st.session_state)
+# ==========================================
+# 3. UI & APP LOGIC
+# ==========================================
 
-if __name__ == "__main__":
-    main()
+st.title("🏥 CAPA AI: Regulatory Intelligence Tool")
+st.markdown("Search US, EU, UK, and LATAM databases + Global Media for device safety issues.")
+
+with st.form("search_form"):
+    col1, col2 = st.columns(2)
+    with col1:
+        device_name = st.text_input("Device Name", placeholder="e.g. Infusion Pump")
+        model_num = st.text_input("Model Number (Optional)", placeholder="e.g. Alaris 8015")
+    with col2:
+        manufacturer = st.text_input("Manufacturer/Vendor", placeholder="e.g. Becton Dickinson")
+        category = st.selectbox("Device Category", ["General", "Cardiovascular", "Orthopedic", "Radiology", "Dental"])
+    
+    submitted = st.form_submit_button("Run Safety Scan")
+
+if submitted and device_name:
+    st.divider()
+    
+    with st.status("Running Global Safety Scan...", expanded=True) as status:
+        
+        # 1. US FDA
+        st.write("🇺🇸 Querying US FDA Enforcement Database...")
+        fda_hits = search_openfda(device_name, manufacturer)
+        
+        # 2. Global Regulatory
+        st.write("🌍 Querying Global Agencies (EU, UK, LATAM, APAC)...")
+        reg_query = f"{device_name} {manufacturer if manufacturer else ''} {model_num if model_num else ''}"
+        global_hits = search_google(reg_query, category="regulatory")
+        
+        # 3. Media
+        st.write("📰 Querying Global Media & News...")
+        media_hits = search_google(reg_query, category="media")
+        
+        status.update(label="Data collection complete!", state="complete", expanded=False)
+
+    # Display Raw Data in Tabs
+    tab1, tab2, tab3 = st.tabs(["AI Analysis", "Raw Database Hits", "Web Search Results"])
+    
+    with tab1:
+        st.subheader("🤖 AI Risk Assessment")
+        
+        prompt = f"""
+        You are a Quality Assurance Regulatory Expert. Review the collected data for:
+        Device: {device_name}
+        Manufacturer: {manufacturer}
+        
+        DATA:
+        1. US FDA Database: {json.dumps(fda_hits)}
+        2. Global Regulatory Web Hits: {json.dumps(global_hits)}
+        3. Media News Hits: {json.dumps(media_hits)}
+        
+        OUTPUT:
+        Provide a professional CAPA Risk Assessment Summary using Markdown.
+        1. **Executive Summary**: Is there an active crisis?
+        2. **Global Recall Status**: Break down by region (US vs EU vs others).
+        3. **Key Warning Signals**: Summarize specific technical failures mentioned (e.g., software bug, battery failure).
+        4. **Risk Level**: (Low/Medium/High) with justification.
+        5. **Recommended Actions**: 3 bullet points for the quality engineering team.
+        """
+        
+        if not OPENAI_API_KEY:
+             st.error("No OpenAI Key found.")
+        else:
+            with st.spinner("AI is analyzing regulatory texts..."):
+                try:
+                    completion = client.chat.completions.create(
+                        model="gpt-4o", 
+                        messages=[
+                            {"role": "system", "content": "You are a precise and helpful regulatory consultant."},
+                            {"role": "user", "content": prompt}
+                        ]
+                    )
+                    st.markdown(completion.choices[0].message.content)
+                except Exception as e:
+                    st.error(f"AI Error: {e}")
+
+    with tab2:
+        st.subheader("US FDA Structured Data")
+        if fda_hits:
+            st.json(fda_hits)
+        else:
+            st.info("No structured FDA enforcement reports found for this specific query.")
+
+    with tab3:
+        st.subheader("Global Web & Regulatory Hits")
+        if global_hits or media_hits:
+            for hit in global_hits + media_hits:
+                st.markdown(f"**[{hit['title']}]({hit['link']})**")
+                st.caption(f"{hit['source']} | {hit['snippet']}")
+                st.divider()
+        else:
+            st.info("No web results found.")
+
+elif submitted:
+    st.warning("Please enter at least a Device Name to start.")

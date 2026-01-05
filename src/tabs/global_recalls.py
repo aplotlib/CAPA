@@ -1,115 +1,134 @@
 import streamlit as st
 import pandas as pd
 from src.ai_services import get_ai_service
-from src.services.openfda_service import OpenFDAService
+from src.services.regulatory_service import RegulatoryService
 
 def display_recalls_tab():
-    st.header("🌍 Global Regulatory Intelligence & Recalls")
-    st.caption("Screen your device against **REAL-TIME** FDA Enforcement Reports (openFDA API).")
+    st.header("🌍 Global Regulatory Intelligence Agent")
+    st.caption("AI-powered surveillance of FDA (Devices, Drugs, Food) and CPSC databases.")
 
     ai = get_ai_service()
+    
+    # Initialize session state for recalls if needed
+    if 'recall_hits' not in st.session_state:
+        st.session_state.recall_hits = pd.DataFrame()
 
-    col1, col2 = st.columns([2, 1])
-
-    with col1:
-        st.subheader("🛡️ Product Screening (FDA Database)")
-        
-        # Use SKU/Name from global sidebar if available
-        default_desc = ""
-        if 'product_info' in st.session_state:
-            p_name = st.session_state.product_info.get('name', '')
-            if p_name:
-                default_desc = p_name
+    # --- INPUT SECTION ---
+    with st.container(border=True):
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.subheader("1. Configure Search Target")
+            # Default to active product info
+            default_name = st.session_state.product_info.get('name', '')
+            default_desc = st.session_state.product_info.get('ifu', '')
             
-        device_query = st.text_input(
-            "Search Term (Product Name or Keyword)", 
-            value=default_desc,
-            placeholder="e.g., Infusion Pump, Catheter, Knee Implant...",
-            help="This searches the official FDA Device Recall database."
-        )
+            p_name = st.text_input("Product Name / Type", value=default_name)
+            p_desc = st.text_area("Description (for AI Context)", value=default_desc, height=68, 
+                                help="The AI uses this to find synonyms and judge relevance.")
+            
+        with col2:
+            st.write("###") # Spacing
+            st.write("###") 
+            auto_expand = st.checkbox("🤖 AI-Expanded Search", value=True, help="Allow AI to generate synonyms (e.g. 'Heart' -> 'Cardiac')")
+            
+            if st.button("🚀 Run Scan", type="primary", use_container_width=True):
+                if not p_name:
+                    st.error("Enter a product name.")
+                else:
+                    run_search(p_name, p_desc, auto_expand, ai)
+
+    # --- RESULTS SECTION ---
+    if not st.session_state.recall_hits.empty:
+        df = st.session_state.recall_hits
+        st.divider()
+        st.subheader(f"Found {len(df)} Regulatory Events")
         
-        if st.button("Run Live FDA Screen", type="primary", icon="🔍"):
-            if not device_query.strip():
-                st.error("Please enter a search term.")
-            else:
-                with st.spinner(f"Querying FDA Database for '{device_query}'..."):
-                    # FETCH REAL DATA
-                    real_data = OpenFDAService.search_recalls(device_query, limit=15)
-                    st.session_state.recall_results_df = real_data
+        # Tabs for different views
+        tab_list, tab_raw = st.tabs(["⚡ Smart Action View", "📋 Raw Data"])
+        
+        with tab_list:
+            st.info("Review these findings. Use the buttons to immediately create actions in your Quality System.")
+            
+            for index, row in df.iterrows():
+                with st.expander(f"**{row['Date']}** | {row['Source']} | {row['Product'][:80]}..."):
+                    c1, c2 = st.columns([3, 1])
+                    with c1:
+                        st.markdown(f"**Reason:** {row['Reason']}")
+                        st.markdown(f"**Firm:** {row['Firm']}")
+                        st.caption(f"ID: {row['ID']}")
                     
-                    # Generate AI Summary of the REAL data if available
-                    if not real_data.empty and ai:
-                        with st.spinner("AI is analyzing the findings..."):
-                            data_summary_str = real_data[['Reason', 'Class', 'Firm']].to_string()
-                            prompt = f"Analyze these real FDA recall events for '{device_query}':\n{data_summary_str}\n\nSummarize the common failure modes and risks."
-                            st.session_state.recall_analysis = ai.analyze_text(prompt)
-                    else:
-                        st.session_state.recall_analysis = "No analysis available (No records found)."
+                    with c2:
+                        # ACTION BUTTONS
+                        if st.button("📝 Draft CAPA", key=f"capa_{index}"):
+                            create_capa_draft(row)
+                        
+                        if st.button("⚠️ Add to FMEA", key=f"fmea_{index}"):
+                            add_to_fmea(row)
 
-        # Display Results
-        if 'recall_results_df' in st.session_state:
-            df = st.session_state.recall_results_df
-            
-            if not df.empty:
-                st.success(f"Found {len(df)} records from the FDA.")
-                
-                # 1. AI Analysis of Real Data
-                if st.session_state.get('recall_analysis'):
-                    with st.expander("🤖 AI Analysis of Trends", expanded=True):
-                        st.markdown(st.session_state.recall_analysis)
+        with tab_raw:
+            st.dataframe(df, use_container_width=True)
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button("Download CSV", csv, "regulatory_scan.csv", "text/csv")
 
-                # 2. Real Data Table
-                st.markdown("### 📋 Official Enforcement Reports")
-                st.dataframe(
-                    df,
-                    column_config={
-                        "Date": st.column_config.DateColumn("Initiated"),
-                        "Product": st.column_config.TextColumn("Product Description", width="large"),
-                        "Reason": st.column_config.TextColumn("Reason for Recall", width="large"),
-                        "Recall #": st.column_config.TextColumn("ID", width="small"),
-                    },
-                    hide_index=True,
-                    width=1000 
-                )
-                
-                # CSV Download
-                csv = df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    "Download Recall Data (CSV)",
-                    csv,
-                    "fda_recalls.csv",
-                    "text/csv"
-                )
-            else:
-                st.warning("No official FDA recalls found for this search term.")
-
-    with col2:
-        st.subheader("🔗 External Databases")
-        st.info("The tool above searches FDA (USA). For other regions, please consult official sources directly:")
+def run_search(name, desc, auto_expand, ai):
+    """Orchestrates the search logic."""
+    search_terms = [name]
+    
+    if auto_expand and ai:
+        with st.spinner("AI is generating regulatory search terms..."):
+            keywords = ai.generate_search_keywords(name, desc)
+            if keywords:
+                st.toast(f"AI added terms: {', '.join(keywords)}")
+                search_terms.extend(keywords)
+    
+    # Remove duplicates
+    search_terms = list(set(search_terms))
+    
+    all_results = pd.DataFrame()
+    progress_text = "Scanning databases..."
+    my_bar = st.progress(0, text=progress_text)
+    
+    for i, term in enumerate(search_terms):
+        my_bar.progress((i + 1) / len(search_terms), text=f"Scanning sources for '{term}'...")
+        hits = RegulatoryService.search_all_sources(term, limit=5)
+        all_results = pd.concat([all_results, hits])
         
-        sources = [
-            {
-                "region": "🇪🇺 EU (EUDAMED)", 
-                "name": "Vigilance & Surveillance", 
-                "url": "https://ec.europa.eu/tools/eudamed"
-            },
-            {
-                "region": "🇬🇧 UK (MHRA)", 
-                "name": "Drug and Device Alerts", 
-                "url": "https://www.gov.uk/drug-device-alerts"
-            },
-            {
-                "region": "🇦🇺 Australia (TGA)", 
-                "name": "SARA Database", 
-                "url": "https://apps.tga.gov.au/PROD/DRAC/arn-entry.aspx"
-            },
-            {
-                "region": "🇨🇦 Canada", 
-                "name": "Recalls and Safety Alerts", 
-                "url": "https://recalls-rappels.canada.ca/en"
-            }
-        ]
-        
-        for source in sources:
-            with st.expander(f"{source['region']}"):
-                st.markdown(f"**[Open Database]({source['url']})**")
+    my_bar.empty()
+    
+    if not all_results.empty:
+        # Deduplicate based on ID
+        all_results.drop_duplicates(subset=['ID'], inplace=True)
+        st.session_state.recall_hits = all_results
+        st.success("Scan Complete!")
+    else:
+        st.warning("No recalls found for these terms.")
+
+def create_capa_draft(row):
+    """Pushes data to the CAPA tab."""
+    draft = {
+        "issue_description": f"Regulatory Surveillance Hit ({row['Source']}): {row['Product']}. \n\nReason: {row['Reason']}",
+        "root_cause": "External Recall Investigation Required",
+        "immediate_actions": f"1. Review affected inventory for Recall #{row['ID']}.\n2. Contact manufacturer {row['Firm']}."
+    }
+    st.session_state.capa_entry_draft = draft
+    st.sidebar.success("Draft created! Go to 'CAPA' tab to finalize.")
+
+def add_to_fmea(row):
+    """Pushes data to the Risk/FMEA tab."""
+    new_mode = {
+        "Potential Failure Mode": f"Recall Event: {row['Reason'][:100]}...",
+        "Potential Effect(s)": "Patient Harm / Regulatory Action",
+        "Potential Cause(s)": f"Design/Mfg issue identified in {row['Source']} Recall #{row['ID']}",
+        "Severity": 8, # Default to high for recalls
+        "Occurrence": 5,
+        "Detection": 3,
+        "RPN": 120
+    }
+    
+    if 'fmea_rows' not in st.session_state:
+        st.session_state.fmea_rows = []
+    
+    st.session_state.fmea_rows.append(new_mode)
+    # Update the dataframe tracker as well to ensure persistence
+    st.session_state.fmea_data = pd.DataFrame(st.session_state.fmea_rows)
+    st.sidebar.success("Added to FMEA! Go to 'Risk' tab to review.")

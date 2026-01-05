@@ -4,7 +4,6 @@ from typing import Optional, Dict, Any, List
 import json
 import logging
 import io
-# Import the retry decorator from your utils
 from src.utils import retry_with_backoff
 
 # Setup Logger
@@ -14,7 +13,6 @@ class AIServiceBase:
     """Base class for all AI Services using OpenAI SDK."""
     def __init__(self, api_key: str):
         if not api_key:
-            # Don't crash immediately, allow graceful degradation
             self.client = None
             logger.warning("AIService initialized without API Key.")
             return
@@ -48,8 +46,16 @@ class AIServiceBase:
             return {"error": "AI Client not initialized (Missing API Key)."}
 
         messages = []
+        
+        # FIX: Ensure the word "JSON" is strictly present in the system instruction
         if system_instruction:
+            if "json" not in system_instruction.lower():
+                system_instruction += " Respond strictly in JSON format."
             messages.append({"role": "system", "content": system_instruction})
+        else:
+            # If no system instruction, add a default one enforcing JSON
+            messages.append({"role": "system", "content": "You are a helpful assistant. Respond strictly in JSON format."})
+            
         messages.append({"role": "user", "content": prompt})
 
         try:
@@ -97,7 +103,6 @@ class AIService(AIServiceBase):
 
         # 1. Transcribe with Whisper
         try:
-            # Create a file-like object for the API
             audio_file = io.BytesIO(audio_bytes)
             audio_file.name = "audio.wav" 
             
@@ -110,7 +115,7 @@ class AIService(AIServiceBase):
             return {"error": f"Transcription failed: {str(e)}"}
 
         # 2. Extract Structure with LLM
-        system_prompt = "You are a Quality Assurance Assistant. Extract fields from the transcript."
+        system_prompt = "You are a Quality Assurance Assistant. Extract fields from the transcript. Return JSON."
         user_prompt = f"""
         CONTEXT: {context}
         TRANSCRIPT: {transcript_text}
@@ -123,8 +128,9 @@ class AIService(AIServiceBase):
         return self._generate_json(user_prompt, system_prompt)
 
     def analyze_meeting_transcript(self, transcript_text: str) -> Dict[str, str]:
-        system_prompt = "You are a QA Expert. Extract CAPA details (issue, root cause, actions) from notes."
-        user_prompt = f"Analyze this transcript:\n{transcript_text}"
+        # FIX: Added "Return JSON" to prompt to prevent 400 error
+        system_prompt = "You are a QA Expert. Extract CAPA details (issue, root cause, actions) from notes. Return JSON."
+        user_prompt = f"Analyze this transcript and return a JSON object:\n{transcript_text}"
         return self._generate_json(user_prompt, system_prompt)
 
     def screen_recalls(self, product_description: str) -> str:
@@ -134,7 +140,7 @@ class AIService(AIServiceBase):
 
 class DesignControlsTriager(AIServiceBase):
     def generate_design_controls(self, name: str, ifu: str, user_needs: str, tech_reqs: str, risks: str) -> Dict[str, str]:
-        system = "You are a Medical Device Systems Engineer (ISO 13485). Generate Design Control documentation."
+        system = "You are a Medical Device Systems Engineer (ISO 13485). Generate Design Control documentation in JSON."
         prompt = f"""
         Product: {name}
         Description: {ifu}
@@ -151,7 +157,7 @@ class DesignControlsTriager(AIServiceBase):
 
 class UrraGenerator(AIServiceBase):
     def generate_urra(self, product_name: str, product_desc: str, user: str, environment: str) -> Dict[str, Any]:
-        system = "You are a Usability Engineer (IEC 62366). Generate a Use-Related Risk Analysis (URRA)."
+        system = "You are a Usability Engineer (IEC 62366). Generate a Use-Related Risk Analysis (URRA). Return JSON."
         prompt = f"""
         Device: {product_name}
         Context: {product_desc}
@@ -179,7 +185,7 @@ class ManualWriter(AIServiceBase):
 
 class ProjectCharterHelper(AIServiceBase):
     def generate_charter_draft(self, product_name: str, problem_statement: str, target_user: str) -> Dict[str, Any]:
-        system = "You are a Project Manager in MedTech. Draft a Project Charter."
+        system = "You are a Project Manager in MedTech. Draft a Project Charter in JSON."
         prompt = f"""
         Project: {product_name}
         Problem: {problem_statement}
@@ -204,7 +210,7 @@ class VendorEmailDrafter(AIServiceBase):
 
 class HumanFactorsHelper(AIServiceBase):
     def generate_hf_report_from_answers(self, name: str, ifu: str, answers: Dict) -> Dict[str, str]:
-        system = "You are a Human Factors Engineer (IEC 62366). Draft an HFE Report."
+        system = "You are a Human Factors Engineer (IEC 62366). Draft an HFE Report in JSON."
         prompt = f"""
         Device: {name}
         User Profile: {answers.get('user_profile')}
@@ -217,7 +223,7 @@ class HumanFactorsHelper(AIServiceBase):
 
 class MedicalDeviceClassifier(AIServiceBase):
     def classify_device(self, description: str) -> Dict[str, str]:
-        system = "You are a Regulatory Affairs Specialist. Classify medical devices (FDA/MDR)."
+        system = "You are a Regulatory Affairs Specialist. Classify medical devices (FDA/MDR). Return JSON."
         prompt = f"""
         Device Description: {description}
         

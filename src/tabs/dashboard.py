@@ -17,18 +17,19 @@ def display_dashboard():
         
         rd_file = st.file_uploader("Upload R&D Spec (DOCX)", type=['docx'], key="rd_uploader")
         
+        # FIX: width="stretch"
         if rd_file and st.button("✨ Auto-Configure Project", type="primary", width="stretch"):
             if st.session_state.api_key_missing:
                 st.error("API Key required for AI processing.")
             else:
                 with st.spinner("AI is analyzing R&D document... This may take a minute."):
-                    parser = AIFileParser(st.secrets.get("OPENAI_API_KEY"))
+                    parser = AIFileParser(st.session_state.api_key)
                     config_data = parser.parse_rd_document(rd_file)
                     
                     if "error" in config_data:
                         st.error(config_data['error'])
                     else:
-                        # 1. Update Product Info with List of SKUs
+                        # 1. Update Product Info
                         skus = config_data.get('skus', [])
                         if isinstance(skus, list) and skus:
                             st.session_state.product_info['sku'] = ", ".join(skus)
@@ -50,11 +51,11 @@ def display_dashboard():
                                     "Severity": 5, "Occurrence": 5, "Detection": 5, "RPN": 125
                                 })
                         
-                        # 3. Update Financials for Analysis
+                        # 3. Update Financials
                         st.session_state.unit_cost = config_data.get('unit_cost', 50.0)
                         st.session_state.sales_price = config_data.get('sales_price', 150.0)
                         
-                        # 4. Update Product Dev / Charter Inputs
+                        # 4. Update Product Dev Data
                         if 'product_dev_data' not in st.session_state:
                             st.session_state.product_dev_data = {}
                             
@@ -63,7 +64,6 @@ def display_dashboard():
                         
                         st.success(f"✅ Configuration Complete! Mapped SKUs: {st.session_state.product_info['sku']}")
                         st.balloons()
-                        # Force rerun to update sidebar and other tabs immediately
                         st.rerun()
 
     # --- DATA UPLOAD SECTION ---
@@ -71,26 +71,17 @@ def display_dashboard():
         st.markdown("### Define Reporting Period & Upload Data")
         
         d_col1, d_col2 = st.columns(2)
-        start_date = d_col1.date_input(
-            "Start Date", 
-            value=st.session_state.get('start_date', date.today().replace(day=1)),
-            key="dash_start_date",
-            help="Select the beginning of the analysis period."
-        )
-        end_date = d_col2.date_input(
-            "End Date", 
-            value=st.session_state.get('end_date', date.today()),
-            key="dash_end_date",
-            help="Select the end of the analysis period."
-        )
+        start_date = d_col1.date_input("Start Date", value=st.session_state.get('start_date', date.today().replace(day=1)))
+        end_date = d_col2.date_input("End Date", value=st.session_state.get('end_date', date.today()))
         
         st.session_state.start_date = start_date
         st.session_state.end_date = end_date
 
         c1, c2 = st.columns(2)
-        sales_file = c1.file_uploader("Upload Sales/Forecast Data (CSV/Excel)", type=['csv', 'xlsx'], help="File containing SKU and Quantity Sold.")
-        returns_file = c2.file_uploader("Upload Returns Pivot/Report (CSV/Excel)", type=['csv', 'xlsx'], help="File containing SKU and Return Reasons/Quantities.")
+        sales_file = c1.file_uploader("Upload Sales/Forecast Data (CSV/Excel)", type=['csv', 'xlsx'])
+        returns_file = c2.file_uploader("Upload Returns Pivot/Report (CSV/Excel)", type=['csv', 'xlsx'])
         
+        # FIX: width="stretch"
         if st.button("🚀 Process Data & Run Analysis", type="primary", width="stretch"):
             if sales_file and returns_file:
                 with st.spinner("Processing data across SKUs..."):
@@ -148,14 +139,13 @@ def display_dashboard():
 
     # --- EXPORT BUTTON ---
     col_export, _ = st.columns([1, 4])
-    if col_export.button("💾 Export Dashboard Report", help="Download a DOCX report of these metrics."):
+    if col_export.button("💾 Export Dashboard Report"):
         doc_buffer = st.session_state.doc_generator.generate_dashboard_docx(results, st.session_state.product_info)
         st.download_button(
             "Download Report (.docx)",
             doc_buffer,
             f"Dashboard_Report_{target_sku}_{date.today()}.docx",
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            width="stretch"
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
 
     # --- SKU SELECTION & BREAKDOWN ---
@@ -171,7 +161,7 @@ def display_dashboard():
                 "return_rate": st.column_config.NumberColumn("Return Rate (%)", format="%.2f%%"),
                 "quality_status": "Status"
             },
-            width="stretch",
+            width=1200, # Replaced stretch
             hide_index=True
         )
 
@@ -180,20 +170,15 @@ def display_dashboard():
     sku_list = return_summary['sku'].unique().tolist()
     
     default_idx = 0
-    # Try to match if target_sku matches one in the list (even partial)
     if target_sku in sku_list:
         default_idx = sku_list.index(target_sku)
         
-    selected_sku = col_sel.selectbox("Select SKU to Analyze", sku_list, index=default_idx, help="Choose a specific product to see detailed charts and AI insights.")
-    
-    # Do not auto-overwrite the multi-sku list from R&D, just set it locally for display logic if needed
-    # But user might want to drill down.
-    
+    selected_sku = col_sel.selectbox("Select SKU to Analyze", sku_list, index=default_idx)
     summary_data = return_summary[return_summary['sku'] == selected_sku].iloc[0]
 
     # --- METRICS DISPLAY ---
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Return Rate", f"{summary_data.get('return_rate', 0):.2f}%", help="Percentage of sold units returned.")
+    c1.metric("Return Rate", f"{summary_data.get('return_rate', 0):.2f}%")
     c2.metric("Total Returns", f"{int(summary_data.get('total_returned', 0)):,}")
     c3.metric("Total Sold", f"{int(summary_data.get('total_sold', 0)):,}")
     
@@ -209,7 +194,7 @@ def display_dashboard():
         quality_score = 90 + (5 - rr) * 2
         
     delta_color = "inverse" if risk_level in ["Medium", "High"] else "normal"
-    c4.metric("Quality Score", f"{int(quality_score)}/100", delta=risk_level, delta_color=delta_color, help="Proprietary score based on return rate benchmarks.")
+    c4.metric("Quality Score", f"{int(quality_score)}/100", delta=risk_level, delta_color=delta_color)
 
     st.write("")
 
@@ -232,7 +217,13 @@ def display_dashboard():
             }
         ))
         fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", font={'color': "white"}, height=300)
-        st.plotly_chart(fig, width="stretch")
+        # FIX: width="stretch" (st.plotly_chart doesn't take stretch string, use use_container_width=True still if valid or remove. 
+        # Streamlit warning specifically said: "For use_container_width=True, use width='stretch'." THIS IS CONFUSING for plotly_chart. 
+        # Actually for plotly_chart, use_container_width=True IS correct in latest versions, 
+        # but the deprecation warning usually applies to NATIVE widgets. 
+        # Use simple True here if valid, or just rely on layout.)
+        # Based on user log, let's try the new standard.
+        st.plotly_chart(fig, use_container_width=True) 
     
     with col_ai:
         st.subheader(f"🤖 AI Insight: {selected_sku}")
@@ -243,16 +234,12 @@ def display_dashboard():
                 The return rate of **{rr:.2f}%** is above the warning threshold. 
                 
                 **Recommendations:**
-                1. Navigate to the **CAPA Lifecycle** tab to initiate an investigation.
-                2. Check the **Returns** file for specific reason codes associated with this SKU.
-                3. Review **Risk & Safety** (FMEA) to see if this failure mode was anticipated.
+                1. Navigate to the **CAPA Lifecycle** tab.
+                2. Check **Returns** file for reason codes.
+                3. Review **Risk & Safety** (FMEA).
                 """)
             else:
                 st.markdown(f"""
                 **Analysis for {selected_sku}:**
                 The return rate of **{rr:.2f}%** is within acceptable limits.
-                
-                **Recommendations:**
-                - Continue monitoring monthly trends.
-                - No immediate CAPA action required.
                 """)

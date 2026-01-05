@@ -14,8 +14,13 @@ class AIServiceBase:
     def __init__(self, api_key: str):
         if not api_key:
             raise ValueError("API Key is required for AI Services.")
+        
         self.client = genai.Client(api_key=api_key)
+        
+        # Models Configuration
+        # Defaulting to 2.0 Flash as it is the current workhorse for high-speed tasks
         self.fast_model = "gemini-2.0-flash-exp" 
+        # Using Flash Thinking (or Pro) for reasoning tasks
         self.reasoning_model = "gemini-2.0-flash-thinking-exp"
 
     def _generate_json(self, prompt: str, system_instruction: str = None) -> Dict[str, Any]:
@@ -53,7 +58,7 @@ class AIServiceBase:
             logger.error(f"AI Text Generation Error: {e}")
             return f"Error: {str(e)}"
 
-# --- Main Service Class (Existing) ---
+# --- Main Service Class ---
 class AIService(AIServiceBase):
     def analyze_text(self, prompt: str, system_instruction: str = None) -> str:
         return self._generate_text(prompt, system_instruction)
@@ -90,7 +95,7 @@ class AIService(AIServiceBase):
         user = f"Screen this device: {product_description}. List common recall reasons and keywords."
         return self._generate_text(user, system)
 
-# --- Missing Service Classes (Added) ---
+# --- Consolidated Service Classes ---
 
 class DesignControlsTriager(AIServiceBase):
     def generate_design_controls(self, name: str, ifu: str, user_needs: str, tech_reqs: str, risks: str) -> Dict[str, str]:

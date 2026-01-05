@@ -4,16 +4,77 @@ import pandas as pd
 from datetime import datetime, timedelta
 from src.services.regulatory_service import RegulatoryService
 from src.ai_services import get_ai_service
+from src.utils import calculate_fuzzy_similarity
 
 class RecallResponseAgent:
     """
     An autonomous agent that monitors regulatory databases, adverse events, and media.
-    Identifies risks and proactively drafts quality documentation (CAPAs, Emails, PR Statements).
+    Identifies risks and proactively drafts quality documentation.
     """
     
     def __init__(self):
         self.ai = get_ai_service()
         self.regulatory = RegulatoryService()
+
+    def run_batch_mission(self, df_products, start_date, end_date, progress_callback=None):
+        """
+        Runs the surveillance mission on a batch of products from an uploaded file.
+        Uses fuzzy matching to filter results.
+        """
+        batch_results = []
+        total_products = len(df_products)
+        
+        for idx, row in df_products.iterrows():
+            sku = str(row.get('SKU', 'N/A'))
+            product_name = str(row.get('Product Name', 'Unknown'))
+            
+            if progress_callback:
+                progress_callback((idx + 1) / total_products, f"Scanning SKU {sku}: {product_name}...")
+
+            # 1. Search Logic
+            # We search for the Product Name.
+            # We enforce the date range selected by the user.
+            results_df, _ = self.regulatory.search_all_sources(product_name, start_date, end_date, limit=20)
+            
+            if results_df.empty:
+                batch_results.append({
+                    "SKU": sku, "Product Name": product_name, "Date": "N/A", "Source": "N/A", 
+                    "Issue Description": "No records found", "Risk Level": "Low", "Match Score": 0, "Link": "N/A"
+                })
+                continue
+            
+            # 2. Fuzzy Match & Filter
+            # Iterate through search results and check if they ACTUALLY match the input product
+            # This prevents "Infusion Pump" search finding "Pool Pump".
+            for _, res in results_df.iterrows():
+                title = res.get('Product', '') or res.get('Description', '')
+                
+                # Calculate Similarity
+                score = calculate_fuzzy_similarity(product_name, title)
+                
+                # Thresholds:
+                # - Match Score > 60: Likely relevant
+                # - Risk Level: Determine based on Source (Class I Recall = High)
+                
+                risk = "Low"
+                if "Class I" in str(res.get('Reason', '')): risk = "High"
+                elif "Death" in str(res.get('Reason', '')): risk = "High"
+                elif "Class II" in str(res.get('Reason', '')): risk = "Medium"
+                
+                # If score is very low, it's likely noise, unless AI overrides (skipped here for speed)
+                if score > 45: 
+                    batch_results.append({
+                        "SKU": sku,
+                        "Product Name": product_name,
+                        "Date": res['Date'],
+                        "Source": res['Source'],
+                        "Issue Description": res['Reason'],
+                        "Risk Level": risk,
+                        "Match Score": int(score),
+                        "Link": res['Link']
+                    })
+
+        return pd.DataFrame(batch_results)
 
     def run_mission(self, search_term, my_firm, my_model, lookback_days=365):
         """

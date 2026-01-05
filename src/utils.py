@@ -47,7 +47,10 @@ def init_session_state():
         "recall_report": None,
         "analysis_results": None,
         "fmea_rows": [],
-        "ai_helpers_initialized": False
+        "ai_helpers_initialized": False,
+        # Fix: Initializing these dictionaries prevents AttributeError in exports/tabs
+        "capa_data": {},
+        "project_charter_data": {}
     }
     
     for key, value in defaults.items():

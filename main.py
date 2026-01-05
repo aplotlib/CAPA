@@ -1,110 +1,78 @@
+import streamlit as st
 import os
 import sys
-import streamlit as st
-import yaml
-from datetime import date
 
-# --- PATH SETUP ---
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-SRC_DIR = os.path.join(APP_DIR, 'src')
-sys.path.insert(0, APP_DIR)
-sys.path.insert(0, SRC_DIR)
+# Ensure src is in pythonpath
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# --- IMPORTS ---
-from src.ai_factory import AIHelperFactory
-from src.utils import init_session_state
-from src.services.session_manager import SessionManager
+from src.ui.recalls_tab import display_recalls_tab
+from src.services.document_service import DocumentGenerator
+from src.services.ai_service import AIService
 
-# --- PAGE CONFIGURATION ---
+# --- Config & Setup ---
 st.set_page_config(
-    page_title="ORION Tracker",
+    page_title="CAPA Manager Pro",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- INITIALIZATION ---
-init_session_state()
-
-# Load Configuration
-try:
-    if os.path.exists("config.yaml"):
-        with open("config.yaml", "r") as f:
-            st.session_state.config = yaml.safe_load(f)
-except Exception:
-    pass
-
-# Initialize AI Components if API Key exists
-if st.session_state.get('api_key') and not st.session_state.get('components_initialized'):
-    # Initialize core logic
-    from src.data_processing import DataProcessor
-    from src.document_generator import DocumentGenerator
+# --- Session State Initialization ---
+if 'init' not in st.session_state:
+    st.session_state.init = True
     
-    st.session_state.data_processor = DataProcessor()
+    # User Profile / Context Mock
+    st.session_state.product_info = {
+        "name": "Infusion Pump", 
+        "manufacturer": "Acme MedCorp", 
+        "model": "X-500"
+    }
+    
+    # Services
+    # Note: In production, API Key should be in secrets or env
+    api_key = os.environ.get("GEMINI_API_KEY", "") 
+    st.session_state.ai_service = AIService(api_key=api_key)
     st.session_state.doc_generator = DocumentGenerator()
     
-    # Initialize AI Factory (Simplified)
-    AIHelperFactory.initialize_ai_helpers(st.session_state.api_key)
-    st.session_state.components_initialized = True
+    # Data Stores
+    st.session_state.recall_hits = None
+    st.session_state.recall_log = {}
 
-# --- PAGE WRAPPERS ---
-def page_dashboard():
-    from src.tabs.dashboard import display_dashboard
-    display_dashboard()
+# --- CSS Styling (Tailwind-ish look for Streamlit) ---
+st.markdown("""
+<style>
+    .reportview-container {
+        background: #fcfcfc;
+    }
+    .stButton>button {
+        border-radius: 6px;
+        font-weight: 600;
+    }
+    div[data-testid="stExpander"] details summary {
+        font-weight: 600;
+        color: #1e293b;
+    }
+    div[data-testid="stMetricValue"] {
+        font-size: 1.5rem;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-def page_recalls():
-    from src.tabs.global_recalls import display_recalls_tab
-    display_recalls_tab()
-
-# --- NAVIGATION ---
-pages = {
-    "Analytics": [
-        st.Page(page_dashboard, title="Mission Control", icon="📊", default=True),
-    ],
-    "Regulatory Intelligence": [
-        st.Page(page_recalls, title="Global Recall Tracker", icon="🌍"),
-    ]
-}
-
-pg = st.navigation(pages)
-
-# --- SIDEBAR UTILITIES ---
-with st.sidebar:
-    st.image("https://placehold.co/200x60/0B0E14/00F3FF?text=ORION", width="stretch")
-    st.header("Active Asset")
+# --- Main Layout ---
+def main():
+    st.sidebar.title("🛡️ QA Command")
+    st.sidebar.caption("ISO 13485:2016 Compliant")
     
-    if 'product_info' not in st.session_state:
-        st.session_state.product_info = {}
+    menu = st.sidebar.radio("Modules", ["Dashboard", "Regulatory Intelligence", "CAPA Actions", "Risk Management"])
+    
+    if menu == "Regulatory Intelligence":
+        display_recalls_tab()
+    elif menu == "Dashboard":
+        st.title("Executive Dashboard")
+        st.info("Select 'Regulatory Intelligence' to access the Global Recalls engine.")
+    else:
+        st.title(f"{menu}")
+        st.warning("Module under construction.")
 
-    st.session_state.product_info['sku'] = st.text_input(
-        "SKU", st.session_state.product_info.get('sku', '')
-    )
-    st.session_state.product_info['name'] = st.text_input(
-        "Name", st.session_state.product_info.get('name', '')
-    )
-    
-    st.divider()
-    st.subheader("💾 Session Persistence")
-    
-    # Save
-    if st.button("Save Session State"):
-        json_bytes = SessionManager.export_session()
-        st.download_button(
-            label="Download .capa File",
-            data=json_bytes,
-            file_name=f"orion_session_{date.today()}.json",
-            mime="application/json"
-        )
-    
-    # Load
-    uploaded_session = st.file_uploader("Load Session", type=["json"], label_visibility="collapsed")
-    if uploaded_session:
-        success, msg = SessionManager.load_session(uploaded_session)
-        if success:
-            st.success("Session Restored!")
-            st.rerun()
-        else:
-            st.error(msg)
-
-# --- EXECUTION ---
-pg.run()
+if __name__ == "__main__":
+    main()

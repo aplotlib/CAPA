@@ -1,7 +1,7 @@
 import requests
 import pandas as pd
-import streamlit as st
 import re
+from datetime import datetime
 
 class RegulatoryService:
     """
@@ -16,17 +16,39 @@ class RegulatoryService:
     CPSC_BASE = "https://www.saferproducts.gov/RestWebServices/Recall"
 
     @staticmethod
-    def search_all_sources(query_term: str, limit: int = 15) -> tuple[pd.DataFrame, dict]:
+    def search_all_sources(query_term: str, start_date=None, end_date=None, limit: int = 20) -> tuple[pd.DataFrame, dict]:
         """
         Searches all sources and returns:
         1. DataFrame of combined results.
-        2. Dictionary of counts per source (e.g., {'FDA Device': 5, 'CPSC': 0}).
+        2. Dictionary of counts per source.
+        
+        Args:
+            query_term: Search keywords.
+            start_date: (Optional) datetime or string YYYY-MM-DD
+            end_date: (Optional) datetime or string YYYY-MM-DD
+            limit: Max results per source.
         """
         results = []
         status_log = {}
 
+        # Format dates for APIs if provided
+        date_query_fda = ""
+        date_params_cpsc = {}
+
+        if start_date and end_date:
+            s_str = start_date.strftime("%Y-%m-%d") if hasattr(start_date, 'strftime') else str(start_date)
+            e_str = end_date.strftime("%Y-%m-%d") if hasattr(end_date, 'strftime') else str(end_date)
+            
+            # OpenFDA Date Range Syntax: [YYYY-MM-DD TO YYYY-MM-DD]
+            date_query_fda = f' AND recall_initiation_date:[{s_str} TO {e_str}]'
+            
+            # CPSC Date Params
+            date_params_cpsc = {
+                'RecallDateStart': s_str,
+                'RecallDateEnd': e_str
+            }
+
         # --- 1. FDA Sources ---
-        # We search Devices, Drugs, and Food
         fda_categories = [
             ("FDA Device", "device"),
             ("FDA Drug", "drug"),
@@ -34,49 +56,54 @@ class RegulatoryService:
         ]
 
         for label, category in fda_categories:
-            hits = RegulatoryService._fetch_openfda(query_term, category, limit)
+            hits = RegulatoryService._fetch_openfda(query_term, category, limit, date_query_fda)
             status_log[label] = len(hits)
             results.extend(hits)
 
         # --- 2. CPSC Source ---
-        cpsc_hits = RegulatoryService._fetch_cpsc(query_term)
+        cpsc_hits = RegulatoryService._fetch_cpsc(query_term, date_params_cpsc)
         status_log["CPSC"] = len(cpsc_hits)
         results.extend(cpsc_hits)
 
         # --- 3. Aggregate & Sort ---
         df = pd.DataFrame(results)
         if not df.empty and 'Date' in df.columns:
-            # Ensure dates are datetime objects for sorting
             df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
             df = df.sort_values(by='Date', ascending=False)
-            # Convert back to string for display if needed, or keep as datetime
+            # Standardize date display
             df['Date'] = df['Date'].dt.strftime('%Y-%m-%d')
             
         return df, status_log
 
     @staticmethod
-    def _fetch_openfda(term: str, category: str, limit: int) -> list:
+    def _fetch_openfda(term: str, category: str, limit: int, date_filter: str) -> list:
         """
-        Generic handler for FDA APIs using robust Lucene query construction.
+        Generic handler for FDA APIs.
+        NOW SEARCHES: Product Description + Reason + Recalling Firm
         """
-        if not term or not term.strip():
+        if not term.strip():
             return []
 
         url = f"{RegulatoryService.FDA_BASE}/{category}/enforcement.json"
         
-        # FIX: Clean the term to remove punctuation and extra spaces
-        # "Infusion, Pump" -> ["Infusion", "Pump"]
-        words = re.findall(r'\w+', term.strip())
+        # CLEANUP: Replace non-alphanumeric chars with spaces to avoid Lucene syntax errors
+        clean_term = re.sub(r'[^\w\s]', ' ', term.strip())
+        words = clean_term.split()
         
         if not words: 
             return []
             
-        # Join with " AND " to ensure all words must be present in the result
+        # Join with " AND " to ensure all words must be present
         joined_term = " AND ".join(words)
         
-        # Search in Product Description OR Reason for Recall
-        # We rely on requests to handle the URL encoding of the space/characters
-        search_query = f'(product_description:({joined_term}) OR reason_for_recall:({joined_term}))'
+        # Search in Product Description OR Reason OR Firm (Expanded Scope)
+        # Note: We group the OR clauses, then apply the AND date_filter if exists
+        search_query = (
+            f'(product_description:({joined_term}) '
+            f'OR reason_for_recall:({joined_term}) '
+            f'OR recalling_firm:({joined_term}))'
+            f'{date_filter}'
+        )
         
         params = {
             'search': search_query,
@@ -86,9 +113,7 @@ class RegulatoryService:
         
         out = []
         try:
-            # Added explicit timeout
             res = requests.get(url, params=params, timeout=10)
-            
             if res.status_code == 200:
                 data = res.json()
                 if "results" in data:
@@ -102,34 +127,30 @@ class RegulatoryService:
                             "ID": item.get("recall_number"),
                             "Status": item.get("status")
                         })
-            elif res.status_code == 400:
-                # 400 often means "No matches found" in OpenFDA
-                pass
             else:
-                print(f"FDA API Error ({category}): {res.status_code}")
-                
-        except Exception as e:
-            print(f"FDA Connection Error: {e}")
-            # Optionally log to streamlit if needed, but print is safer for services
+                # print(f"FDA Error {res.status_code}: {res.text}")
+                pass
+        except Exception:
             pass
             
         return out
 
     @staticmethod
-    def _fetch_cpsc(term: str) -> list:
+    def _fetch_cpsc(term: str, date_params: dict) -> list:
         """Handler for CPSC SaferProducts API."""
-        if not term or not term.strip():
+        if not term.strip():
             return []
             
-        # CPSC Simple Search
-        # Note: RecallTitle performs a keyword search on the title
+        # CPSC Search Params
         params = {'format': 'json', 'RecallTitle': term}
+        if date_params:
+            params.update(date_params)
+            
         out = []
         try:
             res = requests.get(RegulatoryService.CPSC_BASE, params=params, timeout=10)
             if res.status_code == 200:
                 items = res.json()
-                # CPSC returns a list directly
                 if isinstance(items, list):
                     for item in items:
                         out.append({
@@ -141,8 +162,7 @@ class RegulatoryService:
                             "ID": str(item.get("RecallID")),
                             "Status": "Public Recall"
                         })
-        except Exception as e:
-            print(f"CPSC Connection Error: {e}")
+        except Exception:
             pass
             
         return out

@@ -1,80 +1,19 @@
-# src/services/agent_service.py
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
+import difflib
 from src.services.regulatory_service import RegulatoryService
 from src.ai_services import get_ai_service
-from src.utils import calculate_fuzzy_similarity
 
 class RecallResponseAgent:
     """
     An autonomous agent that monitors regulatory databases, adverse events, and media.
-    Identifies risks and proactively drafts quality documentation.
+    Identifies risks and proactively drafts quality documentation (CAPAs, Emails, PR Statements).
     """
     
     def __init__(self):
         self.ai = get_ai_service()
         self.regulatory = RegulatoryService()
-
-    def run_batch_mission(self, df_products, start_date, end_date, progress_callback=None):
-        """
-        Runs the surveillance mission on a batch of products from an uploaded file.
-        Uses fuzzy matching to filter results.
-        """
-        batch_results = []
-        total_products = len(df_products)
-        
-        for idx, row in df_products.iterrows():
-            sku = str(row.get('SKU', 'N/A'))
-            product_name = str(row.get('Product Name', 'Unknown'))
-            
-            if progress_callback:
-                progress_callback((idx + 1) / total_products, f"Scanning SKU {sku}: {product_name}...")
-
-            # 1. Search Logic
-            # We search for the Product Name.
-            # We enforce the date range selected by the user.
-            results_df, _ = self.regulatory.search_all_sources(product_name, start_date, end_date, limit=20)
-            
-            if results_df.empty:
-                batch_results.append({
-                    "SKU": sku, "Product Name": product_name, "Date": "N/A", "Source": "N/A", 
-                    "Issue Description": "No records found", "Risk Level": "Low", "Match Score": 0, "Link": "N/A"
-                })
-                continue
-            
-            # 2. Fuzzy Match & Filter
-            # Iterate through search results and check if they ACTUALLY match the input product
-            # This prevents "Infusion Pump" search finding "Pool Pump".
-            for _, res in results_df.iterrows():
-                title = res.get('Product', '') or res.get('Description', '')
-                
-                # Calculate Similarity
-                score = calculate_fuzzy_similarity(product_name, title)
-                
-                # Thresholds:
-                # - Match Score > 60: Likely relevant
-                # - Risk Level: Determine based on Source (Class I Recall = High)
-                
-                risk = "Low"
-                if "Class I" in str(res.get('Reason', '')): risk = "High"
-                elif "Death" in str(res.get('Reason', '')): risk = "High"
-                elif "Class II" in str(res.get('Reason', '')): risk = "Medium"
-                
-                # If score is very low, it's likely noise, unless AI overrides (skipped here for speed)
-                if score > 45: 
-                    batch_results.append({
-                        "SKU": sku,
-                        "Product Name": product_name,
-                        "Date": res['Date'],
-                        "Source": res['Source'],
-                        "Issue Description": res['Reason'],
-                        "Risk Level": risk,
-                        "Match Score": int(score),
-                        "Link": res['Link']
-                    })
-
-        return pd.DataFrame(batch_results)
 
     def run_mission(self, search_term, my_firm, my_model, lookback_days=365):
         """
@@ -132,6 +71,77 @@ class RecallResponseAgent:
 
         self._log(mission_log, f"🏁 MISSION COMPLETE. Generated {len(artifacts)} response packages.")
         return mission_log, artifacts
+
+    def run_bulk_scan(self, file_obj, start_date, end_date, fuzzy_threshold=0.6, progress_callback=None):
+        """
+        Runs surveillance on a list of products provided in an Excel/CSV file.
+        Format: Col A = SKU, Col B = Product Name.
+        """
+        try:
+            # Parse File
+            if file_obj.name.endswith('.csv'):
+                df_input = pd.read_csv(file_obj)
+            else:
+                df_input = pd.read_excel(file_obj)
+            
+            # Normalize headers (take first two columns regardless of name)
+            if len(df_input.columns) < 2:
+                return pd.DataFrame(), ["Error: File must have at least 2 columns (SKU, Product Name)."]
+            
+            # Rename for consistency
+            df_input = df_input.iloc[:, :2]
+            df_input.columns = ['SKU', 'Product Name']
+            df_input = df_input.dropna(subset=['Product Name'])
+        except Exception as e:
+            return pd.DataFrame(), [f"Error parsing file: {e}"]
+
+        consolidated_results = []
+        total_items = len(df_input)
+        
+        for idx, row in df_input.iterrows():
+            sku = str(row['SKU'])
+            p_name = str(row['Product Name'])
+            
+            if progress_callback:
+                progress = (idx + 1) / total_items
+                progress_callback(progress, f"Scanning {idx+1}/{total_items}: {p_name}...")
+
+            # 1. SEARCH
+            hits, _ = self.regulatory.search_all_sources(p_name, start_date, end_date, limit=20)
+            
+            if not hits.empty:
+                # 2. FUZZY MATCH FILTERING
+                for h_idx, hit in hits.iterrows():
+                    hit_product = str(hit.get('Product', '')).lower()
+                    target_product = p_name.lower()
+                    
+                    # Calculate similarity ratio
+                    score = self._fuzzy_score(target_product, hit_product)
+                    
+                    # If score is good OR the product name is explicitly in the hit text
+                    if score >= fuzzy_threshold or target_product in hit_product:
+                        # Append to results
+                        consolidated_results.append({
+                            "My SKU": sku,
+                            "My Product": p_name,
+                            "Match Score": f"{score:.2f}",
+                            "Source": hit['Source'],
+                            "Date": hit['Date'],
+                            "Found Product": hit['Product'],
+                            "Reason": hit['Reason'],
+                            "Risk Level": "High" if score > 0.8 else "Medium",
+                            "Link": hit['Link']
+                        })
+        
+        if not consolidated_results:
+            return pd.DataFrame(), ["No results found."]
+            
+        return pd.DataFrame(consolidated_results), ["Success"]
+
+    def _fuzzy_score(self, s1, s2):
+        """Calculates fuzzy similarity ratio between two strings."""
+        if not s1 or not s2: return 0.0
+        return difflib.SequenceMatcher(None, s1, s2).ratio()
 
     def _execute_response_protocol(self, record, analysis, source_type):
         """

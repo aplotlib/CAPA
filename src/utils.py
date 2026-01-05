@@ -5,21 +5,6 @@ import functools
 import logging
 import os
 
-# Import all service classes
-from src.ai_services import (
-    AIService, DesignControlsTriager, UrraGenerator, ManualWriter, 
-    ProjectCharterHelper, VendorEmailDrafter, HumanFactorsHelper, 
-    MedicalDeviceClassifier
-)
-from src.ai_capa_helper import AICAPAHelper
-from src.fmea import FMEA
-from src.pre_mortem import PreMortem
-from src.rca_tools import RootCauseAnalyzer
-from src.ai_context_helper import AIContextHelper
-from src.audit_logger import AuditLogger
-from src.document_generator import DocumentGenerator
-from src.data_processing import DataProcessor
-
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -104,6 +89,25 @@ def _load_api_keys():
 
 def initialize_ai_services():
     """Instantiates all helper classes and stores them in session state."""
+    
+    # --- MOVED IMPORTS HERE TO PREVENT CIRCULAR DEPENDENCY ---
+    # These modules import 'retry_with_backoff' from this file (src.utils),
+    # so we must delay importing them until this file is fully initialized.
+    from src.ai_services import (
+        AIService, DesignControlsTriager, UrraGenerator, ManualWriter, 
+        ProjectCharterHelper, VendorEmailDrafter, HumanFactorsHelper, 
+        MedicalDeviceClassifier
+    )
+    from src.ai_capa_helper import AICAPAHelper
+    from src.fmea import FMEA
+    from src.pre_mortem import PreMortem
+    from src.rca_tools import RootCauseAnalyzer
+    from src.ai_context_helper import AIContextHelper
+    from src.audit_logger import AuditLogger
+    from src.document_generator import DocumentGenerator
+    from src.data_processing import DataProcessor
+    # --------------------------------------------------------
+
     if st.session_state.get('services_initialized'):
         return
 

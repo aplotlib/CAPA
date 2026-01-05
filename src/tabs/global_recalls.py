@@ -1,7 +1,9 @@
 import streamlit as st
 import pandas as pd
+import time
 from datetime import datetime, timedelta
 from src.services.regulatory_service import RegulatoryService
+from src.services.agent_service import RecallResponseAgent
 
 def get_ai_service():
     """Retrieves AI Service from session state."""
@@ -13,24 +15,114 @@ def search_wrapper(term, start, end):
 
 def display_recalls_tab():
     st.header("🌍 Regulatory Intelligence & Recall Tracker")
-    st.caption("Deep-scan surveillance with AI Relevance Screening (FDA, UK, Canada, CPSC).")
+    st.caption("Deep-scan surveillance with Autonomous Agent capabilities.")
 
     ai = get_ai_service()
     
+    # Initialize Session State
     if 'recall_hits' not in st.session_state or st.session_state.recall_hits is None: 
         st.session_state.recall_hits = pd.DataFrame()
     if 'recall_log' not in st.session_state: 
         st.session_state.recall_log = {}
 
-    with st.expander("🛠️ Search & Screening Configuration", expanded=True):
+    # Safe get for product info (used by both Agent and Manual tools)
+    p_info = st.session_state.get('product_info', {})
+    default_name = p_info.get('name', '')
+    default_manufacturer = p_info.get('manufacturer', '')
+    default_model = p_info.get('model', '')
+
+    # --- 🤖 SECTION 1: AUTONOMOUS AGENT ---
+    with st.expander("🤖 Autonomous Recall Response Agent", expanded=True):
+        st.info("The Agent will scan global databases, analyze risks, and **automatically draft CAPAs and Emails** for high-risk findings.")
+        
+        c1, c2, c3 = st.columns([2, 2, 1])
+        with c1:
+            agent_term = st.text_input("Surveillance Target", value=default_name, placeholder="e.g. Infusion Pump", key="agent_term")
+        with c2:
+            agent_firm = st.text_input("My Firm Name", value=default_manufacturer, placeholder="e.g. Acme MedCorp", key="agent_firm")
+        with c3:
+            st.write("") # Spacer to align button
+            start_btn = st.button("🚀 Launch Agent", type="primary", use_container_width=True)
+
+        if start_btn:
+            if not ai:
+                st.error("AI Service not connected.")
+            else:
+                agent = RecallResponseAgent()
+                
+                # Container for live logs
+                log_container = st.container()
+                log_container.markdown("### 📡 Agent Live Feed")
+                log_box = log_container.empty()
+                
+                with st.spinner("Agent is executing mission..."):
+                    # Run the agent
+                    # Using default_model or a placeholder if missing
+                    model_id = default_model if default_model else "General Device Class"
+                    logs, artifacts = agent.run_mission(agent_term, agent_firm, model_id)
+                    
+                    # Simulate streaming logs for UX
+                    log_text = ""
+                    for line in logs:
+                        log_text += f"{line}  \n"
+                        log_box.markdown(f"```text\n{log_text}\n```")
+                        time.sleep(0.05) 
+                
+                # Store results
+                st.session_state.agent_artifacts = artifacts
+                st.success("Mission Complete!")
+
+    # --- 📦 SECTION 2: AGENT RESULTS ---
+    if 'agent_artifacts' in st.session_state and st.session_state.agent_artifacts:
+        st.divider()
+        st.subheader(f"📦 Agent Action Packages ({len(st.session_state.agent_artifacts)})")
+        
+        for i, art in enumerate(st.session_state.agent_artifacts):
+            rec = art['source_record']
+            risk_analysis = art.get('risk_analysis', 'N/A')
+            
+            with st.expander(f"🚨 ACTION ITEM: {rec['Product'][:60]}...", expanded=True):
+                col_left, col_right = st.columns(2)
+                
+                with col_left:
+                    st.markdown("### ⚠️ Threat Detected")
+                    st.error(f"**Risk Analysis:** {risk_analysis}")
+                    st.write(f"**Reason:** {rec['Reason']}")
+                    st.write(f"**Source:** {rec['Source']}")
+                    st.caption(f"Firm: {rec['Firm']}")
+                
+                with col_right:
+                    st.markdown("### 🤖 Generated Assets")
+                    
+                    # CAPA DRAFT BUTTON
+                    if st.button(f"📥 Save as Draft CAPA", key=f"btn_capa_{i}"):
+                        if 'capa_records' not in st.session_state: st.session_state.capa_records = []
+                        
+                        capa_data = art.get('capa_draft', {})
+                        new_capa = {
+                            "id": f"AUTO-CAPA-{len(st.session_state.capa_records)+1:03d}",
+                            "issue": capa_data.get('issue_description', 'Auto-generated issue'),
+                            "root_cause": capa_data.get('root_cause_investigation_plan', 'TBD'),
+                            "actions": capa_data.get('containment_action', 'TBD'),
+                            "date": str(datetime.now().date())
+                        }
+                        st.session_state.capa_records.append(new_capa)
+                        st.toast("CAPA saved to database!")
+
+                    # EMAIL DRAFT POPOVER
+                    email_body = art.get('email_draft', "No email generated.")
+                    with st.popover("✉️ View Vendor Email Draft"):
+                        st.markdown("#### Draft Vendor Communication")
+                        st.text_area("Subject: Urgent - Recall Inquiry", value=email_body, height=300, key=f"email_{i}")
+
+    st.divider()
+
+    # --- 🛠️ SECTION 3: MANUAL TOOLS (Original Logic) ---
+    with st.expander("🛠️ Manual Search & Screening Configuration", expanded=False):
         col1, col2 = st.columns([1, 1])
         with col1:
             st.subheader("1. Search Criteria")
-            # Safe get for product info
-            p_info = st.session_state.get('product_info', {})
-            default_name = p_info.get('name', '')
-            
-            p_name = st.text_input("Search Term / Product Type", value=default_name, placeholder="e.g. Infusion Pump")
+            p_name = st.text_input("Search Term / Product Type", value=default_name, placeholder="e.g. Infusion Pump", key="manual_search_term")
             c_d1, c_d2 = st.columns(2)
             start_date = c_d1.date_input("Start Date", value=datetime.now() - timedelta(days=365*3))
             end_date = c_d2.date_input("End Date", value=datetime.now())
@@ -38,12 +130,12 @@ def display_recalls_tab():
         with col2:
             st.subheader("2. 'My Product' Match Criteria")
             st.caption("AI uses this to flag high-risk matches.")
-            my_firm = st.text_input("My Manufacturer Name", value=p_info.get('manufacturer', ''), placeholder="e.g. Acme MedCorp")
-            my_model = st.text_input("My Model Number/ID", value=p_info.get('model', ''), placeholder="e.g. Model X-500")
+            my_firm = st.text_input("My Manufacturer Name", value=default_manufacturer, placeholder="e.g. Acme MedCorp", key="manual_firm")
+            my_model = st.text_input("My Model Number/ID", value=default_model, placeholder="e.g. Model X-500", key="manual_model")
 
         auto_expand = st.checkbox("🤖 AI-Expanded Search (Synonyms)", value=True)
         
-        if st.button("🚀 Run Deep Scan", type="primary", use_container_width=True):
+        if st.button("🚀 Run Deep Scan (Manual)", type="secondary", use_container_width=True):
             if not p_name:
                 st.error("Enter a search query.")
             else:

@@ -91,7 +91,8 @@ pg = st.navigation(pages)
 
 # --- SIDEBAR UTILITIES ---
 with st.sidebar:
-    st.image("https://placehold.co/200x60/0B0E14/00F3FF?text=ORION", use_container_width=True)
+    # Fix: Replaced use_container_width=True with width="stretch"
+    st.image("https://placehold.co/200x60/0B0E14/00F3FF?text=ORION", width="stretch")
     st.header("Active Asset")
     
     if 'product_info' not in st.session_state:

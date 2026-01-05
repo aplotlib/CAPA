@@ -93,8 +93,13 @@ class AICAPAHelper:
             total_returns=int(summary.get('total_returned', 0))
         )
         
+        # Ensure system prompt explicitly requests JSON
+        system_content = prompts.CAPA_SUGGESTION_SYSTEM
+        if "json" not in system_content.lower():
+             system_content += " You must respond strictly in JSON format."
+
         messages = [
-            {"role": "system", "content": prompts.CAPA_SUGGESTION_SYSTEM},
+            {"role": "system", "content": system_content},
             {"role": "user", "content": user_prompt}
         ]
         

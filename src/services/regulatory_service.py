@@ -1,6 +1,7 @@
 import requests
 import pandas as pd
 import streamlit as st
+import re
 
 class RegulatoryService:
     """
@@ -45,32 +46,36 @@ class RegulatoryService:
         # --- 3. Aggregate & Sort ---
         df = pd.DataFrame(results)
         if not df.empty and 'Date' in df.columns:
+            # Ensure dates are datetime objects for sorting
             df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
             df = df.sort_values(by='Date', ascending=False)
+            # Convert back to string for display if needed, or keep as datetime
+            df['Date'] = df['Date'].dt.strftime('%Y-%m-%d')
             
         return df, status_log
 
     @staticmethod
     def _fetch_openfda(term: str, category: str, limit: int) -> list:
         """
-        Generic handler for FDA APIs.
-        FIX: Uses spaces for Boolean logic; lets `requests` handle URL encoding.
+        Generic handler for FDA APIs using robust Lucene query construction.
         """
-        if not term.strip():
+        if not term or not term.strip():
             return []
 
         url = f"{RegulatoryService.FDA_BASE}/{category}/enforcement.json"
         
-        # FIX: Do NOT use '+'. Use spaces. 'requests' will encode spaces to '+' automatically.
-        # We construct a Lucene query: (field:(term AND term) OR field:(term AND term))
-        words = term.strip().split()
+        # FIX: Clean the term to remove punctuation and extra spaces
+        # "Infusion, Pump" -> ["Infusion", "Pump"]
+        words = re.findall(r'\w+', term.strip())
+        
         if not words: 
             return []
             
-        # Join with " AND " to ensure all words must be present
+        # Join with " AND " to ensure all words must be present in the result
         joined_term = " AND ".join(words)
         
         # Search in Product Description OR Reason for Recall
+        # We rely on requests to handle the URL encoding of the space/characters
         search_query = f'(product_description:({joined_term}) OR reason_for_recall:({joined_term}))'
         
         params = {
@@ -81,48 +86,63 @@ class RegulatoryService:
         
         out = []
         try:
-            res = requests.get(url, params=params, timeout=5)
-            data = res.json()
+            # Added explicit timeout
+            res = requests.get(url, params=params, timeout=10)
             
-            if "results" in data:
-                for item in data["results"]:
-                    out.append({
-                        "Source": f"FDA {category.capitalize()}",
-                        "Date": item.get("recall_initiation_date"),
-                        "Product": item.get("product_description"),
-                        "Reason": item.get("reason_for_recall"),
-                        "Firm": item.get("recalling_firm"),
-                        "ID": item.get("recall_number"),
-                        "Status": item.get("status")
-                    })
+            if res.status_code == 200:
+                data = res.json()
+                if "results" in data:
+                    for item in data["results"]:
+                        out.append({
+                            "Source": f"FDA {category.capitalize()}",
+                            "Date": item.get("recall_initiation_date"),
+                            "Product": item.get("product_description"),
+                            "Reason": item.get("reason_for_recall"),
+                            "Firm": item.get("recalling_firm"),
+                            "ID": item.get("recall_number"),
+                            "Status": item.get("status")
+                        })
+            elif res.status_code == 400:
+                # 400 often means "No matches found" in OpenFDA
+                pass
+            else:
+                print(f"FDA API Error ({category}): {res.status_code}")
+                
         except Exception as e:
-            # print(f"Debug: FDA {category} error: {e}")
+            print(f"FDA Connection Error: {e}")
+            # Optionally log to streamlit if needed, but print is safer for services
             pass
+            
         return out
 
     @staticmethod
     def _fetch_cpsc(term: str) -> list:
         """Handler for CPSC SaferProducts API."""
-        if not term.strip():
+        if not term or not term.strip():
             return []
             
         # CPSC Simple Search
+        # Note: RecallTitle performs a keyword search on the title
         params = {'format': 'json', 'RecallTitle': term}
         out = []
         try:
-            res = requests.get(RegulatoryService.CPSC_BASE, params=params, timeout=5)
+            res = requests.get(RegulatoryService.CPSC_BASE, params=params, timeout=10)
             if res.status_code == 200:
                 items = res.json()
-                for item in items:
-                    out.append({
-                        "Source": "CPSC (Consumer)",
-                        "Date": item.get("RecallDate"),
-                        "Product": item.get("Title"),
-                        "Reason": item.get("Description"), 
-                        "Firm": "See Details", 
-                        "ID": str(item.get("RecallID")),
-                        "Status": "Public Recall"
-                    })
-        except Exception:
+                # CPSC returns a list directly
+                if isinstance(items, list):
+                    for item in items:
+                        out.append({
+                            "Source": "CPSC (Consumer)",
+                            "Date": item.get("RecallDate"),
+                            "Product": item.get("Title"),
+                            "Reason": item.get("Description"), 
+                            "Firm": "See Details", 
+                            "ID": str(item.get("RecallID")),
+                            "Status": "Public Recall"
+                        })
+        except Exception as e:
+            print(f"CPSC Connection Error: {e}")
             pass
+            
         return out

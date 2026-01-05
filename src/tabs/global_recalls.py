@@ -19,8 +19,12 @@ def display_recalls_tab():
         with col1:
             st.subheader("1. Configure Search Target")
             # Default to active product info
-            default_name = st.session_state.product_info.get('name', '')
-            default_desc = st.session_state.product_info.get('ifu', '')
+            default_name = ""
+            default_desc = ""
+            
+            if 'product_info' in st.session_state:
+                default_name = st.session_state.product_info.get('name', '')
+                default_desc = st.session_state.product_info.get('ifu', '')
             
             p_name = st.text_input("Product Name / Type", value=default_name)
             p_desc = st.text_area("Description (for AI Context)", value=default_desc, height=68, 
@@ -49,7 +53,8 @@ def display_recalls_tab():
         with tab_list:
             st.info("Review these findings. Use the buttons to immediately create actions in your Quality System.")
             
-            for index, row in df.iterrows():
+            # Pagination or Limit to first 20 for performance in list view
+            for index, row in df.head(20).iterrows():
                 with st.expander(f"**{row['Date']}** | {row['Source']} | {row['Product'][:80]}..."):
                     c1, c2 = st.columns([3, 1])
                     with c1:
@@ -59,10 +64,11 @@ def display_recalls_tab():
                     
                     with c2:
                         # ACTION BUTTONS
-                        if st.button("📝 Draft CAPA", key=f"capa_{index}"):
+                        # We use a unique key for every button
+                        if st.button("📝 Draft CAPA", key=f"capa_{row['ID']}_{index}"):
                             create_capa_draft(row)
                         
-                        if st.button("⚠️ Add to FMEA", key=f"fmea_{index}"):
+                        if st.button("⚠️ Add to FMEA", key=f"fmea_{row['ID']}_{index}"):
                             add_to_fmea(row)
 
         with tab_raw:
@@ -76,6 +82,7 @@ def run_search(name, desc, auto_expand, ai):
     
     if auto_expand and ai:
         with st.spinner("AI is generating regulatory search terms..."):
+            # We call the new AI method we added
             keywords = ai.generate_search_keywords(name, desc)
             if keywords:
                 st.toast(f"AI added terms: {', '.join(keywords)}")
@@ -110,6 +117,7 @@ def create_capa_draft(row):
         "root_cause": "External Recall Investigation Required",
         "immediate_actions": f"1. Review affected inventory for Recall #{row['ID']}.\n2. Contact manufacturer {row['Firm']}."
     }
+    # Update the session state used by src/tabs/capa.py
     st.session_state.capa_entry_draft = draft
     st.sidebar.success("Draft created! Go to 'CAPA' tab to finalize.")
 
@@ -125,10 +133,14 @@ def add_to_fmea(row):
         "RPN": 120
     }
     
+    # Update the session state used by src/tabs/risk_safety.py
     if 'fmea_rows' not in st.session_state:
         st.session_state.fmea_rows = []
     
     st.session_state.fmea_rows.append(new_mode)
-    # Update the dataframe tracker as well to ensure persistence
-    st.session_state.fmea_data = pd.DataFrame(st.session_state.fmea_rows)
+    
+    # Also update the dataframe wrapper if it exists
+    if 'fmea_data' in st.session_state:
+        st.session_state.fmea_data = pd.DataFrame(st.session_state.fmea_rows)
+        
     st.sidebar.success("Added to FMEA! Go to 'Risk' tab to review.")

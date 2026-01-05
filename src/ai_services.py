@@ -47,13 +47,13 @@ class AIServiceBase:
 
         messages = []
         
-        # FIX: Ensure the word "JSON" is strictly present in the system instruction
+        # FAILSAFE: The OpenAI API strictly requires the word "JSON" in the prompt 
+        # when response_format is set to json_object.
         if system_instruction:
             if "json" not in system_instruction.lower():
-                system_instruction += " Respond strictly in JSON format."
+                system_instruction = f"{system_instruction} Respond strictly in JSON format."
             messages.append({"role": "system", "content": system_instruction})
         else:
-            # If no system instruction, add a default one enforcing JSON
             messages.append({"role": "system", "content": "You are a helpful assistant. Respond strictly in JSON format."})
             
         messages.append({"role": "user", "content": prompt})
@@ -65,7 +65,12 @@ class AIServiceBase:
                 response_format={"type": "json_object"},
                 temperature=0.3
             )
-            return json.loads(response.choices[0].message.content)
+            content = response.choices[0].message.content
+            if not content:
+                return {"error": "Empty response from AI"}
+            return json.loads(content)
+        except json.JSONDecodeError:
+             return {"error": "Failed to decode AI response as JSON"}
         except Exception as e:
             logger.error(f"AI Generation Error: {e}")
             return {"error": str(e)}
@@ -128,7 +133,6 @@ class AIService(AIServiceBase):
         return self._generate_json(user_prompt, system_prompt)
 
     def analyze_meeting_transcript(self, transcript_text: str) -> Dict[str, str]:
-        # FIX: Added "Return JSON" to prompt to prevent 400 error
         system_prompt = "You are a QA Expert. Extract CAPA details (issue, root cause, actions) from notes. Return JSON."
         user_prompt = f"Analyze this transcript and return a JSON object:\n{transcript_text}"
         return self._generate_json(user_prompt, system_prompt)
@@ -140,7 +144,8 @@ class AIService(AIServiceBase):
 
 class DesignControlsTriager(AIServiceBase):
     def generate_design_controls(self, name: str, ifu: str, user_needs: str, tech_reqs: str, risks: str) -> Dict[str, str]:
-        system = "You are a Medical Device Systems Engineer (ISO 13485). Generate Design Control documentation in JSON."
+        # Explicitly mention JSON in system prompt
+        system = "You are a Medical Device Systems Engineer (ISO 13485). Generate Design Control documentation in JSON format."
         prompt = f"""
         Product: {name}
         Description: {ifu}
@@ -185,7 +190,7 @@ class ManualWriter(AIServiceBase):
 
 class ProjectCharterHelper(AIServiceBase):
     def generate_charter_draft(self, product_name: str, problem_statement: str, target_user: str) -> Dict[str, Any]:
-        system = "You are a Project Manager in MedTech. Draft a Project Charter in JSON."
+        system = "You are a Project Manager in MedTech. Draft a Project Charter in JSON format."
         prompt = f"""
         Project: {product_name}
         Problem: {problem_statement}

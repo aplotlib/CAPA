@@ -35,8 +35,9 @@ class RegulatoryService:
         df = pd.DataFrame(results)
         if not df.empty:
             # Sort by date descending
-            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-            df = df.sort_values(by='Date', ascending=False)
+            if 'Date' in df.columns:
+                df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+                df = df.sort_values(by='Date', ascending=False)
         return df
 
     @staticmethod
@@ -69,6 +70,7 @@ class RegulatoryService:
                         "Status": item.get("status")
                     })
         except Exception as e:
+            # Fail silently to keep the app running if one API is down
             print(f"Error fetching FDA {category}: {e}")
         return out
 
@@ -88,9 +90,9 @@ class RegulatoryService:
                         "Source": "CPSC (Consumer)",
                         "Date": item.get("RecallDate"),
                         "Product": item.get("Title"),
-                        "Reason": item.get("Description"), # CPSC puts the hazard in Description usually
-                        "Firm": "Multiple/See Details", # CPSC structure varies
-                        "ID": item.get("RecallID"),
+                        "Reason": item.get("Description"), 
+                        "Firm": "See Details", 
+                        "ID": str(item.get("RecallID")),
                         "Status": "Public Recall"
                     })
         except Exception as e:

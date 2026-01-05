@@ -64,6 +64,7 @@ def display_cost_of_quality_tab():
                              })
                 fig.update_layout(showlegend=False, font_family="Inter")
                 fig.update_traces(textposition='inside', textinfo='percent+label')
+                
                 # Fix: Replaced use_container_width=True with width="stretch"
                 st.plotly_chart(fig, width="stretch")
 

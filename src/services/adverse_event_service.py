@@ -21,9 +21,9 @@ class AdverseEventService:
             e_str = end_date.strftime("%Y-%m-%d") if hasattr(end_date, 'strftime') else str(end_date)
             date_query = f'+AND+date_received:[{s_str}+TO+{e_str}]'
 
-        # Query syntax: Search for device name and ensure we capture relevant events
+        # Query syntax: Use generic_name OR brand_name for better coverage
         sanitized_term = query_term.strip().replace(" ", "+")
-        search_query = f'device.generic_name:"{sanitized_term}"{date_query}'
+        search_query = f'(device.generic_name:"{sanitized_term}"+OR+device.brand_name:"{sanitized_term}"){date_query}'
         
         params = {
             'search': search_query,
@@ -39,7 +39,8 @@ class AdverseEventService:
                 if "results" in data:
                     for item in data["results"]:
                         # Extract key fields
-                        mdr_text = "See details."
+                        device_info = item.get("device", [{}])[0]
+                        mdr_text = "No description."
                         if "mdr_text" in item and item["mdr_text"]:
                             mdr_text = item["mdr_text"][0].get("text", "No description.")
                         
@@ -50,16 +51,17 @@ class AdverseEventService:
                             outcome = str(item["remedial_action"])
                         
                         out.append({
-                            "Source": "FDA MAUDE (Adverse Event)",
+                            "Source": "FDA MAUDE",
                             "Date": item.get("date_received"),
-                            "Product": item.get("device", [{}])[0].get("generic_name", query_term),
-                            "Description": mdr_text[:200] + "...",
-                            "Reason": f"Event Type: {event_type} | Outcome: {outcome}",
-                            "Firm": item.get("manufacturer_name", "Unknown"),
-                            "Model Info": item.get("device", [{}])[0].get("model_number", "N/A"),
+                            "Product": device_info.get("generic_name", query_term),
+                            "Description": mdr_text[:250] + "...",
+                            "Reason": f"Event: {event_type} | Outcome: {outcome}",
+                            "Firm": device_info.get("manufacturer_d_name", "Unknown"),
+                            "Model Info": device_info.get("model_number", "N/A"),
                             "ID": item.get("report_number", "N/A"),
                             "Link": f"https://www.accessdata.fda.gov/scripts/cdrh/cfdocs/cfmaude/detail.cfm?mdrfoi__id={item.get('report_number')}",
-                            "Status": event_type
+                            "Status": event_type,
+                            "Risk_Level": "High" if event_type in ["Death", "Injury"] else "Medium"
                         })
         except Exception as e:
             print(f"MAUDE Search Error: {e}")

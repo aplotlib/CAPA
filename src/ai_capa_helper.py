@@ -63,6 +63,7 @@ class AICAPAHelper:
         if not self.client: return "AI client not initialized."
         if not rough_input or len(rough_input) < 3: return rough_input
 
+        # This method produces TEXT, not JSON, so no special prompt fixes needed
         messages = [
             {"role": "system", "content": prompts.CAPA_REFINE_SYSTEM.format(field_name=field_name)},
             {"role": "user", "content": f"**Product Context:** {product_context}\n**Rough Input:** {rough_input}\n**Refined Output:**"}
@@ -93,7 +94,7 @@ class AICAPAHelper:
             total_returns=int(summary.get('total_returned', 0))
         )
         
-        # Ensure system prompt explicitly requests JSON
+        # FAILSAFE: Ensure "JSON" is in system prompt
         system_content = prompts.CAPA_SUGGESTION_SYSTEM
         if "json" not in system_content.lower():
              system_content += " You must respond strictly in JSON format."
@@ -109,7 +110,8 @@ class AICAPAHelper:
                 messages=messages,
                 response_format={"type": "json_object"}
             )
-            return json.loads(response.choices[0].message.content)
+            content = response.choices[0].message.content
+            return json.loads(content)
         except Exception as e:
             print(f"Error generating CAPA suggestions: {e}")
             return {"error": f"Failed to generate CAPA suggestions: {e}"}

@@ -16,17 +16,11 @@ class RegulatoryService:
     CPSC_BASE = "https://www.saferproducts.gov/RestWebServices/Recall"
 
     @staticmethod
-    def search_all_sources(query_term: str, start_date=None, end_date=None, limit: int = 20) -> tuple[pd.DataFrame, dict]:
+    def search_all_sources(query_term: str, start_date=None, end_date=None, limit: int = 50) -> tuple[pd.DataFrame, dict]:
         """
         Searches all sources and returns:
         1. DataFrame of combined results.
         2. Dictionary of counts per source.
-        
-        Args:
-            query_term: Search keywords.
-            start_date: (Optional) datetime or string YYYY-MM-DD
-            end_date: (Optional) datetime or string YYYY-MM-DD
-            limit: Max results per source.
         """
         results = []
         status_log = {}
@@ -56,7 +50,8 @@ class RegulatoryService:
         ]
 
         for label, category in fda_categories:
-            hits = RegulatoryService._fetch_openfda(query_term, category, limit, date_query_fda)
+            # Increased limit to ensure we catch relevant hits
+            hits = RegulatoryService._fetch_openfda(query_term, category, limit=limit, date_filter=date_query_fda)
             status_log[label] = len(hits)
             results.extend(hits)
 
@@ -78,32 +73,41 @@ class RegulatoryService:
     @staticmethod
     def _fetch_openfda(term: str, category: str, limit: int, date_filter: str) -> list:
         """
-        Generic handler for FDA APIs.
-        NOW SEARCHES: Product Description + Reason + Recalling Firm
+        Advanced handler for FDA APIs using Cross-Field Logic.
+        Fixes False Negatives by allowing terms to be distributed across fields.
         """
         if not term.strip():
             return []
 
         url = f"{RegulatoryService.FDA_BASE}/{category}/enforcement.json"
         
-        # CLEANUP: Replace non-alphanumeric chars with spaces to avoid Lucene syntax errors
+        # CLEANUP: Replace non-alphanumeric chars with spaces
         clean_term = re.sub(r'[^\w\s]', ' ', term.strip())
         words = clean_term.split()
         
         if not words: 
             return []
             
-        # Join with " AND " to ensure all words must be present
-        joined_term = " AND ".join(words)
+        # CROSS-FIELD AND LOGIC:
+        # Instead of searching "Medtronic Pump" in one field, we ensure "Medtronic"
+        # is in (Desc OR Reason OR Firm) AND "Pump" is in (Desc OR Reason OR Firm).
+        # This catches cases where Firm="Medtronic" and Desc="Infusion Pump".
         
-        # Search in Product Description OR Reason OR Firm (Expanded Scope)
-        # Note: We group the OR clauses, then apply the AND date_filter if exists
-        search_query = (
-            f'(product_description:({joined_term}) '
-            f'OR reason_for_recall:({joined_term}) '
-            f'OR recalling_firm:({joined_term}))'
-            f'{date_filter}'
-        )
+        and_clauses = []
+        for word in words:
+            # For each word in the user's query, it must appear in at least one of these fields
+            or_clause = (
+                f'(product_description:{word} '
+                f'OR reason_for_recall:{word} '
+                f'OR recalling_firm:{word})'
+            )
+            and_clauses.append(or_clause)
+            
+        # Join the groups with AND
+        main_query = " AND ".join(and_clauses)
+        
+        # Append date filter
+        search_query = f'({main_query}){date_filter}'
         
         params = {
             'search': search_query,
@@ -113,7 +117,7 @@ class RegulatoryService:
         
         out = []
         try:
-            res = requests.get(url, params=params, timeout=10)
+            res = requests.get(url, params=params, timeout=15)
             if res.status_code == 200:
                 data = res.json()
                 if "results" in data:
@@ -148,7 +152,7 @@ class RegulatoryService:
             
         out = []
         try:
-            res = requests.get(RegulatoryService.CPSC_BASE, params=params, timeout=10)
+            res = requests.get(RegulatoryService.CPSC_BASE, params=params, timeout=15)
             if res.status_code == 200:
                 items = res.json()
                 if isinstance(items, list):

@@ -51,7 +51,7 @@ def init_session_state():
         "ai_helpers_initialized": False,
         "capa_data": {},
         "project_charter_data": {},
-        "api_key_missing": False
+        "api_key_missing": True
     }
     
     for key, value in defaults.items():
@@ -62,32 +62,46 @@ def init_session_state():
 
 def _load_api_keys():
     """
-    Loads API keys from Environment Variables or Streamlit secrets.
-    Prioritizes 'GOOGLE_API_KEY' from the environment (Standard for Python/Containers).
+    Robustly loads API keys from Environment Variables OR Streamlit secrets.
+    Prioritizes checking both sources to support local Streamlit dev and Cloud deployment.
     """
-    # 1. Check Environment Variables (Best practice for Containers/Cloud)
-    google_key = os.environ.get("GOOGLE_API_KEY")
+    found_key = None
     
-    if not google_key:
-        google_key = os.environ.get("GEMINI_API_KEY")
-        
-    if not google_key:
-        google_key = os.environ.get("API_KEY")
-
-    # 2. Fallback to Streamlit Secrets (Local Dev)
-    if not google_key:
+    # 1. Check Environment Variables (System/Container)
+    env_vars = ["GOOGLE_API_KEY", "GEMINI_API_KEY", "API_KEY"]
+    for var in env_vars:
+        if os.environ.get(var):
+            found_key = os.environ.get(var)
+            logger.info(f"API Key found in environment variable: {var}")
+            break
+            
+    # 2. Check Streamlit Secrets (Local .streamlit/secrets.toml or Cloud Secrets)
+    if not found_key:
         try:
-            google_key = st.secrets.get("GOOGLE_API_KEY")
-            if not google_key:
-                google_key = st.secrets.get("OPENAI_API_KEY") # Check legacy key name
-            if not google_key:
-                google_key = st.secrets.get("API_KEY")
-        except FileNotFoundError:
-            pass # No secrets file found
+            # Check for direct keys
+            secret_keys = ["GOOGLE_API_KEY", "GEMINI_API_KEY", "API_KEY", "OPENAI_API_KEY"]
+            for key in secret_keys:
+                if key in st.secrets:
+                    found_key = st.secrets[key]
+                    logger.info(f"API Key found in st.secrets: {key}")
+                    break
+            
+            # Check for nested keys (e.g., [google] api_key = "...")
+            if not found_key and "google" in st.secrets:
+                 if "api_key" in st.secrets["google"]:
+                     found_key = st.secrets["google"]["api_key"]
+                     logger.info("API Key found in st.secrets['google']['api_key']")
 
-    if google_key:
-        st.session_state.api_key = google_key
+        except FileNotFoundError:
+            logger.warning("No secrets.toml found.")
+        except Exception as e:
+            logger.warning(f"Error reading secrets: {e}")
+
+    # 3. Update Session State
+    if found_key:
+        st.session_state.api_key = found_key
         st.session_state.api_key_missing = False
     else:
+        st.session_state.api_key = None
         st.session_state.api_key_missing = True
-        logger.warning("No API Key found in Environment Variables or Secrets.")
+        logger.error("No API Key found in Environment or Secrets.")

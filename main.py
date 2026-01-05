@@ -12,13 +12,12 @@ sys.path.insert(0, SRC_DIR)
 
 # --- IMPORTS ---
 from src.ai_factory import AIHelperFactory
-from src.audit_logger import AuditLogger
 from src.utils import init_session_state
 from src.services.session_manager import SessionManager
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
-    page_title="ORION QMS",
+    page_title="ORION Tracker",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -43,9 +42,8 @@ if st.session_state.get('api_key') and not st.session_state.get('components_init
     
     st.session_state.data_processor = DataProcessor()
     st.session_state.doc_generator = DocumentGenerator()
-    st.session_state.audit_logger = AuditLogger()
     
-    # Initialize AI Factory
+    # Initialize AI Factory (Simplified)
     AIHelperFactory.initialize_ai_helpers(st.session_state.api_key)
     st.session_state.components_initialized = True
 
@@ -54,36 +52,17 @@ def page_dashboard():
     from src.tabs.dashboard import display_dashboard
     display_dashboard()
 
-def page_capa():
-    from src.tabs.capa import display_capa_workflow
-    display_capa_workflow()
-
 def page_recalls():
     from src.tabs.global_recalls import display_recalls_tab
     display_recalls_tab()
 
-def page_exports():
-    from src.tabs.exports import display_exports_tab
-    display_exports_tab()
-
-def page_instructions():
-    from src.tabs.instructions import display_instructions_tab
-    display_instructions_tab()
-
 # --- NAVIGATION ---
 pages = {
-    "Mission Control": [
-        st.Page(page_dashboard, title="Dashboard", icon="📊", default=True),
-        st.Page(page_exports, title="Data Exports", icon="💾"),
+    "Analytics": [
+        st.Page(page_dashboard, title="Mission Control", icon="📊", default=True),
     ],
-    "Regulatory & Compliance": [
-        st.Page(page_recalls, title="Global Recall Screen", icon="🌍"),
-    ],
-    "Quality Management": [
-        st.Page(page_capa, title="CAPA Lifecycle", icon="⚡"),
-    ],
-    "Help": [
-        st.Page(page_instructions, title="Guide", icon="📘"),
+    "Regulatory Intelligence": [
+        st.Page(page_recalls, title="Global Recall Tracker", icon="🌍"),
     ]
 }
 
@@ -91,7 +70,6 @@ pg = st.navigation(pages)
 
 # --- SIDEBAR UTILITIES ---
 with st.sidebar:
-    # Fix: Replaced use_container_width=True with width="stretch"
     st.image("https://placehold.co/200x60/0B0E14/00F3FF?text=ORION", width="stretch")
     st.header("Active Asset")
     
@@ -107,7 +85,6 @@ with st.sidebar:
     
     st.divider()
     st.subheader("💾 Session Persistence")
-    st.caption("Save your workspace to pick up later.")
     
     # Save
     if st.button("Save Session State"):

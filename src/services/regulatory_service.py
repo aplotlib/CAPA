@@ -1,3 +1,5 @@
+# src/services/regulatory_service.py
+
 import requests
 import pandas as pd
 import re
@@ -6,7 +8,8 @@ from urllib.parse import quote
 
 class RegulatoryService:
     """
-    Unified service to search global regulatory databases:
+    Unified service to search global regulatory databases with enhanced 'Deep Scan' logic.
+    Sources:
     1. FDA (Device, Drug, Food) - USA
     2. CPSC (Consumer) - USA
     3. MHRA - UK (via GOV.UK API)
@@ -19,7 +22,7 @@ class RegulatoryService:
     CANADA_BASE = "https://healthycanadians.gc.ca/recall-alert-rappel-avis/api/recent/en"
 
     @staticmethod
-    def search_all_sources(query_term: str, start_date=None, end_date=None, limit: int = 100) -> tuple[pd.DataFrame, dict]:
+    def search_all_sources(query_term: str, start_date=None, end_date=None, limit: int = 150) -> tuple[pd.DataFrame, dict]:
         """
         Searches all sources and returns:
         1. DataFrame of combined results.
@@ -46,6 +49,7 @@ class RegulatoryService:
             }
 
         # --- 1. FDA Sources (USA) ---
+        # We now query with "Deep Scan" logic (Wildcards + Cross-field)
         fda_categories = [
             ("FDA Device", "device"),
             ("FDA Drug", "drug"),
@@ -53,7 +57,7 @@ class RegulatoryService:
         ]
 
         for label, category in fda_categories:
-            hits = RegulatoryService._fetch_openfda(query_term, category, limit=limit, date_filter=date_query_fda)
+            hits = RegulatoryService._fetch_openfda_deep(query_term, category, limit=limit, date_filter=date_query_fda)
             status_log[label] = len(hits)
             results.extend(hits)
 
@@ -83,28 +87,32 @@ class RegulatoryService:
         return df, status_log
 
     @staticmethod
-    def _fetch_openfda(term: str, category: str, limit: int, date_filter: str) -> list:
-        """Advanced handler for FDA APIs using Cross-Field Logic."""
-        if not term.strip():
-            return []
+    def _fetch_openfda_deep(term: str, category: str, limit: int, date_filter: str) -> list:
+        """
+        Advanced handler for FDA APIs using Wildcards (*) and Cross-Field Logic.
+        Matches if words appear in Description OR Reason OR Firm OR Code Info.
+        """
+        if not term.strip(): return []
 
         url = f"{RegulatoryService.FDA_BASE}/{category}/enforcement.json"
         
         # CLEANUP: Replace non-alphanumeric chars with spaces
         clean_term = re.sub(r'[^\w\s]', ' ', term.strip())
         words = clean_term.split()
+        if not words: return []
         
-        if not words: 
-            return []
-        
-        # CROSS-FIELD LOGIC
+        # DEEP SCAN QUERY CONSTRUCTION
+        # Strategy: For each word, look for "word*" in key fields.
         and_clauses = []
         for word in words:
-            or_clause = (
-                f'(product_description:{word} '
-                f'OR reason_for_recall:{word} '
-                f'OR recalling_firm:{word})'
-            )
+            # Append wildcard to catch plurals/variations (e.g. "pump" -> "pumps")
+            w_wild = f"{word}*"
+            
+            # Fields to check
+            fields = ["product_description", "reason_for_recall", "recalling_firm", "code_info"]
+            
+            or_parts = [f'{field}:{w_wild}' for field in fields]
+            or_clause = f"({' OR '.join(or_parts)})"
             and_clauses.append(or_clause)
             
         main_query = " AND ".join(and_clauses)
@@ -123,29 +131,34 @@ class RegulatoryService:
                 data = res.json()
                 if "results" in data:
                     for item in data["results"]:
+                        # Construct a direct link if possible (OpenFDA doesn't always give one, so we default to search)
+                        rid = item.get("recall_number", "N/A")
+                        link = f"https://www.accessdata.fda.gov/scripts/cdrh/cfdocs/cfRES/res.cfm?id={item.get('event_id', '')}"
+                        if category != 'device':
+                             link = f"https://open.fda.gov/apis/drug/enforcement/" # Generic fallback for non-devices
+
                         out.append({
                             "Source": f"FDA {category.capitalize()}",
                             "Date": item.get("recall_initiation_date"),
                             "Product": item.get("product_description"),
                             "Reason": item.get("reason_for_recall"),
                             "Firm": item.get("recalling_firm"),
-                            "ID": item.get("recall_number"),
+                            "ID": rid,
+                            "Link": link,
                             "Status": item.get("status")
                         })
         except Exception:
-            pass
+            pass # Fail silently to keep other sources running
             
         return out
 
     @staticmethod
     def _fetch_cpsc(term: str, date_params: dict) -> list:
         """Handler for CPSC SaferProducts API."""
-        if not term.strip():
-            return []
+        if not term.strip(): return []
             
         params = {'format': 'json', 'RecallTitle': term}
-        if date_params:
-            params.update(date_params)
+        if date_params: params.update(date_params)
             
         out = []
         try:
@@ -161,22 +174,16 @@ class RegulatoryService:
                             "Reason": item.get("Description"), 
                             "Firm": "See Details", 
                             "ID": str(item.get("RecallID")),
+                            "Link": item.get("URL", "https://www.cpsc.gov/Recalls"),
                             "Status": "Public Recall"
                         })
-        except Exception:
-            pass
-            
+        except Exception: pass
         return out
 
     @staticmethod
     def _fetch_uk_mhra(term: str, limit: int) -> list:
-        """
-        Fetches alerts from the UK GOV.UK Search API filtered for MHRA.
-        """
-        if not term.strip():
-            return []
-
-        # Filter specifically for Medical Safety Alerts from MHRA
+        """Fetches alerts from the UK GOV.UK Search API."""
+        if not term.strip(): return []
         params = {
             'q': term,
             'filter_organisations': 'medicines-and-healthcare-products-regulatory-agency',
@@ -184,7 +191,6 @@ class RegulatoryService:
             'count': limit,
             'order': '-public_timestamp'
         }
-
         out = []
         try:
             res = requests.get(RegulatoryService.GOV_UK_BASE, params=params, timeout=10)
@@ -192,62 +198,48 @@ class RegulatoryService:
                 data = res.json()
                 if 'results' in data:
                     for item in data['results']:
-                        # GOV.UK returns a timestamp like "2023-10-24T09:00:00+01:00"
                         raw_date = item.get("public_timestamp", "")
                         fmt_date = raw_date.split("T")[0] if "T" in raw_date else raw_date
-                        
+                        link = f"https://www.gov.uk{item.get('link')}"
                         out.append({
                             "Source": "UK MHRA",
                             "Date": fmt_date,
                             "Product": item.get("title"),
-                            "Reason": item.get("description"), # Usually the summary
+                            "Reason": item.get("description"), 
                             "Firm": "MHRA Alert",
-                            "ID": item.get("link", "N/A"), # Use link as ID
+                            "ID": "MHRA-Link",
+                            "Link": link,
                             "Status": "Active"
                         })
-        except Exception:
-            pass
+        except Exception: pass
         return out
 
     @staticmethod
     def _fetch_canada(term: str) -> list:
-        """
-        Fetches recent recalls from Health Canada.
-        Note: The API is 'Recent', so we filter client-side for the term.
-        """
+        """Fetches recent recalls from Health Canada."""
         out = []
         try:
-            # This endpoint returns a curated list of recent recalls (JSON)
             res = requests.get(RegulatoryService.CANADA_BASE, timeout=10)
             if res.status_code == 200:
                 data = res.json()
-                # The API structure varies, usually keys like 'results' or direct list
-                # We iterate and filter simply
                 items = data.get('results', []) if isinstance(data, dict) else data
-                
                 term_lower = term.lower()
-                
                 for item in items:
                     title = item.get('title', '').lower()
                     category = item.get('category', '').lower()
-                    
-                    # Filter: Match query AND ensure it's a health/device product
                     if term_lower in title and any(x in category for x in ['health', 'medical', 'device', 'drug']):
-                        
-                        # Date handling (usually epoch or string)
                         date_val = item.get('date_published', '')
                         if str(date_val).isdigit():
                              date_val = datetime.fromtimestamp(int(date_val)).strftime('%Y-%m-%d')
-                        
                         out.append({
                             "Source": "Health Canada",
                             "Date": date_val,
                             "Product": item.get('title'),
                             "Reason": "See Health Canada Link",
                             "Firm": "Health Canada",
-                            "ID": item.get('url', 'N/A'),
+                            "ID": item.get('recall_id', 'N/A'),
+                            "Link": item.get('url'),
                             "Status": "Public"
                         })
-        except Exception:
-            pass
+        except Exception: pass
         return out

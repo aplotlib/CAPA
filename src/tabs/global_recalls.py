@@ -38,7 +38,8 @@ def display_recalls_tab():
                     report = ai.screen_recalls(device_query)
                     st.session_state.recall_report = report
 
-        if 'recall_report' in st.session_state:
+        # Fix: Check if recall_report is not None before displaying
+        if st.session_state.get('recall_report'):
             st.markdown("### 📋 Screening Report")
             st.markdown(st.session_state.recall_report)
             

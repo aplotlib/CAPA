@@ -132,6 +132,33 @@ class AIService(AIServiceBase):
         """
         return self._generate_json(user_prompt, system_prompt)
 
+    def assess_relevance_json(self, my_context: str, record_text: str) -> Dict[str, str]:
+        """
+        Analyzes a recall record against user's product context.
+        """
+        system = "You are a Regulatory Safety Officer. Analyze the recall for relevance to the user's product. Return JSON."
+        prompt = f"""
+        USER CONTEXT (My Product):
+        {my_context}
+        
+        RECALL RECORD:
+        {record_text}
+        
+        TASK:
+        1. Compare 'My Firm' and 'My Model' against the Recall Record.
+        2. If they match, Risk is HIGH.
+        3. If the Recall is for a competitor but same device type, Risk is MEDIUM (Market surveillance).
+        4. If unrelated, Risk is LOW.
+        5. If the record is not in English, TRANSLATE the key issue in the analysis.
+        
+        Return JSON strictly:
+        {{
+            "risk": "High" | "Medium" | "Low",
+            "analysis": "Short explanation. Mention if translation was applied."
+        }}
+        """
+        return self._generate_json(prompt, system)
+
     def analyze_meeting_transcript(self, transcript_text: str) -> Dict[str, str]:
         system_prompt = "You are a QA Expert. Extract CAPA details (issue, root cause, actions) from notes. Return JSON."
         user_prompt = f"Analyze this transcript and return a JSON object:\n{transcript_text}"

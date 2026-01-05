@@ -69,7 +69,7 @@ def display_recalls_tab():
                         "Recall #": st.column_config.TextColumn("ID", width="small"),
                     },
                     hide_index=True,
-                    width=1000  # Deprecated in some versions but good for older streamlit, use use_container_width in newer
+                    width=1000 
                 )
                 
                 # CSV Download

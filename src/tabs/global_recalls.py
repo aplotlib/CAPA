@@ -1,15 +1,23 @@
+# src/tabs/global_recalls.py
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 from src.ai_services import get_ai_service
 from src.services.regulatory_service import RegulatoryService
 
+# --- CACHED SEARCH WRAPPER ---
+@st.cache_data(ttl=3600, show_spinner=False)
+def search_wrapper(term, start, end):
+    return RegulatoryService.search_all_sources(term, start, end, limit=200)
+
 def display_recalls_tab():
-    st.header("🌍 Ultimate Regulatory Tracker")
-    st.caption("Advanced AI-powered surveillance of FDA (USA), UK MHRA, Health Canada, and CPSC databases.")
+    st.header("🌍 Regulatory Intelligence & Recall Tracker")
+    st.caption("Deep-scan surveillance of FDA (USA), UK MHRA, Health Canada, and CPSC databases.")
 
     ai = get_ai_service()
     
+    # Initialize State
     if 'recall_hits' not in st.session_state:
         st.session_state.recall_hits = pd.DataFrame()
     if 'recall_log' not in st.session_state:
@@ -49,103 +57,94 @@ def display_recalls_tab():
                     st.session_state.recall_hits = pd.DataFrame()
                     st.session_state.recall_log = {}
                     
-                    run_search(p_name, p_desc, start_date, end_date, auto_expand, ai)
+                    run_search_logic(p_name, p_desc, start_date, end_date, auto_expand, ai)
                     st.rerun()
-
-    # --- INTERNATIONAL MANUAL SEARCH LINKS ---
-    # Since EU and LATAM often lack open JSON APIs, we provide direct deep-links.
-    if p_name:
-        with st.expander("🔗 Direct Links to Restricted/Manual Databases (EU, LATAM, AUS)", expanded=False):
-            st.info("Some regions (EU, Brazil, Mexico) do not provide open API access. Click below to search their official portals directly.")
-            l_c1, l_c2, l_c3 = st.columns(3)
             
-            # EU EUDAMED
-            eudamed_url = f"https://ec.europa.eu/tools/eudamed/#/screen/search-device?keywords={p_name}"
-            l_c1.markdown(f"**🇪🇺 EU EUDAMED**\n[Search '{p_name}']({eudamed_url})")
-            
-            # Brazil ANVISA
-            anvisa_url = "https://consultas.anvisa.gov.br/#/tecnovigilancia/alerta-sanitario/"
-            l_c2.markdown(f"**🇧🇷 Brazil ANVISA**\n[Go to Portal (Manual Search)]({anvisa_url})")
-            
-            # Australia TGA (SARA)
-            tga_url = f"https://apps.tga.gov.au/Prod/SARA/kui/search?q={p_name}"
-            l_c3.markdown(f"**🇦🇺 Australia TGA**\n[Search '{p_name}']({tga_url})")
-
-    # --- SEARCH STATUS BOARD ---
-    if st.session_state.recall_log:
-        st.write("### 📡 Surveillance Status")
-        # Updated columns to include new sources
-        cols = st.columns(6)
-        log = st.session_state.recall_log
-        
-        def show_metric(col, label, key):
-            count = log.get(key, 0)
-            with col:
-                if count > 0:
-                    st.metric(label, f"{count}", delta="Alert", delta_color="inverse")
-                else:
-                    st.metric(label, "0", delta="Clear", delta_color="off")
-
-        show_metric(cols[0], "FDA Devices", "FDA Device")
-        show_metric(cols[1], "FDA Drugs", "FDA Drug")
-        show_metric(cols[2], "FDA Food", "FDA Food")
-        show_metric(cols[3], "CPSC", "CPSC")
-        show_metric(cols[4], "UK MHRA", "UK MHRA")
-        show_metric(cols[5], "Canada", "Health Canada")
-        st.divider()
+            # GOOGLE VERIFICATION LINK
+            if p_name:
+                google_url = f"https://www.google.com/search?q={p_name.replace(' ', '+')}+recall+FDA+MHRA+safety+notice"
+                st.link_button("🔍 Verify on Google", google_url, use_container_width=True)
 
     # --- RESULTS LIST ---
     if not st.session_state.recall_hits.empty:
         df = st.session_state.recall_hits
+        st.divider()
         st.subheader(f"Detailed Findings ({len(df)})")
         
-        tab_list, tab_raw = st.tabs(["⚡ Smart View", "📋 Raw Data & Export"])
+        # Display Metrics
+        cols = st.columns(6)
+        log = st.session_state.recall_log
+        keys = ["FDA Device", "FDA Drug", "FDA Food", "CPSC", "UK MHRA", "Health Canada"]
+        for i, key in enumerate(keys):
+            count = log.get(key, 0)
+            cols[i].metric(key, count, delta="Alert" if count > 0 else None, delta_color="inverse")
+
+        # Tabs for View
+        tab_list, tab_table = st.tabs(["⚡ Smart View", "📊 Data Table"])
         
         with tab_list:
-            st.info("Showing most recent alerts first.")
-            
             for index, row in df.iterrows():
-                # Dynamic Icon based on Source
                 src = row['Source']
-                if "Drug" in src: icon = "💊"
-                elif "Device" in src: icon = "🛠️"
-                elif "Food" in src: icon = "🍏"
-                elif "UK" in src: icon = "🇬🇧"
-                elif "Canada" in src: icon = "🇨🇦"
-                else: icon = "🧸"
+                icon = "💊" if "Drug" in src else "🛠️" if "Device" in src else "🇬🇧" if "UK" in src else "⚠️"
                 
-                title_str = str(row['Product'])[:90] if row['Product'] else "No Description"
-                
-                with st.expander(f"{icon} **{row['Date']}** | {src} | {title_str}..."):
+                with st.expander(f"{icon} **{row['Date']}** | {src} | {row['Product'][:80]}..."):
                     c1, c2 = st.columns([3, 1])
                     with c1:
                         st.markdown(f"**Product:** {row['Product']}")
                         st.markdown(f"**Reason:** {row['Reason']}")
                         st.markdown(f"**Firm:** {row['Firm']}")
+                        if row.get('Link'):
+                             st.markdown(f"👉 [**View Official Source Record**]({row['Link']})")
                     with c2:
-                        st.markdown(f"**ID:** {row['ID']}")
+                        st.caption(f"ID: {row['ID']}")
                         st.caption(f"Status: {row['Status']}")
-                        # If URL is in ID (UK/Canada), show link
-                        if "http" in str(row['ID']):
-                             st.markdown(f"[View Source]({row['ID']})")
 
-        with tab_raw:
-            c_ex1, c_ex2 = st.columns([1, 4])
-            with c_ex1:
-                csv = df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Download CSV",
-                    data=csv,
-                    file_name="regulatory_search_results.csv",
-                    mime="text/csv",
-                    type="primary"
-                )
-            st.dataframe(df, use_container_width=True)
-    
+        with tab_table:
+            st.dataframe(
+                df, 
+                column_config={
+                    "Link": st.column_config.LinkColumn("Source Link", display_text="Open Record"),
+                    "Date": st.column_config.DateColumn("Date"),
+                },
+                use_container_width=True
+            )
+
+        # --- EXPORT SECTION ---
+        st.divider()
+        st.subheader("📤 Export Regulatory Report")
+        c_ex1, c_ex2 = st.columns(2)
+        with c_ex1:
+            # Generate DOCX
+            if st.button("📄 Generate Formal Regulatory Report (.docx)", width="stretch", type="primary"):
+                with st.spinner("Generating document..."):
+                    doc_buffer = st.session_state.doc_generator.generate_regulatory_report_docx(
+                        df, p_name, log
+                    )
+                    st.download_button(
+                        "Download DOCX Report",
+                        data=doc_buffer,
+                        file_name=f"Regulatory_Report_{p_name}_{datetime.today().date()}.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        width="stretch"
+                    )
+
+        with c_ex2:
+            # CSV Download
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📊 Download Raw CSV",
+                data=csv,
+                file_name=f"recalls_raw_{p_name}.csv",
+                mime="text/csv",
+                width="stretch"
+            )
+            
     elif st.session_state.recall_log:
         st.success("Search complete. No recalls found matching criteria.")
+        if p_name:
+             st.info("Tip: Try a broader search term or verify on Google using the button above.")
 
-def run_search(name, desc, start_date, end_date, auto_expand, ai):
+def run_search_logic(name, desc, start_date, end_date, auto_expand, ai):
     """Orchestrates the search logic."""
     search_terms = [name]
     
@@ -157,36 +156,29 @@ def run_search(name, desc, start_date, end_date, auto_expand, ai):
                 if keywords:
                     st.toast(f"AI added terms: {', '.join(keywords)}")
                     search_terms.extend(keywords)
-        except Exception:
-            pass 
+        except Exception: pass 
     
     search_terms = list(set([t for t in search_terms if t and t.strip()]))
-    
     all_results = pd.DataFrame()
-    # Initialize combined log with ALL potential keys
-    combined_log = {
-        "FDA Device": 0, "FDA Drug": 0, "FDA Food": 0, "CPSC": 0, 
-        "UK MHRA": 0, "Health Canada": 0
-    }
+    combined_log = {}
     
-    progress_text = "Scanning databases..."
-    my_bar = st.progress(0, text=progress_text)
+    progress_bar = st.progress(0, text="Initializing scan...")
     
     for i, term in enumerate(search_terms):
-        my_bar.progress((i + 1) / len(search_terms), text=f"Scanning sources for '{term}'...")
+        progress_bar.progress((i + 1) / len(search_terms), text=f"Scanning global databases for '{term}'...")
         
-        # INCREASED LIMIT TO 100
-        hits, log = RegulatoryService.search_all_sources(term, start_date, end_date, limit=100)
+        # Call the cached wrapper
+        hits, log = search_wrapper(term, start_date, end_date)
         
         all_results = pd.concat([all_results, hits])
-        
         for k, v in log.items():
             combined_log[k] = combined_log.get(k, 0) + v
         
-    my_bar.empty()
+    progress_bar.empty()
     
     if not all_results.empty:
         all_results.fillna("Unknown", inplace=True)
+        # Drop duplicates based on ID to avoid showing same recall for multiple synonyms
         all_results.drop_duplicates(subset=['ID'], inplace=True)
         if 'Date' in all_results.columns:
              all_results = all_results.sort_values(by='Date', ascending=False)

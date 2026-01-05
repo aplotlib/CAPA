@@ -37,10 +37,13 @@ def display_recalls_tab():
                 if not p_name:
                     st.error("Enter a product name.")
                 else:
+                    # Clear previous results before new scan
+                    st.session_state.recall_hits = pd.DataFrame()
+                    st.session_state.recall_log = {}
                     run_search(p_name, p_desc, auto_expand, ai)
+                    st.rerun()
 
     # --- SEARCH STATUS BOARD ---
-    # This shows the user exactly what happened per agency
     if st.session_state.recall_log:
         st.write("### 📡 Database Status")
         cols = st.columns(4)
@@ -71,7 +74,8 @@ def display_recalls_tab():
         with tab_list:
             st.info("Review findings. Use buttons to draft CAPAs or update Risk Files.")
             
-            for index, row in df.head(25).iterrows():
+            # Limit display to top 50 to prevent lag
+            for index, row in df.head(50).iterrows():
                 # Color code header based on source
                 icon = "💊" if "Drug" in row['Source'] else "🛠️" if "Device" in row['Source'] else "🧸"
                 
@@ -83,9 +87,9 @@ def display_recalls_tab():
                         st.caption(f"ID: {row['ID']}")
                     
                     with c2:
-                        if st.button("📝 Draft CAPA", key=f"capa_{index}"):
+                        if st.button("📝 Draft CAPA", key=f"capa_{row['ID']}_{index}"):
                             create_capa_draft(row)
-                        if st.button("⚠️ Add to FMEA", key=f"fmea_{index}"):
+                        if st.button("⚠️ Add to FMEA", key=f"fmea_{row['ID']}_{index}"):
                             add_to_fmea(row)
 
         with tab_raw:
@@ -94,21 +98,24 @@ def display_recalls_tab():
             st.download_button("Download CSV", csv, "regulatory_scan.csv", "text/csv")
     
     elif st.session_state.recall_log:
-        st.success("No recalls found across any connected database.")
+        st.success("Search complete. No recalls found across any connected database.")
 
 def run_search(name, desc, auto_expand, ai):
     """Orchestrates the search logic."""
     search_terms = [name]
     
     if auto_expand and ai:
-        with st.spinner("AI is generating regulatory search terms..."):
-            keywords = ai.generate_search_keywords(name, desc)
-            if keywords:
-                st.toast(f"AI added terms: {', '.join(keywords)}")
-                search_terms.extend(keywords)
+        try:
+            with st.spinner("AI is generating regulatory search terms..."):
+                keywords = ai.generate_search_keywords(name, desc)
+                if keywords:
+                    st.toast(f"AI added terms: {', '.join(keywords)}")
+                    search_terms.extend(keywords)
+        except Exception as e:
+            st.warning(f"AI expansion failed: {e}. Proceeding with base term.")
     
-    # Clean duplicates
-    search_terms = list(set(search_terms))
+    # Clean duplicates and empty strings
+    search_terms = list(set([t for t in search_terms if t and t.strip()]))
     
     all_results = pd.DataFrame()
     combined_log = {"FDA Device": 0, "FDA Drug": 0, "FDA Food": 0, "CPSC": 0}
@@ -120,7 +127,7 @@ def run_search(name, desc, auto_expand, ai):
         my_bar.progress((i + 1) / len(search_terms), text=f"Scanning sources for '{term}'...")
         
         # Returns (DataFrame, Dict)
-        hits, log = RegulatoryService.search_all_sources(term, limit=5)
+        hits, log = RegulatoryService.search_all_sources(term, limit=10)
         
         all_results = pd.concat([all_results, hits])
         
@@ -130,8 +137,10 @@ def run_search(name, desc, auto_expand, ai):
         
     my_bar.empty()
     
-    # Save to session state
+    # Clean duplicates based on ID
     if not all_results.empty:
+        # Some sources might not have ID, fillna to avoid errors
+        all_results['ID'] = all_results['ID'].fillna('Unknown')
         all_results.drop_duplicates(subset=['ID'], inplace=True)
     
     st.session_state.recall_hits = all_results
@@ -148,7 +157,7 @@ def create_capa_draft(row):
 
 def add_to_fmea(row):
     new_mode = {
-        "Potential Failure Mode": f"Recall Event: {row['Reason'][:100]}...",
+        "Potential Failure Mode": f"Recall Event: {str(row['Reason'])[:100]}...",
         "Potential Effect(s)": "Patient Harm / Regulatory Action",
         "Potential Cause(s)": f"Design/Mfg issue identified in {row['Source']} Recall #{row['ID']}",
         "Severity": 8,
@@ -159,6 +168,7 @@ def add_to_fmea(row):
     if 'fmea_rows' not in st.session_state:
         st.session_state.fmea_rows = []
     st.session_state.fmea_rows.append(new_mode)
-    if 'fmea_data' in st.session_state:
-        st.session_state.fmea_data = pd.DataFrame(st.session_state.fmea_rows)
+    
+    # Sync with dataframe immediately
+    st.session_state.fmea_data = pd.DataFrame(st.session_state.fmea_rows)
     st.sidebar.success("Added to FMEA! Go to 'Risk' tab to review.")

@@ -17,8 +17,8 @@ class AICAPAHelper:
         self.client = None
         # Switch to 1.5-flash for better stability and quota handling
         self.fast_model = "gemini-1.5-flash" 
-        self.reasoning_model = "gemini-2.0-flash-thinking-exp"
-
+        self.reasoning_model = "gemini-1.5-flash" # Change this from "gemini-2.0-flash-thinking-exp"
+# ...
         if api_key:
             try:
                 self.client = genai.Client(api_key=api_key)

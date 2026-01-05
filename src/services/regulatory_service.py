@@ -3,13 +3,13 @@ import pandas as pd
 import re
 from datetime import datetime
 from urllib.parse import quote
-# --- IMPORTS ---
 from src.services.adverse_event_service import AdverseEventService
 from src.services.media_service import MediaMonitoringService
 
 class RegulatoryService:
     """
-    Unified service to search global regulatory databases, adverse events, and media.
+    Unified service to search global regulatory databases with enhanced
+    fallback logic and robust error handling.
     """
     
     FDA_BASE = "https://api.fda.gov"
@@ -36,105 +36,119 @@ class RegulatoryService:
             date_query_fda = f' AND recall_initiation_date:[{s_str} TO {e_str}]'
             date_params_cpsc = {'RecallDateStart': s_str, 'RecallDateEnd': e_str}
 
-        # --- 1. FDA Recalls ---
-        fda_categories = [("FDA Device", "device"), ("FDA Drug", "drug"), ("FDA Food", "food")]
+        # --- 1. FDA Recalls (Device, Drug, Food) ---
+        # We try a specific search first, then a broad one if needed
+        fda_categories = [("FDA Device", "device"), ("FDA Drug", "drug")]
         for label, category in fda_categories:
-            hits = RegulatoryService._fetch_openfda_deep(query_term, category, limit, date_query_fda)
+            hits = RegulatoryService._fetch_openfda_smart(query_term, category, limit, date_query_fda)
             status_log[label] = len(hits)
             results.extend(hits)
 
-        # --- 2. CPSC ---
-        cpsc_hits = RegulatoryService._fetch_cpsc(query_term, date_params_cpsc)
-        status_log["CPSC"] = len(cpsc_hits)
-        results.extend(cpsc_hits)
-
-        # --- 3. UK MHRA ---
-        uk_hits = RegulatoryService._fetch_uk_mhra(query_term, limit)
-        status_log["UK MHRA"] = len(uk_hits)
-        results.extend(uk_hits)
-
-        # --- 4. Health Canada ---
-        ca_hits = RegulatoryService._fetch_canada(query_term)
-        status_log["Health Canada"] = len(ca_hits)
-        results.extend(ca_hits)
-
-        # --- 5. FDA MAUDE (Adverse Events) ---
-        # Limit to 30 to prevent noise
-        maude_hits = maude_service.search_events(query_term, start_date, end_date, limit=30)
+        # --- 2. FDA MAUDE (Adverse Events) ---
+        maude_hits = maude_service.search_events(query_term, start_date, end_date, limit=50)
         status_log["FDA MAUDE"] = len(maude_hits)
         results.extend(maude_hits)
 
-        # --- 6. Media / News ---
+        # --- 3. News Media (Enhanced) ---
         media_hits = media_service.search_media(query_term, limit=20)
         status_log["Media"] = len(media_hits)
         results.extend(media_hits)
 
+        # --- 4. CPSC (Consumer Products) ---
+        cpsc_hits = RegulatoryService._fetch_cpsc(query_term, date_params_cpsc)
+        status_log["CPSC"] = len(cpsc_hits)
+        results.extend(cpsc_hits)
+
+        # --- 5. UK MHRA ---
+        uk_hits = RegulatoryService._fetch_uk_mhra(query_term, limit)
+        status_log["UK MHRA"] = len(uk_hits)
+        results.extend(uk_hits)
+
+        # --- 6. Health Canada ---
+        ca_hits = RegulatoryService._fetch_canada(query_term)
+        status_log["Health Canada"] = len(ca_hits)
+        results.extend(ca_hits)
+
         # --- Aggregate ---
         df = pd.DataFrame(results)
-        if not df.empty and 'Date' in df.columns:
-            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-            df = df.sort_values(by='Date', ascending=False)
-            df['Date'] = df['Date'].dt.strftime('%Y-%m-%d')
+        if not df.empty:
+            # Normalize Date
+            if 'Date' in df.columns:
+                df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+                df = df.sort_values(by='Date', ascending=False)
+                df['Date'] = df['Date'].dt.strftime('%Y-%m-%d')
+            
+            # Ensure critical columns exist
+            for col in ['Product', 'Firm', 'Reason', 'Source', 'Link']:
+                if col not in df.columns:
+                    df[col] = "N/A"
             
         return df, status_log
 
-    # ... [Keep existing _fetch methods (_fetch_openfda_deep, _fetch_cpsc, etc.) unchanged] ...
-    # (Copy the existing _fetch methods from the uploaded file here to ensure the class is complete)
     @staticmethod
-    def _fetch_openfda_deep(term: str, category: str, limit: int, date_filter: str) -> list:
+    def _fetch_openfda_smart(term: str, category: str, limit: int, date_filter: str) -> list:
+        """
+        Smart search that attempts exact matching first, then falls back to broad matching.
+        """
         if not term.strip(): return []
         url = f"{RegulatoryService.FDA_BASE}/{category}/enforcement.json"
-        clean_term = re.sub(r'[^\w\s]', ' ', term.strip())
-        words = clean_term.split()
-        if not words: return []
-        and_clauses = []
-        for word in words:
-            w_wild = f"{word}*"
-            fields = ["product_description", "reason_for_recall", "recalling_firm", "code_info"]
-            or_parts = [f'{field}:{w_wild}' for field in fields]
-            and_clauses.append(f"({' OR '.join(or_parts)})")
-        main_query = " AND ".join(and_clauses)
-        search_query = f'({main_query}){date_filter}'
+        
+        # Strategy A: Broad Description Search
+        # Searches product_description OR reason_for_recall
+        clean_term = term.strip().replace('"', '')
+        search_query = f'(product_description:"{clean_term}"+OR+reason_for_recall:"{clean_term}"+OR+recalling_firm:"{clean_term}"){date_filter}'
+        
         params = {'search': search_query, 'limit': limit, 'sort': 'recall_initiation_date:desc'}
-        out = []
+        
         try:
             res = requests.get(url, params=params, timeout=10)
-            if res.status_code == 200:
-                data = res.json()
-                if "results" in data:
-                    for item in data["results"]:
-                        rid = item.get("recall_number", "N/A")
-                        event_id = item.get("event_id")
-                        if category == 'device' and event_id:
-                            link = f"https://www.accessdata.fda.gov/scripts/cdrh/cfdocs/cfRES/res.cfm?id={event_id}"
-                        elif category == 'drug' and rid != "N/A":
-                             link = f"https://www.accessdata.fda.gov/scripts/cder/daf/index.cfm?event=BasicSearch.process"
-                        else:
-                            q_safe = quote(item.get("product_description", "")[:50])
-                            link = f"https://www.google.com/search?q=FDA+Recall+{rid}+{q_safe}"
-                        out.append({
-                            "Source": f"FDA {category.capitalize()}",
-                            "Date": item.get("recall_initiation_date"),
-                            "Product": item.get("product_description"),
-                            "Description": item.get("product_description"),
-                            "Reason": item.get("reason_for_recall"),
-                            "Firm": item.get("recalling_firm"),
-                            "Model Info": item.get("code_info", "N/A"),
-                            "ID": rid,
-                            "Link": link,
-                            "Status": item.get("status")
-                        })
-        except Exception: pass
-        return out
+            data = res.json()
+            
+            # Fallback Strategy B: If no results, try splitting words (Fuzzy-ish)
+            if "error" in data or not data.get("results"):
+                words = clean_term.split()
+                if len(words) > 1:
+                    # Construct AND query for words: (product_description:word1+AND+product_description:word2)
+                    # Note: We apply wildcards to be more effective
+                    desc_parts = [f'product_description:{w}*' for w in words]
+                    combined_desc = "+AND+".join(desc_parts)
+                    search_query = f'({combined_desc}){date_filter}'
+                    params['search'] = search_query
+                    res = requests.get(url, params=params, timeout=10)
+                    data = res.json()
+
+            if "results" in data:
+                out = []
+                for item in data["results"]:
+                    rid = item.get("recall_number", "N/A")
+                    out.append({
+                        "Source": f"FDA {category.capitalize()}",
+                        "Date": item.get("recall_initiation_date"),
+                        "Product": item.get("product_description"),
+                        "Description": item.get("product_description"),
+                        "Reason": item.get("reason_for_recall"),
+                        "Firm": item.get("recalling_firm"),
+                        "Model Info": item.get("code_info", "N/A"),
+                        "ID": rid,
+                        "Link": f"https://www.accessdata.fda.gov/scripts/cdrh/cfdocs/cfRES/res.cfm?id={item.get('event_id', '')}",
+                        "Status": item.get("status")
+                    })
+                return out
+                
+        except Exception as e:
+            print(f"FDA Search Error ({category}): {e}")
+            
+        return []
 
     @staticmethod
     def _fetch_cpsc(term: str, date_params: dict) -> list:
+        # CPSC API is simple but effective
         if not term.strip(): return []
         params = {'format': 'json', 'RecallTitle': term}
         if date_params: params.update(date_params)
         out = []
         try:
-            res = requests.get(RegulatoryService.CPSC_BASE, params=params, timeout=10)
+            res = requests.get(RegulatoryService.CPSC_BASE, params=params, timeout=5)
             if res.status_code == 200:
                 items = res.json()
                 if isinstance(items, list):
@@ -144,9 +158,9 @@ class RegulatoryService:
                             "Date": item.get("RecallDate"),
                             "Product": item.get("Title"),
                             "Description": item.get("Title"),
-                            "Reason": item.get("Description"), 
+                            "Reason": item.get("Description", "See Link"), 
                             "Firm": "See Details", 
-                            "Model Info": "See Link",
+                            "Model Info": "N/A",
                             "ID": str(item.get("RecallID")),
                             "Link": item.get("URL", "https://www.cpsc.gov/Recalls"),
                             "Status": "Public"
@@ -157,27 +171,26 @@ class RegulatoryService:
     @staticmethod
     def _fetch_uk_mhra(term: str, limit: int) -> list:
         if not term.strip(): return []
-        params = {'q': term, 'filter_organisations': 'medicines-and-healthcare-products-regulatory-agency', 'filter_format': 'medical_safety_alert', 'count': limit, 'order': '-public_timestamp'}
+        params = {'q': term, 'filter_organisations': 'medicines-and-healthcare-products-regulatory-agency', 'count': limit, 'order': '-public_timestamp'}
         out = []
         try:
-            res = requests.get(RegulatoryService.GOV_UK_BASE, params=params, timeout=10)
+            res = requests.get(RegulatoryService.GOV_UK_BASE, params=params, timeout=5)
             if res.status_code == 200:
                 data = res.json()
                 if 'results' in data:
                     for item in data['results']:
                         raw_date = item.get("public_timestamp", "")
                         fmt_date = raw_date.split("T")[0] if "T" in raw_date else raw_date
-                        link = f"https://www.gov.uk{item.get('link')}"
                         out.append({
                             "Source": "UK MHRA",
                             "Date": fmt_date,
                             "Product": item.get("title"),
                             "Description": item.get("description"),
                             "Reason": item.get("description"), 
-                            "Firm": "MHRA Alert",
+                            "Firm": "MHRA",
                             "Model Info": "N/A",
-                            "ID": "MHRA-Link",
-                            "Link": link,
+                            "ID": "MHRA-Alert",
+                            "Link": f"https://www.gov.uk{item.get('link')}",
                             "Status": "Active"
                         })
         except Exception: pass
@@ -185,27 +198,36 @@ class RegulatoryService:
 
     @staticmethod
     def _fetch_canada(term: str) -> list:
+        # Improved filtering for Canada
         out = []
         try:
-            res = requests.get(RegulatoryService.CANADA_BASE, timeout=10)
+            res = requests.get(RegulatoryService.CANADA_BASE, timeout=5)
             if res.status_code == 200:
                 data = res.json()
                 items = data.get('results', []) if isinstance(data, dict) else data
-                term_lower = term.lower()
+                
+                term_parts = term.lower().split()
+                
                 for item in items:
                     title = item.get('title', '').lower()
-                    category = item.get('category', '').lower()
-                    if term_lower in title and any(x in category for x in ['health', 'medical', 'device', 'drug']):
+                    cat = item.get('category', '').lower()
+                    
+                    # Fuzzy match: If ANY major word from search term is in title
+                    if any(t in title for t in term_parts) and any(x in cat for x in ['health', 'medical', 'device']):
+                        
                         date_val = item.get('date_published', '')
-                        if str(date_val).isdigit(): date_val = datetime.fromtimestamp(int(date_val)).strftime('%Y-%m-%d')
+                        if str(date_val).isdigit(): 
+                            date_val = datetime.fromtimestamp(int(date_val)).strftime('%Y-%m-%d')
+                            
                         link = item.get('url', 'https://recalls-rappels.canada.ca/en')
                         if link.startswith('/'): link = f"https://recalls-rappels.canada.ca{link}"
+                        
                         out.append({
                             "Source": "Health Canada",
                             "Date": date_val,
                             "Product": item.get('title'),
                             "Description": item.get('title'),
-                            "Reason": "See Link for Full Text",
+                            "Reason": "See Link",
                             "Firm": "Health Canada",
                             "Model Info": "N/A",
                             "ID": item.get('recall_id', 'N/A'),

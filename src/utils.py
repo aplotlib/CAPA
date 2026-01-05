@@ -1,148 +1,205 @@
+# src/services/agent_service.py
 import streamlit as st
-import time
-import random
-import functools
-import logging
-import os
+import pandas as pd
+from datetime import datetime, timedelta
+from src.services.regulatory_service import RegulatoryService
+from src.ai_services import get_ai_service
+from src.utils import calculate_fuzzy_similarity
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-def retry_with_backoff(retries=3, backoff_in_seconds=1):
-    """Decorator to retry a function with exponential backoff."""
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            x = 0
-            while True:
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    if x == retries:
-                        logger.error(f"Function {func.__name__} failed after {retries} retries. Error: {e}")
-                        raise e
-                    sleep_time = (backoff_in_seconds * 2 ** x + random.uniform(0, 1))
-                    logger.warning(f"Error in {func.__name__}: {e}. Retrying in {sleep_time:.2f}s...")
-                    time.sleep(sleep_time)
-                    x += 1
-        return wrapper
-    return decorator
-
-def init_session_state():
-    """Initialize basic data structures in session state."""
-    defaults = {
-        "logged_in": False,
-        "api_key": None,
-        "provider": "openai", # Default to openai, will update in _load_api_keys
-        "product_info": {},
-        "capa_records": [],
-        "components_initialized": False,
-        "capa_entry_draft": {},
-        "recall_report": None,
-        "analysis_results": None,
-        "fmea_rows": [],
-        "ai_helpers_initialized": False,
-        "capa_data": {},
-        "project_charter_data": {},
-        "api_key_missing": True,
-        "audit_log": []
-    }
+class RecallResponseAgent:
+    """
+    An autonomous agent that monitors regulatory databases, adverse events, and media.
+    Identifies risks and proactively drafts quality documentation.
+    """
     
-    for key, value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
+    def __init__(self):
+        self.ai = get_ai_service()
+        self.regulatory = RegulatoryService()
 
-    _load_api_keys()
-
-def _load_api_keys():
-    """Robustly loads API keys and determines the provider."""
-    found_key = None
-    provider = "openai" # Default
-
-    # Helper to check sources
-    def check_key(name):
-        # 1. Env Var
-        if os.environ.get(name): return os.environ.get(name)
-        # 2. Streamlit Secrets
-        if name in st.secrets: return st.secrets[name]
-        return None
-
-    # 1. Try OpenAI First
-    openai_key = check_key("OPENAI_API_KEY")
-    if openai_key:
-        found_key = openai_key
-        provider = "openai"
-    
-    # 2. Try Google/Gemini Second (if no OpenAI key)
-    if not found_key:
-        google_key = check_key("GOOGLE_API_KEY") or check_key("GEMINI_API_KEY")
-        if google_key:
-            found_key = google_key
-            provider = "google"
+    def run_batch_mission(self, df_products, start_date, end_date, progress_callback=None):
+        """
+        Runs the surveillance mission on a batch of products from an uploaded file.
+        Uses fuzzy matching to filter results.
+        """
+        batch_results = []
+        total_products = len(df_products)
+        
+        for idx, row in df_products.iterrows():
+            sku = str(row.get('SKU', 'N/A'))
+            product_name = str(row.get('Product Name', 'Unknown'))
             
-    # 3. Generic Fallback
-    if not found_key:
-        generic_key = check_key("API_KEY")
-        if generic_key:
-            found_key = generic_key
-            # Guess provider based on key format if possible, otherwise default to openai
-            if generic_key.startswith("AIza"): 
-                provider = "google"
-            else:
-                provider = "openai"
+            if progress_callback:
+                progress_callback((idx + 1) / total_products, f"Scanning SKU {sku}: {product_name}...")
 
-    # 4. Update Session State
-    if found_key:
-        st.session_state.api_key = found_key
-        st.session_state.provider = provider
-        st.session_state.api_key_missing = False
-    else:
-        st.session_state.api_key_missing = True
+            # 1. Search Logic
+            # We search for the Product Name.
+            # We enforce the date range selected by the user.
+            results_df, _ = self.regulatory.search_all_sources(product_name, start_date, end_date, limit=20)
+            
+            if results_df.empty:
+                batch_results.append({
+                    "SKU": sku, "Product Name": product_name, "Date": "N/A", "Source": "N/A", 
+                    "Issue Description": "No records found", "Risk Level": "Low", "Match Score": 0, "Link": "N/A"
+                })
+                continue
+            
+            # 2. Fuzzy Match & Filter
+            # Iterate through search results and check if they ACTUALLY match the input product
+            # This prevents "Infusion Pump" search finding "Pool Pump".
+            for _, res in results_df.iterrows():
+                title = res.get('Product', '') or res.get('Description', '')
+                
+                # Calculate Similarity
+                score = calculate_fuzzy_similarity(product_name, title)
+                
+                # Thresholds:
+                # - Match Score > 60: Likely relevant
+                # - Risk Level: Determine based on Source (Class I Recall = High)
+                
+                risk = "Low"
+                if "Class I" in str(res.get('Reason', '')): risk = "High"
+                elif "Death" in str(res.get('Reason', '')): risk = "High"
+                elif "Class II" in str(res.get('Reason', '')): risk = "Medium"
+                
+                # If score is very low, it's likely noise, unless AI overrides (skipped here for speed)
+                if score > 45: 
+                    batch_results.append({
+                        "SKU": sku,
+                        "Product Name": product_name,
+                        "Date": res['Date'],
+                        "Source": res['Source'],
+                        "Issue Description": res['Reason'],
+                        "Risk Level": risk,
+                        "Match Score": int(score),
+                        "Link": res['Link']
+                    })
 
-def initialize_ai_services():
-    """Instantiates all helper classes and stores them in session state."""
-    
-    # --- MOVED IMPORTS HERE TO PREVENT CIRCULAR DEPENDENCY ---
-    from src.ai_services import (
-        AIService, DesignControlsTriager, UrraGenerator, ManualWriter, 
-        ProjectCharterHelper, VendorEmailDrafter, HumanFactorsHelper, 
-        MedicalDeviceClassifier
-    )
-    from src.ai_capa_helper import AICAPAHelper
-    from src.fmea import FMEA
-    from src.pre_mortem import PreMortem
-    from src.rca_tools import RootCauseAnalyzer
-    from src.ai_context_helper import AIContextHelper
-    from src.audit_logger import AuditLogger
-    from src.document_generator import DocumentGenerator
-    from src.data_processing import DataProcessor
-    # --------------------------------------------------------
+        return pd.DataFrame(batch_results)
 
-    if st.session_state.get('services_initialized'):
-        return
+    def run_mission(self, search_term, my_firm, my_model, lookback_days=365):
+        """
+        Executes the full agent workflow: Search -> Analyze -> Draft -> Report.
+        """
+        mission_log = []
+        artifacts = []
+        
+        # --- PHASE 1: SURVEILLANCE ---
+        self._log(mission_log, f"🕵️‍♂️ STARTING MISSION: Surveillance for '{search_term}'...")
+        start_date = datetime.now() - timedelta(days=lookback_days)
+        
+        # 1. Search (Now includes MAUDE and Media)
+        df, stats = self.regulatory.search_all_sources(search_term, start_date, datetime.now(), limit=50)
+        total_hits = len(df)
+        self._log(mission_log, f"✅ SCAN COMPLETE. Found {total_hits} records. Stats: {stats}")
 
-    api_key = st.session_state.get('api_key')
-    
-    # Initialize services even if key is missing (classes handle None gracefully)
-    st.session_state.ai_service = AIService(api_key)
-    st.session_state.ai_capa_helper = AICAPAHelper(api_key)
-    st.session_state.fmea_generator = FMEA(api_key)
-    st.session_state.pre_mortem_generator = PreMortem(api_key)
-    st.session_state.rca_helper = RootCauseAnalyzer(api_key)
-    st.session_state.ai_design_controls_triager = DesignControlsTriager(api_key)
-    st.session_state.urra_generator = UrraGenerator(api_key)
-    st.session_state.manual_writer = ManualWriter(api_key)
-    st.session_state.ai_charter_helper = ProjectCharterHelper(api_key)
-    st.session_state.ai_email_drafter = VendorEmailDrafter(api_key)
-    st.session_state.ai_hf_helper = HumanFactorsHelper(api_key)
-    st.session_state.medical_device_classifier = MedicalDeviceClassifier(api_key)
-    st.session_state.ai_context_helper = AIContextHelper(api_key)
-    
-    # Non-AI Services
-    st.session_state.audit_logger = AuditLogger()
-    st.session_state.doc_generator = DocumentGenerator()
-    st.session_state.data_processor = DataProcessor(api_key)
-    
-    st.session_state.services_initialized = True
-    logger.info("All services initialized.")
+        if df.empty:
+            self._log(mission_log, "🏁 MISSION END: No records found.")
+            return mission_log, artifacts
+
+        # --- PHASE 2: INTELLIGENCE & FILTERING ---
+        self._log(mission_log, f"🧠 ANALYZING: Screening top 25 newest records for relevance to '{my_model}'...")
+        
+        target_df = df.head(25).copy()
+        high_risk_found = False
+        
+        for index, row in target_df.iterrows():
+            source_type = row.get("Source", "Unknown")
+            
+            # Construct context for the AI
+            record_text = f"Source: {source_type}\nProduct: {row['Product']}\nReason/Desc: {row['Reason']}\nFirm: {row['Firm']}"
+            my_context = f"My Firm: {my_firm}\nMy Model: {my_model}"
+            
+            # AI Decision
+            try:
+                assessment = self.ai.assess_relevance_json(my_context, record_text)
+                risk_level = assessment.get("risk", "Low")
+                analysis = assessment.get("analysis", "")
+                
+                # Check for High Risk OR specific source triggers (e.g. Media spikes)
+                if risk_level == "High":
+                    high_risk_found = True
+                    self._log(mission_log, f"🚨 THREAT DETECTED [{source_type}]: {row['Product'][:30]}... ({analysis})")
+                    
+                    # --- PHASE 3: AUTONOMOUS ACTION ---
+                    artifact = self._execute_response_protocol(row, analysis, source_type)
+                    artifacts.append(artifact)
+                    
+            except Exception as e:
+                self._log(mission_log, f"⚠️ ERROR analyzing row {index}: {str(e)}")
+
+        if not high_risk_found:
+            self._log(mission_log, "🛡️ STATUS: No immediate high-risk threats detected in sample.")
+
+        self._log(mission_log, f"🏁 MISSION COMPLETE. Generated {len(artifacts)} response packages.")
+        return mission_log, artifacts
+
+    def _execute_response_protocol(self, record, analysis, source_type):
+        """
+        Chains tasks based on the SOURCE of the threat.
+        """
+        capa_draft = None
+        email_draft = None
+        pr_draft = None
+        
+        # Protocol A: Recall or Adverse Event -> CAPA + Supplier Email
+        if "FDA" in source_type or "CPSC" in source_type or "MHRA" in source_type:
+            capa_draft = self._draft_capa_content(record, analysis)
+            email_draft = self._draft_vendor_email(record)
+            
+        # Protocol B: Media/News -> PR Statement + Internal Memo
+        if "Media" in source_type:
+            pr_draft = self._draft_pr_statement(record, analysis)
+            # Media issues might not need a CAPA immediately, but an investigation record
+            capa_draft = self._draft_capa_content(record, analysis, is_media=True)
+
+        return {
+            "source_record": record,
+            "risk_analysis": analysis,
+            "capa_draft": capa_draft,
+            "email_draft": email_draft,
+            "pr_draft": pr_draft,
+            "source_type": source_type
+        }
+
+    def _draft_capa_content(self, record, analysis, is_media=False):
+        """Drafts CAPA content."""
+        context_note = "A high-risk regulatory event" if not is_media else "Negative media coverage representing a reputational/safety risk"
+        prompt = f"""
+        CONTEXT: {context_note} was found matching our product type.
+        Product: {record['Product']}
+        Issue: {record['Reason']}
+        AI Analysis: {analysis}
+        
+        TASK: Draft a JSON object for a CAPA initiation form.
+        Fields: "issue_description", "root_cause_investigation_plan", "containment_action".
+        """
+        return self.ai._generate_json(prompt, system_instruction="You are a QA Manager drafting a CAPA.")
+
+    def _draft_vendor_email(self, record):
+        """Drafts a demand letter to the vendor."""
+        prompt = f"""
+        CONTEXT: We detected a regulatory issue for a product we might distribute.
+        Product: {record['Product']}
+        Issue: {record['Reason']}
+        
+        TASK: Write a professional email to the vendor asking for:
+        1. Confirmation if our lots are affected.
+        2. Root cause analysis.
+        """
+        return self.ai._generate_text(prompt)
+
+    def _draft_pr_statement(self, record, analysis):
+        """Drafts a PR statement for media handling."""
+        prompt = f"""
+        CONTEXT: Negative media coverage detected.
+        Headline: {record['Description']}
+        AI Analysis: {analysis}
+        
+        TASK: Draft a short internal specific holding statement (PR response) to be used if media inquiries arise.
+        Tone: Professional, concerned, committed to safety.
+        """
+        return self.ai._generate_text(prompt)
+
+    def _log(self, log_list, message):
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        log_list.append(f"[{timestamp}] {message}")

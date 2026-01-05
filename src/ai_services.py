@@ -141,6 +141,35 @@ class AIService(AIServiceBase):
         system = "You are a Regulatory Expert. Screen device against FDA/MDR recall databases."
         user = f"Screen this device: {product_description}. List common recall reasons and keywords."
         return self._generate_text(user, system)
+    # Add this method to your AIService class in src/ai_services.py
+
+    def generate_search_keywords(self, product_name: str, description: str) -> list:
+        system = "You are a Regulatory Search Expert. Generate search terms for recall databases."
+        prompt = f"""
+        Product: {product_name}
+        Description: {description}
+        
+        Task:
+        1. Identify the core device type (e.g., "infusion pump").
+        2. Identify 3-4 synonyms or related medical terms (e.g., "syringe pump", "parenteral", "drug delivery").
+        3. Identify potential hazard keywords (e.g., "occlusion", "software error").
+        
+        Return JSON: {{ "keywords": ["term1", "term2", "term3"] }}
+        """
+        response = self._generate_json(prompt, system)
+        return response.get('keywords', [])
+
+    def assess_relevance(self, product_desc: str, recall_text: str) -> str:
+        """Returns a short relevance explanation."""
+        system = "You are a Safety Engineer. Assess if a recall is relevant to our product."
+        prompt = f"""
+        Our Product: {product_desc}
+        Recall Data: {recall_text}
+        
+        Is this recall relevant to our product's technology or risks?
+        Answer with 'High', 'Medium', or 'Low' followed by a 1-sentence explanation.
+        """
+        return self._generate_text(prompt, system)
 
 class DesignControlsTriager(AIServiceBase):
     def generate_design_controls(self, name: str, ifu: str, user_needs: str, tech_reqs: str, risks: str) -> Dict[str, str]:

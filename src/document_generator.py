@@ -271,6 +271,48 @@ class DocumentGenerator:
         doc.add_heading("Requirement", level=2)
         doc.add_paragraph("Please investigate the root cause of this issue and provide a corrective action plan within 14 days.")
         
+    def generate_regulatory_report_docx(self, df: pd.DataFrame, query: str, log: dict) -> BytesIO:
+        """Generates a formal Regulatory Intelligence Report."""
+        doc = Document()
+        doc.add_heading("Regulatory Intelligence Report", level=1)
+        doc.add_paragraph(f"Search Query: {query}")
+        doc.add_paragraph(f"Date Generated: {date.today().strftime('%Y-%m-%d')}")
+        
+        # Summary Section
+        doc.add_heading("Executive Summary", level=2)
+        total_hits = len(df)
+        doc.add_paragraph(f"A total of {total_hits} potential regulatory events were identified across global databases.")
+        
+        # Metrics Table
+        table = doc.add_table(rows=1, cols=2)
+        table.style = 'Table Grid'
+        hdr_cells = table.rows[0].cells
+        hdr_cells[0].text = 'Database Source'
+        hdr_cells[1].text = 'Hits Found'
+        
+        for source, count in log.items():
+            row_cells = table.add_row().cells
+            row_cells[0].text = source
+            row_cells[1].text = str(count)
+            
+        # Detailed Findings
+        if not df.empty:
+            doc.add_heading("Detailed Findings", level=2)
+            # Limit to top 50 to avoid massive docs
+            top_df = df.head(50)
+            
+            for _, row in top_df.iterrows():
+                p = doc.add_paragraph()
+                p.add_run(f"[{row['Date']}] {row['Source']}").bold = True
+                doc.add_paragraph(f"Product: {row['Product']}")
+                doc.add_paragraph(f"Reason: {row['Reason']}")
+                doc.add_paragraph(f"Firm: {row['Firm']}")
+                doc.add_paragraph(f"Status: {row['Status']}")
+                doc.add_paragraph("___________________________________________________")
+                
+            if len(df) > 50:
+                doc.add_paragraph(f"...and {len(df) - 50} more records (see attached CSV for full data).")
+
         buffer = BytesIO()
         doc.save(buffer)
         buffer.seek(0)

@@ -6,7 +6,7 @@ from datetime import datetime
 class MediaMonitoringService:
     """
     Service to monitor negative media coverage and safety bulletins via News RSS.
-    Enhanced with Regional Targeting (EU, LATAM, APAC).
+    Enhanced with Regional Targeting (EU, LATAM, APAC) and Robust Headers.
     """
     
     # Google News RSS URL template
@@ -27,6 +27,7 @@ class MediaMonitoringService:
             "UK": {"geo": "GB", "lang": "en-GB"},
             "LATAM": {"geo": "MX", "lang": "es-419"}, # Mexico/Spanish as proxy for LATAM
             "APAC": {"geo": "SG", "lang": "en-SG"}, # Singapore as proxy for English APAC
+            "GLOBAL": {"geo": "US", "lang": "en-US"}
         }
         
         settings = config.get(region, config["US"])
@@ -39,14 +40,21 @@ class MediaMonitoringService:
             geo=settings["geo"]
         )
         
+        # Robust Headers to look like a browser
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Referer': 'https://news.google.com/'
         }
         
         out = []
         try:
             res = requests.get(target_url, headers=headers, timeout=8)
             if res.status_code == 200:
+                # Check if content is actually XML
+                if not res.content.strip().startswith(b'<'):
+                    return []
+
                 root = ET.fromstring(res.content)
                 
                 count = 0
@@ -61,27 +69,32 @@ class MediaMonitoringService:
                     
                     # Risk Assessment (Client-Side)
                     full_text = title.lower()
-                    risk_keywords = ['recall', 'death', 'injury', 'lawsuit', 'warning', 'fda', 'danger', 'safety', 'fail', 'defect', 'ban', 'seize', 'alert', 'muerte', 'fallo', 'retiro']
+                    risk_keywords = [
+                        'recall', 'death', 'injury', 'lawsuit', 'warning', 'fda', 'danger', 
+                        'safety', 'fail', 'defect', 'ban', 'seize', 'alert', 'adverse',
+                        'muerte', 'fallo', 'retiro', 'investigation', 'class i', 'urgent'
+                    ]
                     
                     is_risk = any(k in full_text for k in risk_keywords)
                     
                     # Date Formatting
                     fmt_date = pub_date
                     try:
+                        # Common RSS date format: "Mon, 06 Jan 2025 14:30:00 GMT"
                         dt_obj = datetime.strptime(pub_date, "%a, %d %b %Y %H:%M:%S %Z")
                         fmt_date = dt_obj.strftime("%Y-%m-%d")
                     except:
                         pass
 
                     out.append({
-                        "Source": f"Media ({region}) - {source_name}",
+                        "Source": f"Media ({region})",
                         "Date": fmt_date,
                         "Product": query_term,
                         "Description": title,
-                        "Reason": "Media Report" if not is_risk else f"Potential Safety Issue ({', '.join([k for k in risk_keywords if k in full_text])})",
+                        "Reason": "Media Report" if not is_risk else f"Safety Keywords Found: {', '.join([k for k in risk_keywords if k in full_text])}",
                         "Firm": source_name,
                         "Model Info": "N/A",
-                        "ID": "News-Link",
+                        "ID": f"NEWS-{hash(link)}",
                         "Link": link,
                         "Status": "Public Report",
                         "Risk_Level": "High" if is_risk else "Low"

@@ -8,8 +8,16 @@ def get_ai_service():
     return st.session_state.get('ai_service')
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def search_wrapper(term, start, end):
-    return RegulatoryService.search_all_sources(term, start, end, limit=200)
+def search_wrapper(term, start, end, manufacturer="", vendor_only=False, include_sanctions=True):
+    return RegulatoryService.search_all_sources(
+        query_term=term,
+        start_date=start,
+        end_date=end,
+        manufacturer=manufacturer,
+        vendor_only=vendor_only,
+        include_sanctions=include_sanctions,
+        limit=200,
+    )
 
 def display_recalls_tab():
     st.header("🌍 Regulatory Intelligence & Recall Tracker")
@@ -42,6 +50,8 @@ def display_recalls_tab():
             my_model = st.text_input("My Model Number/ID", value=p_info.get('model', ''), placeholder="e.g. Model X-500")
 
         auto_expand = st.checkbox("🤖 AI-Expanded Search (Synonyms)", value=True)
+        vendor_only = st.checkbox("Vendor-only enforcement/sanctions search", value=False)
+        include_sanctions = st.checkbox("Include sanctions & watchlists", value=True)
         
         if st.button("🚀 Run Deep Scan", type="primary", use_container_width=True):
             if not p_name:
@@ -49,7 +59,7 @@ def display_recalls_tab():
             else:
                 st.session_state.recall_hits = pd.DataFrame()
                 st.session_state.recall_log = {}
-                run_search_logic(p_name, start_date, end_date, auto_expand, ai)
+                run_search_logic(p_name, start_date, end_date, auto_expand, ai, my_firm, vendor_only, include_sanctions)
                 st.rerun()
 
     if not st.session_state.recall_hits.empty:
@@ -120,7 +130,7 @@ def display_recalls_tab():
                 else:
                     st.error("Document Generator service missing.")
 
-def run_search_logic(term, start, end, auto_expand, ai):
+def run_search_logic(term, start, end, auto_expand, ai, manufacturer, vendor_only, include_sanctions):
     terms = [term]
     if auto_expand and ai and ai.model:
         try:
@@ -137,7 +147,7 @@ def run_search_logic(term, start, end, auto_expand, ai):
     prog = st.progress(0, "Starting scan...")
     for i, t in enumerate(terms):
         prog.progress((i+1)/len(terms), f"Scanning for '{t}'...")
-        hits, log = search_wrapper(t, start, end)
+        hits, log = search_wrapper(t, start, end, manufacturer=manufacturer, vendor_only=vendor_only, include_sanctions=include_sanctions)
         all_res = pd.concat([all_res, hits])
         for k,v in log.items(): logs[k] = logs.get(k, 0) + v
         

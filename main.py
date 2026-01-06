@@ -99,20 +99,31 @@ with tab_search:
     col_search, col_act = st.columns([3, 1])
     with col_search:
         query = st.text_input("Enter Product Name / Keyword", placeholder="e.g. Infusion Pump")
+        manufacturer_query = st.text_input("Manufacturer / Vendor (optional)", placeholder="e.g. Acme Medical Devices")
     with col_act:
         st.write("")
         st.write("")
+        vendor_only = st.checkbox("Vendor-only search", value=False)
+        include_sanctions = st.checkbox("Sanctions & Watchlists", value=True)
         run_btn = st.button("🚀 Run Surveillance", type="primary", use_container_width=True)
 
-    if run_btn and query:
-        if search_mode == "powerful" and not ai:
+    if run_btn:
+        if not query and not manufacturer_query:
+            st.error("Enter a product keyword or manufacturer/vendor name.")
+        elif vendor_only and not manufacturer_query:
+            st.error("Vendor-only mode requires a manufacturer/vendor name.")
+        elif search_mode == "powerful" and not ai:
             st.error("⚠️ Powerful mode requires OpenAI API Key.")
         else:
-            with st.status(f"Agent running {search_mode} surveillance...", expanded=True) as status:
-                st.write("📡 Connecting to Global Regulatory Databases & Media...")
+            focus_label = "vendor enforcement" if vendor_only else "recalls, alerts, and enforcement"
+            with st.status(f"Agent running {search_mode} surveillance for {focus_label}...", expanded=True) as status:
+                st.write("📡 Connecting to Global Regulatory Databases, Media, and Sanctions Lists...")
                 
                 df, logs = RegulatoryService.search_all_sources(
                     query_term=query,
+                    manufacturer=manufacturer_query,
+                    vendor_only=vendor_only,
+                    include_sanctions=include_sanctions,
                     regions=regions,
                     start_date=start_date,
                     end_date=end_date,
@@ -190,10 +201,38 @@ with tab_batch:
             for i, prod in enumerate(products):
                 status_text.text(f"Scanning: {prod} ({i+1}/{len(products)})...")
                 progress_bar.progress((i+1)/len(products))
-                hits, _ = RegulatoryService.search_all_sources(str(prod), regions, start_date, end_date, limit=20, mode=search_mode, ai_service=ai)
+                hits, _ = RegulatoryService.search_all_sources(
+                    query_term=str(prod),
+                    regions=regions,
+                    start_date=start_date,
+                    end_date=end_date,
+                    limit=20,
+                    mode=search_mode,
+                    ai_service=ai,
+                )
                 if not hits.empty:
                     hits["Queried_Product"] = prod
                     all_results.append(hits)
             
             progress_bar.empty()
             status_text.success("Fleet Scan Complete!")
+            
+            if all_results:
+                final_df = pd.concat(all_results)
+                st.dataframe(final_df, use_container_width=True)
+            else:
+                st.info("No findings for the uploaded fleet.")
+        except Exception as e:
+            st.error(f"Error processing file: {e}")
+
+# ------------------------------------------------------------
+# TAB 3: AI ASSISTANT
+# ------------------------------------------------------------
+with tab_chat:
+    display_chat_interface()
+
+# ------------------------------------------------------------
+# TAB 4: WEB SEARCH
+# ------------------------------------------------------------
+with tab_web:
+    display_web_search()

@@ -14,3 +14,4 @@ google-genai
 requests
 rapidfuzz
 beautifulsoup>=4.0
+lxml>=4.9.0

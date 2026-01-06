@@ -1,30 +1,78 @@
-import requests
-import pandas as pd
+from __future__ import annotations
 import re
 import time
-import streamlit as st
 from datetime import datetime
 from urllib.parse import quote
-from src.services.adverse_event_service import AdverseEventService
-from src.utils import retry_with_backoff
 
-# Try to import BeautifulSoup for scraping, fallback to regex if missing
-try:
-    from bs4 import BeautifulSoup
-except ImportError:
-    BeautifulSoup = None
+import pandas as pd
+import requests
+import streamlit as st
+from bs4 import BeautifulSoup
+from src.services.adverse_event_service import AdverseEventService
+from src.services.media_service import MediaMonitoringService
+from src.services.normalization import NormalizedRecord
+from src.services.sanctions_service import SanctionsService
+from src.utils import retry_with_backoff
 
 class RegulatoryService:
     """
     Unified Regulatory Intelligence Engine.
-    Integrates OpenFDA, CPSC, and Google Custom Search (Global Web/Regulators).
-    Includes Agentic capabilities to visit and verify links.
+    Integrates OpenFDA, global regulators, sanctions lists, and Google crawling.
+    Normalizes all ingested content into a unified schema.
     """
     
     # Configuration
     FDA_BASE = "https://api.fda.gov"
+    FDA_WARNING_LETTERS = "https://api.fda.gov/other/warningletters.json"
     CPSC_BASE = "https://www.saferproducts.gov/RestWebServices/Recall"
     GOOGLE_URL = "https://customsearch.googleapis.com/customsearch/v1"
+    GOOGLE_NEWS_URL = "https://news.google.com/rss/search"
+
+    # RSS/Feed-based endpoints (best-effort; gracefully handled if blocked)
+    REGULATORY_FEEDS = [
+        {
+            "name": "UK MHRA Drug & Device Alerts",
+            "jurisdiction": "UK",
+            "url": "https://www.gov.uk/drug-device-alerts.atom",
+            "product_type": "Drug/Device",
+        },
+        {
+            "name": "EU Field Safety Notices",
+            "jurisdiction": "EU",
+            "url": "https://ec.europa.eu/tools/eudamed/api/announcements/rss",
+            "product_type": "Device",
+        },
+        {
+            "name": "WHO Medical Device/Drug Safety",
+            "jurisdiction": "GLOBAL",
+            "url": "https://www.who.int/feeds/entity/mediacentre/news/en/rss.xml",
+            "product_type": "Global Health",
+        },
+        {
+            "name": "PAHO Safety Bulletins",
+            "jurisdiction": "LATAM",
+            "url": "https://www.paho.org/en/rss-feeds",
+            "product_type": "Global Health",
+        },
+        {
+            "name": "ANVISA Alerts",
+            "jurisdiction": "BR",
+            "url": "https://www.gov.br/anvisa/pt-br/assuntos/alertas?set_language=en&cl=en/@@RSS",
+            "product_type": "Drug/Device",
+        },
+        {
+            "name": "INVIMA Alerts",
+            "jurisdiction": "CO",
+            "url": "https://www.invima.gov.co/en/rss",
+            "product_type": "Drug/Device",
+        },
+        {
+            "name": "COFEPRIS Alerts",
+            "jurisdiction": "MX",
+            "url": "https://www.gob.mx/cofepris/archivo/articulos?format=atom",
+            "product_type": "Drug/Device",
+        },
+    ]
 
     # Targeted Domains for "Regulatory" Search Category
     REGULATORY_DOMAINS = [
@@ -32,6 +80,18 @@ class RegulatoryService:
         "hc-sc.gc.ca", "tga.gov.au", "pmda.go.jp", "swissmedic.ch",
         "invima.gov.co", "argentina.gob.ar/anmat"
     ]
+
+    JURISDICTION_DOMAINS = {
+        "EU": ["europa.eu", "ema.europa.eu", "ec.europa.eu"],
+        "UK": ["gov.uk", "mhra.gov.uk"],
+        "BR": ["anvisa.gov.br"],
+        "CO": ["invima.gov.co"],
+        "MX": ["cofepris.gob.mx"],
+        "GLOBAL": ["who.int", "paho.org"],
+    }
+
+    SANCTIONS = SanctionsService()
+    MEDIA = MediaMonitoringService()
 
     @staticmethod
     def search_all_sources(query_term: str, regions: list = None, start_date=None, end_date=None, limit: int = 100, mode: str = "fast", ai_service=None) -> tuple[pd.DataFrame, dict]:
@@ -46,10 +106,12 @@ class RegulatoryService:
             regions = ["US", "EU", "UK", "LATAM", "APAC"]
 
         # --- 1. OFFICIAL APIs (Fast & Structured) ---
-        # FDA Recalls
-        fda_hits = RegulatoryService._fetch_openfda_smart(query_term, "device", limit, start_date, end_date)
-        results.extend(fda_hits)
-        status_log["FDA Device"] = len(fda_hits)
+        fda_device_hits = RegulatoryService._fetch_openfda_smart(query_term, "device", limit, start_date, end_date)
+        fda_drug_hits = RegulatoryService._fetch_openfda_smart(query_term, "drug", limit, start_date, end_date)
+        warning_letters = RegulatoryService._fetch_warning_letters(query_term, limit)
+        results.extend(fda_device_hits + fda_drug_hits + warning_letters)
+        status_log["FDA Device/Drug"] = len(fda_device_hits) + len(fda_drug_hits)
+        status_log["FDA Warning Letters"] = len(warning_letters)
 
         # MAUDE (Adverse Events)
         maude_service = AdverseEventService()
@@ -62,22 +124,43 @@ class RegulatoryService:
         results.extend(cpsc_hits)
         status_log["CPSC"] = len(cpsc_hits)
 
-        # --- 2. GOOGLE PROGRAMMABLE SEARCH (Global Coverage) ---
-        # We perform two types of Google Searches:
-        # A. Official Regulatory Bodies (Site-restricted) - High Trust
-        # B. Global News/Media (General Web) - High Speed
+        # --- 2. INTERNATIONAL REGULATORY FEEDS ---
+        feed_hits = []
+        for feed in RegulatoryService.REGULATORY_FEEDS:
+            feed_hits.extend(RegulatoryService._fetch_rss_feed(feed, query_term))
+        results.extend(feed_hits)
+        status_log["Regulatory Feeds"] = len(feed_hits)
 
-        # A. Regulatory Site Search
+        # --- 3. GOOGLE PROGRAMMABLE SEARCH (Global Coverage) ---
         reg_query = f'"{query_term}" (recall OR safety OR warning OR alert OR field action)'
         reg_hits = RegulatoryService._google_search(reg_query, category="Regulatory", domains=RegulatoryService.REGULATORY_DOMAINS)
         results.extend(reg_hits)
         status_log["Global Regulators"] = len(reg_hits)
 
-        # B. Media/News Search
+        for region in ["EU", "UK", "BR", "CO", "MX", "GLOBAL"]:
+            scoped_hits = RegulatoryService._google_search(
+                reg_query,
+                category=f"{region} Regulatory",
+                domains=RegulatoryService.JURISDICTION_DOMAINS.get(region)
+            )
+            results.extend(scoped_hits)
+            status_log[f"{region} Crawls"] = status_log.get(f"{region} Crawls", 0) + len(scoped_hits)
+
+        # Media/News Search
         media_query = f'"{query_term}" (recall OR death OR lawsuit OR injury OR scandal)'
         media_hits = RegulatoryService._google_search(media_query, category="Media", domains=None) # None = Whole Web
         results.extend(media_hits)
         status_log["Global Media"] = len(media_hits)
+
+        rss_media_hits = []
+        for region in regions:
+            rss_media_hits.extend(RegulatoryService.MEDIA.search_media(query_term, limit=10, region=region))
+        results.extend(rss_media_hits)
+        status_log["Regional Media"] = len(rss_media_hits)
+
+        news_hits = RegulatoryService._google_news_rss(query_term, regions or [])
+        results.extend(news_hits)
+        status_log["Google News RSS"] = len(news_hits)
 
         # --- 3. POWERFUL MODE: AGENTIC VERIFICATION ---
         if mode == "powerful" and ai_service:
@@ -95,16 +178,10 @@ class RegulatoryService:
             status_log["Agent Filtered"] = len(results)
 
         # --- 4. Final Processing ---
-        df = pd.DataFrame(results)
+        normalized_records = RegulatoryService._normalize_results(results)
+        df = pd.DataFrame(normalized_records)
         if not df.empty:
-            # Deduplicate by Link or ID
             df = df.drop_duplicates(subset=['Link'])
-            # Normalize Columns
-            for col in ['Product', 'Firm', 'Reason', 'Source', 'Link', 'Risk_Level', 'Date']:
-                if col not in df.columns:
-                    df[col] = "N/A"
-            
-            # Sort by Date
             if 'Date' in df.columns:
                 df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
                 df = df.sort_values(by='Date', ascending=False)
@@ -130,7 +207,7 @@ class RegulatoryService:
         # Construct Query
         final_query = query
         if domains:
-            # Create a site: filter (site:a.com OR site:b.com)
+@@ -134,61 +211,77 @@ class RegulatoryService:
             site_group = " OR ".join([f"site:{d}" for d in domains])
             final_query = f"{query} ({site_group})"
 
@@ -156,8 +233,19 @@ class RegulatoryService:
                     if any(x in (title + snippet).lower() for x in ['death', 'injury', 'urgent', 'class i']):
                         risk_level = "High"
 
+                    jurisdiction = "Global"
+                    if category and " " in category:
+                        jurisdiction = category.split(" ", 1)[0]
+                    elif category in ["EU", "UK", "BR", "CO", "MX"]:
+                        jurisdiction = category
+
+                    category_type = "media" if "Media" in category else "regulatory_action"
+
                     out.append({
                         "Source": f"{category} (Google)",
+                        "Jurisdiction": jurisdiction,
+                        "Category": category_type,
+                        "Product_Type": "Unknown",
                         "Date": "Recent", # Google snippet dates are messy, we treat as recent/unknown
                         "Product": query.split('"')[1] if '"' in query else query, # Extract term
                         "Description": title,
@@ -166,7 +254,12 @@ class RegulatoryService:
                         "ID": "WEB-HIT",
                         "Link": item.get('link'),
                         "Status": "Public Web",
-                        "Risk_Level": risk_level
+                        "Risk_Level": risk_level,
+                        "Provenance": {
+                            "query": query,
+                            "domains": domains,
+                            "engine": "Google CSE"
+                        }
                     })
         except Exception as e:
             print(f"Google Search Error: {e}")
@@ -192,28 +285,7 @@ class RegulatoryService:
             
             if resp.status_code != 200:
                 return item # Keep original if we can't scrape
-
-            text_content = ""
-            if BeautifulSoup:
-                soup = BeautifulSoup(resp.content, 'html.parser')
-                # Remove scripts and styles
-                for script in soup(["script", "style", "nav", "footer"]):
-                    script.extract()
-                text_content = soup.get_text(separator=' ')
-            else:
-                # Fallback Regex Stripper
-                text_content = re.sub('<[^<]+?>', ' ', resp.text)
-            
-            # Truncate for Token Limits (approx 1500 words)
-            text_content = " ".join(text_content.split())[:8000]
-
-        except Exception:
-            return item # Return original on scrape error
-
-        # 2. AI Verification
-        # We define a prompt to check if this page is actually about the product and a risk
-        try:
-            prompt = f"""
+@@ -217,97 +310,256 @@ class RegulatoryService:
             I am researching: "{query_term}"
             I found this webpage content:
             "{text_content}..."
@@ -238,6 +310,155 @@ class RegulatoryService:
                 
         except Exception:
             return item # Keep if AI fails to decide
+
+    # =========================================================================
+    # FDA / Enforcement helpers
+    # =========================================================================
+    @staticmethod
+    def _fetch_warning_letters(term: str, limit: int = 50) -> list:
+        params = {
+            "search": f'(subject:\"{term}\" OR issuing_office:\"{term}\" OR document_number:\"{term}\")',
+            "limit": limit,
+            "sort": "date_issued:desc"
+        }
+        out = []
+        try:
+            res = requests.get(RegulatoryService.FDA_WARNING_LETTERS, params=params, timeout=10)
+            if res.status_code == 404:
+                return []
+            res.raise_for_status()
+            data = res.json()
+            for item in data.get("results", []):
+                out.append({
+                    "Source": "FDA Warning Letters",
+                    "Jurisdiction": "US",
+                    "Category": "warning_letter",
+                    "Product_Type": item.get("product_type", "Unknown"),
+                    "Product": item.get("product_type", term),
+                    "Description": item.get("subject"),
+                    "Reason": item.get("issuance_reason", item.get("subject", "")),
+                    "Firm": item.get("recipient_name"),
+                    "Date": item.get("date_issued"),
+                    "Link": item.get("url", ""),
+                    "Document_URL": item.get("url", ""),
+                    "Risk_Level": "High" if "warning" in str(item.get("subject", "")).lower() else "Medium",
+                    "Provenance": {"endpoint": RegulatoryService.FDA_WARNING_LETTERS}
+                })
+        except Exception:
+            return []
+        return out
+
+    # =========================================================================
+    # NORMALIZATION & SANCTIONS
+    # =========================================================================
+    @staticmethod
+    def _normalize_results(raw_results: list[dict]) -> list[dict]:
+        normalized = []
+        for raw in raw_results:
+            record = NormalizedRecord.from_raw(raw).to_dict()
+            matches = RegulatoryService.SANCTIONS.check_manufacturer(record.get("Manufacturer"))
+            record["Sanctions_Flag"] = bool(matches)
+            record["Sanctions_Source"] = ", ".join(matches)
+            normalized.append(record)
+        return normalized
+
+    # =========================================================================
+    # FEEDS & NEWS
+    # =========================================================================
+    @staticmethod
+    def _fetch_rss_feed(feed_meta: dict, query_term: str) -> list:
+        url = feed_meta.get("url")
+        if not url:
+            return []
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (RegulatoryAgent)',
+            'Accept': 'application/xml, text/xml;q=0.9, */*;q=0.8'
+        }
+        out = []
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code != 200:
+                return []
+            content = resp.content
+            # Lightweight XML parsing
+            from xml.etree import ElementTree as ET
+            root = ET.fromstring(content)
+            for item in root.findall('.//item'):
+                title = item.findtext('title', default="")
+                link = item.findtext('link', default="")
+                pub_date = item.findtext('pubDate', default="")
+                description = item.findtext('description', default=title)
+                if query_term.lower() not in (title + description).lower():
+                    continue
+                out.append({
+                    "Source": feed_meta.get("name"),
+                    "Jurisdiction": feed_meta.get("jurisdiction", "GLOBAL"),
+                    "Category": "regulatory_action",
+                    "Product_Type": feed_meta.get("product_type", "Unknown"),
+                    "Product": title,
+                    "Description": description,
+                    "Reason": description,
+                    "Firm": feed_meta.get("name"),
+                    "Date": pub_date,
+                    "Link": link,
+                    "Document_URL": link,
+                    "Risk_Level": "Medium",
+                    "Provenance": {"feed": url}
+                })
+        except Exception:
+            return []
+        return out
+
+    @staticmethod
+    def _google_news_rss(query_term: str, regions: list[str]) -> list[dict]:
+        hits = []
+        region_targets = regions or ["US"]
+        region_map = {
+            "US": ("US", "en-US"),
+            "EU": ("IE", "en-IE"),
+            "UK": ("GB", "en-GB"),
+            "LATAM": ("MX", "es-419"),
+            "APAC": ("SG", "en-SG"),
+            "GLOBAL": ("US", "en-US"),
+            "BR": ("BR", "pt-BR"),
+            "CO": ("CO", "es-CO"),
+            "MX": ("MX", "es-MX"),
+        }
+        for region in region_targets:
+            try:
+                geo, lang = region_map.get(region, ("US", "en-US"))
+                params = {
+                    "q": quote(query_term),
+                    "hl": lang,
+                    "gl": geo,
+                    "ceid": f"{geo}:{lang}",
+                }
+                resp = requests.get(RegulatoryService.GOOGLE_NEWS_URL, params=params, timeout=8)
+                if resp.status_code != 200 or not resp.content.startswith(b'<'):
+                    continue
+                from xml.etree import ElementTree as ET
+                root = ET.fromstring(resp.content)
+                for item in root.findall('.//item'):
+                    title = item.findtext('title', default="")
+                    link = item.findtext('link', default="")
+                    pub_date = item.findtext('pubDate', default="")
+                    hits.append({
+                        "Source": "Google News",
+                        "Jurisdiction": region,
+                        "Category": "media",
+                        "Product": query_term,
+                        "Description": title,
+                        "Reason": item.findtext('description', default=""),
+                        "Firm": item.findtext('source', default="News"),
+                        "Date": pub_date,
+                        "Link": link,
+                        "Document_URL": link,
+                        "Risk_Level": "Medium",
+                        "Provenance": {"feed": "Google News RSS", "region": region}
+                    })
+            except Exception:
+                continue
+        return hits
 
     # =========================================================================
     # LEGACY / API HELPERS (Preserved)
@@ -267,16 +488,22 @@ class RegulatoryService:
                     cls = item.get("classification", "")
                     risk = "High" if "Class I" in cls or "Class 1" in cls else "Medium"
                     out.append({
-                        "Source": f"FDA {category.capitalize()}",
+                        "Source": f"FDA {category.capitalize()} Enforcement",
+                        "Jurisdiction": "US",
+                        "Category": "recall",
+                        "Recall_Class": cls,
+                        "Product_Type": category.capitalize(),
                         "Date": item.get("recall_initiation_date"),
                         "Product": item.get("product_description"),
                         "Description": item.get("product_description"),
                         "Reason": item.get("reason_for_recall"),
                         "Firm": item.get("recalling_firm"),
+                        "Model_Numbers": item.get("product_code"),
                         "ID": item.get("recall_number"),
                         "Link": f"https://www.accessdata.fda.gov/scripts/cdrh/cfdocs/cfRES/res.cfm?id={item.get('event_id', '')}",
                         "Status": item.get("status"),
-                        "Risk_Level": risk
+                        "Risk_Level": risk,
+                        "Provenance": {"endpoint": url}
                     })
                 return out
         except Exception:
@@ -299,6 +526,9 @@ class RegulatoryService:
                     for item in items:
                         out.append({
                             "Source": "CPSC",
+                            "Jurisdiction": "US",
+                            "Category": "recall",
+                            "Product_Type": "Consumer Product",
                             "Date": item.get("RecallDate"),
                             "Product": item.get("Title"),
                             "Description": item.get("Title"),
@@ -307,7 +537,8 @@ class RegulatoryService:
                             "ID": str(item.get("RecallID")),
                             "Link": item.get("URL"),
                             "Status": "Public",
-                            "Risk_Level": "Medium"
+                            "Risk_Level": "Medium",
+                            "Provenance": {"endpoint": RegulatoryService.CPSC_BASE}
                         })
         except Exception: pass
         return out

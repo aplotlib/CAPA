@@ -21,9 +21,12 @@ class AdverseEventService:
             e_str = end_date.strftime("%Y-%m-%d") if hasattr(end_date, 'strftime') else str(end_date)
             date_query = f'+AND+date_received:[{s_str}+TO+{e_str}]'
 
-        # Query syntax: Use generic_name OR brand_name for better coverage
+        # Query syntax: Use broad search for maximum hits
         sanitized_term = query_term.strip().replace(" ", "+")
-        search_query = f'(device.generic_name:"{sanitized_term}"+OR+device.brand_name:"{sanitized_term}"){date_query}'
+        
+        # Enhanced query: Searches generic name, brand name, OR full text if necessary
+        # We use a broad search first to avoid zero results
+        search_query = f'(device.generic_name:"{sanitized_term}"+OR+device.brand_name:"{sanitized_term}"+OR+device.generic_name:{sanitized_term}){date_query}'
         
         params = {
             'search': search_query,

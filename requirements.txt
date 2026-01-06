@@ -13,3 +13,4 @@ xlsxwriter>=3.0.3
 google-genai
 requests
 rapidfuzz
+beautifulsoup

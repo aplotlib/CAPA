@@ -23,7 +23,7 @@ def display_cost_of_quality_tab():
             scrap_rework = st.number_input("Internal Failures (Scrap, Rework) ($)", 0.0, step=100.0)
             returns_warranty = st.number_input("External Failures (Returns, Warranty) ($)", 0.0, step=100.0)
 
-        if st.form_submit_button("Calculate Cost of Quality", type="primary", width="stretch"):
+        if st.form_submit_button("Calculate Cost of Quality", type="primary", use_container_width=True):
             total_prevention = quality_planning + training
             total_appraisal = inspection + audits
             total_failure = scrap_rework + returns_warranty
@@ -65,11 +65,10 @@ def display_cost_of_quality_tab():
                 fig.update_layout(showlegend=False, font_family="Inter")
                 fig.update_traces(textposition='inside', textinfo='percent+label')
                 
-                # Fix: Replaced use_container_width=True with width="stretch"
-                st.plotly_chart(fig, width="stretch")
+                st.plotly_chart(fig, use_container_width=True)
 
             if not st.session_state.api_key_missing:
-                if st.button("Get AI Insights on CoQ", width="stretch"):
+                if st.button("Get AI Insights on CoQ", use_container_width=True):
                     with st.spinner("AI is analyzing..."):
                         prompt = f"Analyze this Cost of Quality (CoQ) data: {results}. Give actionable advice on how to shift spending from failure costs to prevention and appraisal costs to improve overall quality and long-term profitability."
                         st.info(st.session_state.ai_context_helper.generate_response(prompt))

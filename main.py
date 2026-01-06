@@ -186,13 +186,8 @@ def _request_json(url: str, params: Dict[str, Any], timeout: int = 30) -> Any:
         return r.json()
         
     except requests.exceptions.HTTPError as e:
-        # Specific handling for Authorization errors to prevent app crash
-        if e.response.status_code in [401, 403]:
-            st.toast(f"⚠️ Auth Error ({e.response.status_code}) for {url}. Check API Key.", icon="⚠️")
-            # Return None so the app continues without this specific data source
-            return None
-        # For other HTTP errors (500, etc), log and continue
-        print(f"HTTP Error fetching {url}: {e}")
+        # Log error to console instead of UI to avoid CacheReplayClosureError
+        print(f"⚠️ HTTP Error ({e.response.status_code}) fetching {url}: {e}")
         return None
         
     except Exception as e:
@@ -205,7 +200,8 @@ def google_search_cached(query: str, days: Optional[int], num: int) -> List[Dict
     ensure_google_secrets()
     
     if not GOOGLE_API_KEY or not GOOGLE_CX_ID:
-        st.toast("Skipping Google Search: Missing API Key or CX ID.", icon="⚠️")
+        # Return empty list without UI side effect to prevent cache errors
+        print("Skipping Google Search: Missing API Key or CX ID.")
         return []
 
     params = {

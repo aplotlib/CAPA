@@ -197,23 +197,3 @@ with tab_batch:
             
             progress_bar.empty()
             status_text.success("Fleet Scan Complete!")
-            
-            if all_results:
-                final_df = pd.concat(all_results)
-                st.dataframe(final_df, use_container_width=True)
-            else:
-                st.info("No findings for the uploaded fleet.")
-        except Exception as e:
-            st.error(f"Error processing file: {e}")
-
-# ------------------------------------------------------------
-# TAB 3: AI ASSISTANT
-# ------------------------------------------------------------
-with tab_chat:
-    display_chat_interface()
-
-# ------------------------------------------------------------
-# TAB 4: WEB SEARCH
-# ------------------------------------------------------------
-with tab_web:
-    display_web_search()

@@ -25,15 +25,20 @@ except Exception:
 # Secrets / Config
 # ============================================================
 def get_secret(name: str, required: bool = True) -> Optional[str]:
+    # Check streamlit secrets first
     if hasattr(st, "secrets") and name in st.secrets:
         v = str(st.secrets[name]).strip()
         if v:
             return v
+    # Check environment variables
     v = (os.getenv(name) or "").strip()
     if v:
         return v
+    
     if required:
-        raise RuntimeError(f"Missing required secret/env var: {name}")
+        # Don't raise immediately to avoid crashing before UI loads; 
+        # let the specific function handle missing keys.
+        return None 
     return None
 
 
@@ -51,8 +56,14 @@ def ensure_google_secrets():
 
 def ensure_openai_client() -> Any:
     if OpenAI is None:
-        raise RuntimeError("openai package not installed. Add `openai` to requirements.txt.")
+        st.error("OpenAI package not installed. Please add `openai` to requirements.txt.")
+        st.stop()
+    
     api_key = get_secret("OPENAI_API_KEY", required=True)
+    if not api_key:
+        st.error("Missing `OPENAI_API_KEY`. Please set it in .streamlit/secrets.toml")
+        st.stop()
+        
     return OpenAI(api_key=api_key)
 
 
@@ -76,7 +87,8 @@ def preset_window(days: int, today: Optional[date] = None) -> DateWindow:
 
 def custom_window(start: date, end: date) -> DateWindow:
     if start > end:
-        raise ValueError("Start date must be <= end date")
+        # Graceful fallback instead of crash
+        return DateWindow(start=end, end=start)
     return DateWindow(start=start, end=end)
 
 
@@ -121,6 +133,7 @@ def fuzzy_score(product_name: str, title: str, snippet: str) -> float:
     pn = normalize_text(product_name)
     t = normalize_text(title)
     sn = normalize_text(snippet)
+    if not pn: return 0.0
     a = fuzz.token_set_ratio(pn, t)
     b = fuzz.token_set_ratio(pn, sn)
     return max(a, b) / 100.0
@@ -162,16 +175,39 @@ def _yyyymmdd(d: date) -> str:
 
 
 def _request_json(url: str, params: Dict[str, Any], timeout: int = 30) -> Any:
-    r = requests.get(url, params=params, timeout=timeout)
-    if r.status_code == 404:
+    """Safely executes a GET request and handles 401/403/404 errors gracefully."""
+    try:
+        r = requests.get(url, params=params, timeout=timeout)
+        
+        if r.status_code == 404:
+            return None
+            
+        r.raise_for_status()
+        return r.json()
+        
+    except requests.exceptions.HTTPError as e:
+        # Specific handling for Authorization errors to prevent app crash
+        if e.response.status_code in [401, 403]:
+            st.toast(f"⚠️ Auth Error ({e.response.status_code}) for {url}. Check API Key.", icon="⚠️")
+            # Return None so the app continues without this specific data source
+            return None
+        # For other HTTP errors (500, etc), log and continue
+        print(f"HTTP Error fetching {url}: {e}")
         return None
-    r.raise_for_status()
-    return r.json()
+        
+    except Exception as e:
+        print(f"Network/Connection Error fetching {url}: {e}")
+        return None
 
 
 @st.cache_data(show_spinner=False, ttl=60 * 60)
 def google_search_cached(query: str, days: Optional[int], num: int) -> List[Dict[str, Any]]:
     ensure_google_secrets()
+    
+    if not GOOGLE_API_KEY or not GOOGLE_CX_ID:
+        st.toast("Skipping Google Search: Missing API Key or CX ID.", icon="⚠️")
+        return []
+
     params = {
         "key": GOOGLE_API_KEY,
         "cx": GOOGLE_CX_ID,
@@ -180,6 +216,7 @@ def google_search_cached(query: str, days: Optional[int], num: int) -> List[Dict
     }
     if days is not None:
         params["dateRestrict"] = f"d{int(days)}"
+        
     data = _request_json(GOOGLE_ENDPOINT, params=params)
     if not data:
         return []
@@ -264,16 +301,20 @@ LLM_SCHEMA = {
 
 
 def classify_hit_openai(client: Any, sku: str, product_name: str, hit: Dict[str, Any], model: str) -> Dict[str, Any]:
-    payload = {"sku": sku, "product_name": product_name, "hit": hit}
-    resp = client.responses.create(
-        model=model,
-        input=[
-            {"role": "system", "content": LLM_SYSTEM},
-            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-        ],
-        response_format={"type": "json_schema", "json_schema": LLM_SCHEMA},
-    )
-    return resp.output_parsed
+    try:
+        payload = {"sku": sku, "product_name": product_name, "hit": hit}
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": LLM_SYSTEM},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            response_format={"type": "json_schema", "json_schema": LLM_SCHEMA},
+        )
+        return json.loads(resp.choices[0].message.content)
+    except Exception as e:
+        print(f"LLM Classification Error: {e}")
+        return {}
 
 
 # ============================================================
@@ -309,7 +350,7 @@ class RunOptions:
 
     # LLM
     use_llm: bool = False
-    llm_model: str = "gpt-4.1-mini"
+    llm_model: str = "gpt-4o-mini" # Corrected from gpt-4.1-mini
     llm_sleep_seconds: float = 0.0
 
     # Controls
@@ -593,8 +634,9 @@ def search_one(
         for r in deduped:
             classification = classify_hit_openai(llm_client, sku, product_name, r, model=opts.llm_model)
             out = dict(r)
-            for k, v in classification.items():
-                out[f"LLM_{k}"] = v
+            if classification:
+                for k, v in classification.items():
+                    out[f"LLM_{k}"] = v
             enriched.append(out)
             if opts.llm_sleep_seconds > 0:
                 time.sleep(opts.llm_sleep_seconds)
@@ -725,7 +767,7 @@ max_hits = st.sidebar.slider("Max hits per source (cap)", 10, 200, 50, 10)
 st.sidebar.divider()
 st.sidebar.header("Agentic AI (optional)")
 use_llm = st.sidebar.checkbox("Enable AI classification", value=False)
-llm_model = st.sidebar.text_input("LLM model", value="gpt-4.1-mini", disabled=not use_llm)
+llm_model = st.sidebar.text_input("LLM model", value="gpt-4o-mini", disabled=not use_llm)
 llm_sleep = st.sidebar.slider("LLM delay per hit (seconds)", 0.0, 2.0, 0.0, 0.1, disabled=not use_llm)
 
 st.sidebar.divider()
@@ -811,8 +853,8 @@ with tab1:
             try:
                 ensure_google_secrets()
             except Exception as e:
-                st.error(f"Google not configured: {e}")
-                st.stop()
+                # Do not stop execution for Google error, just warn and continue
+                st.toast(f"Google configuration missing/invalid. Searching other sources...", icon="⚠️")
 
         with st.spinner("Searching sources..."):
             rows = search_one(sku.strip(), product_name.strip(), window, opts, llm_client=llm_client)
@@ -864,9 +906,8 @@ with tab2:
         if opts.use_google_general or opts.use_google_regulators:
             try:
                 ensure_google_secrets()
-            except Exception as e:
-                st.error(f"Google not configured: {e}")
-                st.stop()
+            except Exception:
+                pass # Already handled inside search_one
 
         st.write(f"Products loaded: **{len(products)}**")
         progress = st.progress(0.0)

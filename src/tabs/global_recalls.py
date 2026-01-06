@@ -28,12 +28,15 @@ def display_recalls_tab():
         col1, col2, col3 = st.columns([2, 1, 1])
         with col1:
             search_term = st.text_input("Product Name / Search Term", value=default_name, placeholder="e.g. Infusion Pump")
+            manufacturer = st.text_input("Manufacturer / Vendor (optional)", value=p_info.get('manufacturer', ''), placeholder="e.g. Acme Medical")
         with col2:
             st.markdown("**Search Depth**")
             search_mode = st.radio("Mode", ["Fast (APIs + Snippets)", "Powerful (Agentic Scrape)"], label_visibility="collapsed")
         with col3:
             st.markdown("**Lookback**")
             days_back = st.selectbox("Period", [30, 90, 365, 730], index=1, label_visibility="collapsed")
+            include_sanctions = st.checkbox("Sanctions/Watchlists", value=True)
+            vendor_only = st.checkbox("Vendor-only search", value=False)
 
         # Date Calculation
         end_date = datetime.now()
@@ -44,8 +47,10 @@ def display_recalls_tab():
         
         btn_col, _ = st.columns([1, 2])
         if btn_col.button("🚀 Launch Surveillance Mission", type="primary", use_container_width=True):
-            if not search_term:
-                st.error("Please enter a search term.")
+            if not search_term and not manufacturer:
+                st.error("Please enter a search term or manufacturer.")
+            elif vendor_only and not manufacturer:
+                st.error("Vendor-only search requires a manufacturer/vendor name.")
             else:
                 if mode_key == "powerful" and not ai:
                     st.warning("⚠️ Powerful mode requires AI. Please check your API keys. Switching to Fast mode.")
@@ -58,8 +63,11 @@ def display_recalls_tab():
 
                     # EXECUTE SEARCH
                     df, logs = RegulatoryService.search_all_sources(
-                        search_term, 
+                        query_term=search_term, 
                         regions=["US", "EU", "UK", "LATAM", "APAC"],
+                        manufacturer=manufacturer,
+                        vendor_only=vendor_only,
+                        include_sanctions=include_sanctions,
                         start_date=start_date, 
                         end_date=end_date,
                         limit=100,

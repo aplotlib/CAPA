@@ -274,7 +274,7 @@ def gdelt_search_cached(query: str, window_start: date, window_end: date, maxrec
 
 
 # ============================================================
-# LLM classification (optional)
+# LLM classification & Summarization (Agentic)
 # ============================================================
 LLM_SYSTEM = (
     "You are a safety/compliance analyst. "
@@ -315,6 +315,54 @@ def classify_hit_openai(client: Any, sku: str, product_name: str, hit: Dict[str,
     except Exception as e:
         print(f"LLM Classification Error: {e}")
         return {}
+
+
+def summarize_risks_openai(client: Any, product_name: str, hits: List[Dict[str, Any]], model: str) -> str:
+    """Agentic capability: Summarize findings into a Regulatory Intelligence Briefing."""
+    if not hits:
+        return "No findings to summarize."
+    
+    # Minimize token usage by sending only key fields
+    context_hits = []
+    for h in hits:
+        context_hits.append({
+            "Region": h.get("Region"),
+            "Category": h.get("Category"),
+            "Title": h.get("Title"),
+            "Snippet": h.get("Snippet", "")[:150],
+            "Date": h.get("Date")
+        })
+
+    system_prompt = (
+        "You are a Regulatory Intelligence Agent. "
+        "Your goal is to screen search results for a medical device and provide a 'Regulatory Briefing'."
+        "Group your response by Region (US, EU, UK, LATAM, Global). "
+        "Highlight any 'High Severity' issues like Recalls, Safety Alerts, or Lawsuits. "
+        "Ignore obvious noise or unrelated products."
+    )
+    
+    user_prompt = f"""
+    Product: {product_name}
+    Search Results: {json.dumps(context_hits, indent=1)}
+    
+    Format the output as a clean Markdown report with:
+    1. Executive Summary (1-2 sentences).
+    2. Regional Breakdown (US, EU, UK, LATAM).
+    3. Action Recommendations (if any risks found).
+    """
+
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.3
+        )
+        return resp.choices[0].message.content
+    except Exception as e:
+        return f"Agent Summary Error: {e}"
 
 
 # ============================================================
@@ -359,24 +407,27 @@ class RunOptions:
 
 DEFAULT_UK_DOMAINS = [
     "gov.uk/drug-device-alerts",
-    "mhra.gov.uk",  # some legacy content
+    "mhra.gov.uk", 
+    "nice.org.uk"
 ]
 DEFAULT_EU_DOMAINS = [
     "ema.europa.eu",
+    "health.ec.europa.eu", # EUDAMED portal
     "bfarm.de",          # Germany
     "ansm.sante.fr",     # France
     "aemps.gob.es",      # Spain
     "hpra.ie",           # Ireland
     "fimea.fi",          # Finland
     "lakemedelsverket.se",  # Sweden
+    "swissmedic.ch"      # Switzerland (important for EU market)
 ]
 DEFAULT_LATAM_DOMAINS = [
-    "invima.gov.co",
-    "gov.br/anvisa",
-    "gob.mx/cofepris",
-    "argentina.gob.ar/anmat",
-    "gob.pe/digemid",
-    "ispch.cl",
+    "invima.gov.co",        # Colombia
+    "gov.br/anvisa",        # Brazil
+    "gob.mx/cofepris",      # Mexico
+    "argentina.gob.ar/anmat", # Argentina
+    "gob.pe/digemid",       # Peru
+    "ispch.cl",             # Chile
 ]
 DEFAULT_MEDIA_DOMAINS = [
     "reuters.com",
@@ -387,6 +438,8 @@ DEFAULT_MEDIA_DOMAINS = [
     "theguardian.com",
     "bloomberg.com",
     "ft.com",
+    "medtechdive.com",
+    "massdevice.com"
 ]
 
 
@@ -410,15 +463,17 @@ def search_one(
     window: DateWindow,
     opts: RunOptions,
     llm_client: Any = None,
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], str]:
+    """Returns list of hits AND an optional Agent Summary string."""
     rows: List[Dict[str, Any]] = []
 
     # Terms tuned for "bad news" / regulatory actions
-    risk_terms = '(recall OR "field safety" OR "safety notice" OR "urgent safety" OR "risk of" OR warning OR injury OR lawsuit OR counterfeit OR "press release")'
+    # Added: "safety notice", "bulletin", "warning letter"
+    risk_terms = '(recall OR "field safety" OR "safety notice" OR "urgent safety" OR "risk of" OR warning OR injury OR lawsuit OR bulletin OR alert OR "warning letter")'
     base_terms = f"\"{product_name}\" {risk_terms}"
 
     # ------------------
-    # Google - General Web
+    # Google - General Web (News/Media)
     # ------------------
     if opts.use_google_general:
         q = base_terms
@@ -433,8 +488,9 @@ def search_one(
             rows.append({
                 "SKU": sku,
                 "Product Name": product_name,
-                "Source": "google_general",
-                "Region": "global",
+                "Source": "Google Web",
+                "Category": "News/Media",
+                "Region": "Global",
                 "Title": title,
                 "URL": url,
                 "Snippet": snippet,
@@ -463,13 +519,13 @@ def search_one(
                 url = safe_get(it, "link")
                 score = fuzzy_score(product_name, title, snippet)
                 if score < max(0.55, opts.fuzzy_threshold_google - 0.10):
-                    # regulators often have structured titles that fuzzy-match worse
                     continue
                 rows.append({
                     "SKU": sku,
                     "Product Name": product_name,
-                    "Source": f"google_regulator_{region_name.lower()}",
-                    "Region": region_name.lower(),
+                    "Source": f"Regulator ({region_name})",
+                    "Category": "Regulatory Action",
+                    "Region": region_name,
                     "Title": title,
                     "URL": url,
                     "Snippet": snippet,
@@ -503,10 +559,11 @@ def search_one(
             rows.append({
                 "SKU": sku,
                 "Product Name": product_name,
-                "Source": "openfda_device_recall",
-                "Region": "us",
+                "Source": "FDA Device Recall",
+                "Category": "Regulatory Action",
+                "Region": "US",
                 "Title": title,
-                "URL": recall_num,
+                "URL": f"https://www.accessdata.fda.gov/scripts/cdrh/cfdocs/cfRES/res.cfm?id={r.get('event_id','')}", # Construct actionable link
                 "Snippet": snippet,
                 "Date": safe_get(r, "report_date"),
                 "FuzzyScore": round(score, 3),
@@ -525,8 +582,9 @@ def search_one(
             rows.append({
                 "SKU": sku,
                 "Product Name": product_name,
-                "Source": "openfda_device_enforcement",
-                "Region": "us",
+                "Source": "FDA Enforcement",
+                "Category": "Regulatory Action",
+                "Region": "US",
                 "Title": title,
                 "URL": recall_num,
                 "Snippet": snippet,
@@ -550,8 +608,9 @@ def search_one(
             rows.append({
                 "SKU": sku,
                 "Product Name": product_name,
-                "Source": "cpsc",
-                "Region": "us",
+                "Source": "CPSC (Consumer Safety)",
+                "Category": "Regulatory Action",
+                "Region": "US",
                 "Title": title,
                 "URL": url,
                 "Snippet": snippet,
@@ -562,9 +621,7 @@ def search_one(
     # ------------------
     # Media: GDELT (recent coverage) + optional domain scoping
     # ------------------
-    # Practical rule: if window > 93 days, GDELT often becomes unreliable (Doc API is "recent" oriented)
     if opts.use_gdelt_media and window.days <= 93:
-        # If user provided media domains, use gdelt "domain:" operators; else plain query
         gdelt_q = f"\"{product_name}\" (recall OR safety OR warning OR injury OR lawsuit)"
         if opts.media_domains:
             dom_ops = " OR ".join([f"domain:{d}" for d in opts.media_domains if d])
@@ -574,7 +631,6 @@ def search_one(
         for a in articles[: opts.max_hits_per_source]:
             title = safe_get(a, "title")
             url = safe_get(a, "url")
-            # GDELT includes a short "seendate" and "sourceCountry" / "domain"
             snippet = safe_get(a, "sourceCountry") + " " + safe_get(a, "domain")
             dt = safe_get(a, "seendate")
             score = fuzzy_score(product_name, title, snippet)
@@ -583,8 +639,9 @@ def search_one(
             rows.append({
                 "SKU": sku,
                 "Product Name": product_name,
-                "Source": "gdelt_media",
-                "Region": "media",
+                "Source": "GDELT Media",
+                "Category": "News/Media",
+                "Region": "Global",
                 "Title": title,
                 "URL": url,
                 "Snippet": snippet.strip(),
@@ -606,8 +663,9 @@ def search_one(
             rows.append({
                 "SKU": sku,
                 "Product Name": product_name,
-                "Source": "google_media_domains",
-                "Region": "media",
+                "Source": "Google News Domains",
+                "Category": "News/Media",
+                "Region": "Global",
                 "Title": title,
                 "URL": url,
                 "Snippet": snippet,
@@ -625,11 +683,17 @@ def search_one(
         seen.add(k)
         deduped.append(r)
 
-    # Optional LLM classification
+    # Agentic: Summarization & Classification
+    agent_summary = ""
     if opts.use_llm:
         if llm_client is None:
             llm_client = ensure_openai_client()
+        
+        # 1. Summarize all findings (The "Agent")
+        if deduped:
+            agent_summary = summarize_risks_openai(llm_client, product_name, deduped, opts.llm_model)
 
+        # 2. Detailed Classification
         enriched = []
         for r in deduped:
             classification = classify_hit_openai(llm_client, sku, product_name, r, model=opts.llm_model)
@@ -640,9 +704,9 @@ def search_one(
             enriched.append(out)
             if opts.llm_sleep_seconds > 0:
                 time.sleep(opts.llm_sleep_seconds)
-        return enriched
+        return enriched, agent_summary
 
-    return deduped
+    return deduped, ""
 
 
 # ============================================================
@@ -665,7 +729,7 @@ def add_flags(df: pd.DataFrame) -> pd.DataFrame:
     else:
         df["FlagLevel"] = df["FuzzyScore"].apply(lambda x: "HIGH" if x >= 0.90 else ("MED" if x >= 0.80 else "LOW"))
         df["Severity"] = ""
-        df["Category"] = ""
+        # df["Category"] is already set by search_one
         df["Confidence"] = ""
     return df
 
@@ -680,9 +744,9 @@ def build_summary(df: pd.DataFrame) -> pd.DataFrame:
 
 def build_breakdown(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
-        return pd.DataFrame(columns=["Region", "Source", "FlagLevel", "count"])
+        return pd.DataFrame(columns=["Region", "Category", "Source", "FlagLevel", "count"])
     breakdown = (
-        df.groupby(["Region", "Source", "FlagLevel"], dropna=False)
+        df.groupby(["Region", "Category", "Source", "FlagLevel"], dropna=False)
         .size()
         .reset_index(name="count")
         .sort_values(["count"], ascending=False)
@@ -704,8 +768,9 @@ def export_reports(df: pd.DataFrame) -> Tuple[bytes, bytes]:
 # ============================================================
 # UI
 # ============================================================
-st.set_page_config(page_title="CAPA Screening", layout="wide")
-st.title("CAPA Screening – Global Recalls & Negative Press")
+st.set_page_config(page_title="CAPA Regulatory Agent", layout="wide", page_icon="🛡️")
+st.title("🛡️ Global Regulatory Intelligence & CAPA Agent")
+st.caption("Surveillance of FDA, EU, UK, LATAM, CPSC, and Global Media for Recalls & Safety Alerts")
 
 with st.expander("Security / Setup (read this once)", expanded=False):
     st.markdown(
@@ -740,8 +805,8 @@ st.sidebar.caption(f"Window: {window.start.isoformat()} → {window.end.isoforma
 st.sidebar.divider()
 st.sidebar.header("Sources")
 
-use_google_general = st.sidebar.checkbox("Google – General web", value=True)
-use_google_regulators = st.sidebar.checkbox("Google – Regulators (EU/UK/LATAM)", value=True)
+use_google_general = st.sidebar.checkbox("Google – General web (News)", value=True)
+use_google_regulators = st.sidebar.checkbox("Google – Regulators (EU/UK/LATAM)", value=True, help="Specific site searches for MHRA, EMA, ANVISA, etc.")
 
 use_openfda_recall = st.sidebar.checkbox("openFDA – Device recall", value=True)
 use_openfda_enforcement = st.sidebar.checkbox("openFDA – Device enforcement", value=True)
@@ -754,9 +819,9 @@ if use_gdelt_media and window.days > 93:
 
 st.sidebar.divider()
 st.sidebar.header("Regulators – Regions")
-reg_uk = st.sidebar.checkbox("UK regulators", value=True)
-reg_eu = st.sidebar.checkbox("EU regulators", value=True)
-reg_latam = st.sidebar.checkbox("LATAM regulators", value=True)
+reg_uk = st.sidebar.checkbox("UK regulators (MHRA)", value=True)
+reg_eu = st.sidebar.checkbox("EU regulators (EMA/National)", value=True)
+reg_latam = st.sidebar.checkbox("LATAM regulators (ANVISA/COFEPRIS/INVIMA)", value=True)
 
 st.sidebar.divider()
 st.sidebar.header("Matching & Limits")
@@ -765,8 +830,8 @@ keep_official_low = st.sidebar.checkbox("Keep low-score openFDA/CPSC hits", valu
 max_hits = st.sidebar.slider("Max hits per source (cap)", 10, 200, 50, 10)
 
 st.sidebar.divider()
-st.sidebar.header("Agentic AI (optional)")
-use_llm = st.sidebar.checkbox("Enable AI classification", value=False)
+st.sidebar.header("Agentic AI")
+use_llm = st.sidebar.checkbox("Enable AI Agent", value=True, help="Analyzes results to generate a briefing and categorize risk.")
 llm_model = st.sidebar.text_input("LLM model", value="gpt-4o-mini", disabled=not use_llm)
 llm_sleep = st.sidebar.slider("LLM delay per hit (seconds)", 0.0, 2.0, 0.0, 0.1, disabled=not use_llm)
 
@@ -776,22 +841,22 @@ st.sidebar.header("Domain Lists (editable)")
 uk_domains_text = st.sidebar.text_area(
     "UK domains (one per line)",
     value="\n".join(DEFAULT_UK_DOMAINS),
-    height=120,
+    height=100,
 )
 eu_domains_text = st.sidebar.text_area(
     "EU domains (one per line)",
     value="\n".join(DEFAULT_EU_DOMAINS),
-    height=160,
+    height=120,
 )
 latam_domains_text = st.sidebar.text_area(
     "LATAM domains (one per line)",
     value="\n".join(DEFAULT_LATAM_DOMAINS),
-    height=160,
+    height=120,
 )
 media_domains_text = st.sidebar.text_area(
     "Media domains (optional, one per line)",
     value="\n".join(DEFAULT_MEDIA_DOMAINS),
-    height=160,
+    height=100,
 )
 
 opts = RunOptions(
@@ -834,7 +899,7 @@ with tab1:
     with colA:
         sku = st.text_input("SKU", value="")
     with colB:
-        product_name = st.text_input("Product Name", value="")
+        product_name = st.text_input("Product Name / Description", value="")
 
     run_single = st.button("Run Search", type="primary", disabled=not product_name.strip())
 
@@ -856,22 +921,69 @@ with tab1:
                 # Do not stop execution for Google error, just warn and continue
                 st.toast(f"Google configuration missing/invalid. Searching other sources...", icon="⚠️")
 
-        with st.spinner("Searching sources..."):
-            rows = search_one(sku.strip(), product_name.strip(), window, opts, llm_client=llm_client)
+        with st.spinner("Agent is querying global health agencies & media..."):
+            rows, agent_summary = search_one(sku.strip(), product_name.strip(), window, opts, llm_client=llm_client)
 
         if not rows:
             st.info("No hits found for the selected sources/date range.")
         else:
             df = add_flags(pd.DataFrame(rows))
-            st.markdown("### Findings")
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            
+            # --- Agent Briefing ---
+            if agent_summary:
+                st.success("Analysis Complete")
+                with st.expander("📝 Agent Regulatory Briefing", expanded=True):
+                    st.markdown(agent_summary)
+            
+            st.divider()
 
-            st.markdown("### Breakdown")
+            # --- Categorized Findings ---
+            st.markdown("### Findings by Category")
+            
+            # Create sub-tabs for easier viewing
+            subtabs = st.tabs(["All", "Regulatory Actions (Official)", "News & Media", "US", "EU", "LATAM"])
+            
+            with subtabs[0]:
+                st.dataframe(
+                    df, 
+                    use_container_width=True, 
+                    hide_index=True,
+                    column_config={"URL": st.column_config.LinkColumn("Source Link")}
+                )
+            
+            with subtabs[1]:
+                reg_df = df[df["Category"] == "Regulatory Action"]
+                st.dataframe(
+                    reg_df, 
+                    use_container_width=True, 
+                    hide_index=True,
+                    column_config={"URL": st.column_config.LinkColumn("Source Link")}
+                )
+
+            with subtabs[2]:
+                news_df = df[df["Category"] == "News/Media"]
+                st.dataframe(
+                    news_df, 
+                    use_container_width=True, 
+                    hide_index=True,
+                    column_config={"URL": st.column_config.LinkColumn("Source Link")}
+                )
+            
+            with subtabs[3]: # US
+                st.dataframe(df[df["Region"] == "US"], use_container_width=True, hide_index=True, column_config={"URL": st.column_config.LinkColumn("Source Link")})
+            with subtabs[4]: # EU
+                st.dataframe(df[df["Region"] == "EU"], use_container_width=True, hide_index=True, column_config={"URL": st.column_config.LinkColumn("Source Link")})
+            with subtabs[5]: # LATAM
+                st.dataframe(df[df["Region"] == "LATAM"], use_container_width=True, hide_index=True, column_config={"URL": st.column_config.LinkColumn("Source Link")})
+
+
+            st.markdown("### Regional Breakdown")
             st.dataframe(build_breakdown(df), use_container_width=True, hide_index=True)
 
             csv_bytes, xlsx_bytes = export_reports(df)
-            st.download_button("Download CSV", data=csv_bytes, file_name="single_search_report.csv")
-            st.download_button("Download XLSX", data=xlsx_bytes, file_name="single_search_report.xlsx")
+            c1, c2 = st.columns(2)
+            c1.download_button("Download CSV", data=csv_bytes, file_name="single_search_report.csv")
+            c2.download_button("Download XLSX", data=xlsx_bytes, file_name="single_search_report.xlsx")
 
 
 # ------------------------------------------------------------
@@ -921,7 +1033,7 @@ with tab2:
             pn_i = str(r["Product Name"]).strip()
             status.write(f"Searching **{i+1}/{len(products)}**: `{sku_i}` – {pn_i}")
 
-            rows = search_one(sku_i, pn_i, window, opts, llm_client=llm_client)
+            rows, _ = search_one(sku_i, pn_i, window, opts, llm_client=llm_client)
             all_rows.extend(rows)
 
             progress.progress((i + 1) / len(products))
@@ -944,13 +1056,14 @@ with tab2:
 
         st.markdown("### Screening Overview (top hit per product)")
         st.dataframe(
-            best[["SKU", "Product Name", "Region", "Source", "FlagLevel", "FuzzyScore", "Title", "URL"]],
+            best[["SKU", "Product Name", "Region", "Category", "Source", "FlagLevel", "FuzzyScore", "Title", "URL"]],
             use_container_width=True,
             hide_index=True,
+            column_config={"URL": st.column_config.LinkColumn("Source Link")}
         )
 
         st.markdown("### All Findings")
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, use_container_width=True, hide_index=True, column_config={"URL": st.column_config.LinkColumn("Source Link")})
 
         st.markdown("### Breakdown")
         st.dataframe(build_breakdown(df), use_container_width=True, hide_index=True)

@@ -17,8 +17,7 @@ def display_dashboard():
         
         rd_file = st.file_uploader("Upload R&D Spec (DOCX)", type=['docx'], key="rd_uploader")
         
-        # FIX: width="stretch"
-        if rd_file and st.button("✨ Auto-Configure Project", type="primary", width="stretch"):
+        if rd_file and st.button("✨ Auto-Configure Project", type="primary", use_container_width=True):
             if st.session_state.api_key_missing:
                 st.error("API Key required for AI processing.")
             else:
@@ -81,8 +80,7 @@ def display_dashboard():
         sales_file = c1.file_uploader("Upload Sales/Forecast Data (CSV/Excel)", type=['csv', 'xlsx'])
         returns_file = c2.file_uploader("Upload Returns Pivot/Report (CSV/Excel)", type=['csv', 'xlsx'])
         
-        # FIX: width="stretch"
-        if st.button("🚀 Process Data & Run Analysis", type="primary", width="stretch"):
+        if st.button("🚀 Process Data & Run Analysis", type="primary", use_container_width=True):
             if sales_file and returns_file:
                 with st.spinner("Processing data across SKUs..."):
                     try:
@@ -161,7 +159,7 @@ def display_dashboard():
                 "return_rate": st.column_config.NumberColumn("Return Rate (%)", format="%.2f%%"),
                 "quality_status": "Status"
             },
-            width=1200, # Replaced stretch
+            use_container_width=True,
             hide_index=True
         )
 
@@ -217,12 +215,6 @@ def display_dashboard():
             }
         ))
         fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", font={'color': "white"}, height=300)
-        # FIX: width="stretch" (st.plotly_chart doesn't take stretch string, use use_container_width=True still if valid or remove. 
-        # Streamlit warning specifically said: "For use_container_width=True, use width='stretch'." THIS IS CONFUSING for plotly_chart. 
-        # Actually for plotly_chart, use_container_width=True IS correct in latest versions, 
-        # but the deprecation warning usually applies to NATIVE widgets. 
-        # Use simple True here if valid, or just rely on layout.)
-        # Based on user log, let's try the new standard.
         st.plotly_chart(fig, use_container_width=True) 
     
     with col_ai:

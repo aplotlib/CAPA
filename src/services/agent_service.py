@@ -27,7 +27,14 @@ class RecallResponseAgent:
         start_date = datetime.now() - timedelta(days=lookback_days)
         
         # 1. Search (Now includes MAUDE and Media)
-        df, stats = self.regulatory.search_all_sources(search_term, start_date, datetime.now(), limit=50)
+        df, stats = self.regulatory.search_all_sources(
+            query_term=search_term,
+            start_date=start_date,
+            end_date=datetime.now(),
+            limit=50,
+            manufacturer=my_firm,
+            include_sanctions=True,
+        )
         total_hits = len(df)
         self._log(mission_log, f"✅ SCAN COMPLETE. Found {total_hits} records. Stats: {stats}")
 
@@ -107,7 +114,12 @@ class RecallResponseAgent:
                 progress_callback(progress, f"Scanning {idx+1}/{total_items}: {p_name}...")
 
             # 1. SEARCH
-            hits, _ = self.regulatory.search_all_sources(p_name, start_date, end_date, limit=20)
+            hits, _ = self.regulatory.search_all_sources(
+                query_term=p_name,
+                start_date=start_date,
+                end_date=end_date,
+                limit=20,
+            )
             
             if not hits.empty:
                 # 2. FUZZY MATCH FILTERING

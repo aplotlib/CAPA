@@ -5,10 +5,16 @@ quality_thresholds:
   critical_return_rate: 15
   warning_return_rate: 10
 ai_models:
-  # Use Mini for grammar, simple rewrites, and basic summaries (Faster/Cheaper)
-  fast: "gpt-4o-mini"
-  # Use Standard 4o for complex reasoning, root cause analysis, and regulatory drafting
-  reasoning: "gpt-4o"
+  openai:
+    # Use Mini for grammar, simple rewrites, and basic summaries (Faster/Cheaper)
+    fast: "gpt-4o-mini"
+    # Use Standard 4o for complex reasoning, root cause analysis, and regulatory drafting
+    reasoning: "gpt-4o"
+  gemini:
+    # Use Flash for rapid summaries and snippets
+    fast: "gemini-1.5-flash"
+    # Use Pro for deeper reasoning and regulatory analysis
+    reasoning: "gemini-1.5-pro"
 export_formats:
   - docx
   - pdf

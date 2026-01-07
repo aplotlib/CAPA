@@ -1,6 +1,6 @@
 import streamlit as st
 import openai
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 import json
 import logging
 import io
@@ -11,28 +11,29 @@ logger = logging.getLogger(__name__)
 
 class AIServiceBase:
     """Base class for all AI Services using OpenAI SDK (compatible with Gemini)."""
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, provider: str = "openai", model_overrides: Optional[Dict[str, str]] = None):
         if not api_key:
             self.client = None
             logger.warning("AIService initialized without API Key.")
             return
 
-        self.provider = st.session_state.get("provider", "openai")
+        self.provider = provider
+        model_overrides = model_overrides or {}
 
         try:
-            if self.provider == "google":
+            if self.provider == "gemini":
                 # Route through Google's OpenAI-compatible endpoint
                 self.client = openai.OpenAI(
                     api_key=api_key,
                     base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
                 )
-                self.fast_model = "gemini-1.5-flash"
-                self.reasoning_model = "gemini-1.5-pro"
+                self.fast_model = model_overrides.get("fast", "gemini-1.5-flash")
+                self.reasoning_model = model_overrides.get("reasoning", "gemini-1.5-pro")
             else:
                 # Default OpenAI
                 self.client = openai.OpenAI(api_key=api_key)
-                self.fast_model = "gpt-4o-mini"
-                self.reasoning_model = "gpt-4o"
+                self.fast_model = model_overrides.get("fast", "gpt-4o-mini")
+                self.reasoning_model = model_overrides.get("reasoning", "gpt-4o")
                 
         except Exception as e:
             logger.error(f"Failed to initialize AI Client ({self.provider}): {e}")
@@ -51,7 +52,7 @@ class AIServiceBase:
             
         return self.client.chat.completions.create(**kwargs)
 
-    def _generate_json(self, prompt: str, system_instruction: str = None) -> Dict[str, Any]:
+    def _generate_json(self, prompt: str, system_instruction: str = None, use_reasoning: bool = False) -> Dict[str, Any]:
         """Helper to generate JSON responses safely."""
         if not self.client:
             return {"error": "AI Client not initialized (Missing API Key)."}
@@ -71,7 +72,7 @@ class AIServiceBase:
 
         try:
             response = self._generate_with_retry(
-                model=self.fast_model,
+                model=self.reasoning_model if use_reasoning else self.fast_model,
                 messages=messages,
                 response_format={"type": "json_object"},
                 temperature=0.3
@@ -86,7 +87,7 @@ class AIServiceBase:
             logger.error(f"AI Generation Error: {e}")
             return {"error": str(e)}
 
-    def _generate_text(self, prompt: str, system_instruction: str = None) -> str:
+    def _generate_text(self, prompt: str, system_instruction: str = None, use_reasoning: bool = False) -> str:
         """Helper to generate text responses."""
         if not self.client:
             return "Error: AI Client not initialized (Missing API Key)."
@@ -98,7 +99,7 @@ class AIServiceBase:
 
         try:
             response = self._generate_with_retry(
-                model=self.fast_model,
+                model=self.reasoning_model if use_reasoning else self.fast_model,
                 messages=messages,
                 temperature=0.4
             )
@@ -106,6 +107,31 @@ class AIServiceBase:
         except Exception as e:
             logger.error(f"AI Text Generation Error: {e}")
             return f"Error: {str(e)}"
+
+    @staticmethod
+    def _verbosity_instruction(level: str) -> str:
+        if level == "Pithy":
+            return "Be extremely concise. Use 3-5 bullets, max 120 words."
+        if level == "Verbose":
+            return "Be thorough and structured with headings and bullet points. Include key context and caveats."
+        return "Be concise but clear. Use short paragraphs or bullets."
+
+    def generate_text_with_verbosity(self, prompt: str, system_instruction: str, verbosity: str, use_reasoning: bool = False) -> str:
+        verbosity_note = self._verbosity_instruction(verbosity)
+        merged_instruction = f"{system_instruction}\n{verbosity_note}".strip()
+        return self._generate_text(prompt, system_instruction=merged_instruction, use_reasoning=use_reasoning)
+
+    def generate_dual_responses(
+        self,
+        prompt: str,
+        system_instruction: str,
+        concise_label: str = "Pithy",
+        verbose_label: str = "Verbose",
+        use_reasoning: bool = False,
+    ) -> Tuple[str, str]:
+        concise = self.generate_text_with_verbosity(prompt, system_instruction, concise_label, use_reasoning=use_reasoning)
+        verbose = self.generate_text_with_verbosity(prompt, system_instruction, verbose_label, use_reasoning=use_reasoning)
+        return concise, verbose
 
 # --- Specialized Services ---
 
@@ -118,8 +144,8 @@ class AIService(AIServiceBase):
              return {"error": "AI Client not initialized."}
 
         # 1. Transcribe (Note: Google compatible endpoint doesn't support 'whisper-1' usually, 
-        # so this might fail if using Google Key. We add a check.)
-        if self.provider == 'google':
+        # so this might fail if using Gemini Key. We add a check.)
+        if self.provider == 'gemini':
              return {"error": "Audio transcription is currently optimized for OpenAI keys only."}
 
         try:
@@ -145,7 +171,7 @@ class AIService(AIServiceBase):
         2. Extract fields: Issue Description, Root Cause, Immediate Actions.
         Return JSON.
         """
-        return self._generate_json(user_prompt, system_prompt)
+        return self._generate_json(user_prompt, system_prompt, use_reasoning=True)
 
     def assess_relevance_json(self, my_context: str, record_text: str) -> Dict[str, str]:
         """
@@ -172,12 +198,12 @@ class AIService(AIServiceBase):
             "analysis": "Short explanation. Mention if translation was applied."
         }}
         """
-        return self._generate_json(prompt, system)
+        return self._generate_json(prompt, system, use_reasoning=True)
 
     def analyze_meeting_transcript(self, transcript_text: str) -> Dict[str, str]:
         system_prompt = "You are a QA Expert. Extract CAPA details (issue, root cause, actions) from notes. Return JSON."
         user_prompt = f"Analyze this transcript and return a JSON object:\n{transcript_text}"
-        return self._generate_json(user_prompt, system_prompt)
+        return self._generate_json(user_prompt, system_prompt, use_reasoning=True)
 
     def screen_recalls(self, product_description: str) -> str:
         system = "You are a Regulatory Expert. Screen device against FDA/MDR recall databases."
@@ -197,7 +223,7 @@ class AIService(AIServiceBase):
         
         Return JSON: {{ "keywords": ["term1", "term2", "term3"] }}
         """
-        response = self._generate_json(prompt, system)
+        response = self._generate_json(prompt, system, use_reasoning=True)
         return response.get('keywords', [])
 
     def assess_relevance(self, product_desc: str, recall_text: str) -> str:
@@ -226,7 +252,7 @@ class DesignControlsTriager(AIServiceBase):
         Generate a JSON with keys: 'traceability_matrix', 'inputs', 'outputs', 'verification', 'validation', 'plan', 'transfer', 'dhf'.
         Each value should be a markdown string suitable for a report.
         """
-        return self._generate_json(prompt, system)
+        return self._generate_json(prompt, system, use_reasoning=True)
 
 class UrraGenerator(AIServiceBase):
     def generate_urra(self, product_name: str, product_desc: str, user: str, environment: str) -> Dict[str, Any]:
@@ -241,7 +267,7 @@ class UrraGenerator(AIServiceBase):
         Return JSON with key 'urra_rows' containing a list of objects with keys:
         'Task', 'Hazard', 'Severity' (1-5), 'Probability' (1-5), 'Risk Level' (Low/Med/High), 'Mitigation'.
         """
-        return self._generate_json(prompt, system)
+        return self._generate_json(prompt, system, use_reasoning=True)
 
 class ManualWriter(AIServiceBase):
     def generate_manual_section(self, section_title: str, product_name: str, product_ifu: str, user_inputs: Dict, target_language: str) -> str:
@@ -266,7 +292,7 @@ class ProjectCharterHelper(AIServiceBase):
         
         Return JSON with keys: 'project_goal', 'scope', 'device_classification', 'applicable_standards' (list), 'stakeholders'.
         """
-        return self._generate_json(prompt, system)
+        return self._generate_json(prompt, system, use_reasoning=True)
 
 class VendorEmailDrafter(AIServiceBase):
     def draft_vendor_email(self, goal: str, analysis_results: Any, sku: str, vendor: str, contact: str, english_level: int) -> str:
@@ -292,7 +318,7 @@ class HumanFactorsHelper(AIServiceBase):
         
         Return JSON with keys: 'conclusion_statement', 'descriptions', 'device_interface', 'known_problems', 'hazards_analysis', 'preliminary_analyses', 'critical_tasks', 'validation_testing'.
         """
-        return self._generate_json(prompt, system)
+        return self._generate_json(prompt, system, use_reasoning=True)
 
 class MedicalDeviceClassifier(AIServiceBase):
     def classify_device(self, description: str) -> Dict[str, str]:
@@ -305,15 +331,36 @@ class MedicalDeviceClassifier(AIServiceBase):
         'rationale' (Why?), 
         'product_code' (FDA Product Code if applicable).
         """
-        return self._generate_json(prompt, system)
+        return self._generate_json(prompt, system, use_reasoning=True)
+
+class MultiProviderAIService:
+    def __init__(self, openai_key: str, gemini_key: str, model_overrides: Optional[Dict[str, Dict[str, str]]] = None):
+        model_overrides = model_overrides or {}
+        self.openai = AIService(openai_key, provider="openai", model_overrides=model_overrides.get("openai"))
+        self.gemini = AIService(gemini_key, provider="gemini", model_overrides=model_overrides.get("gemini"))
+
+    def generate_dual_responses(self, prompt: str, system_instruction: str) -> Tuple[str, str]:
+        concise = self.openai.generate_text_with_verbosity(prompt, system_instruction, "Pithy", use_reasoning=True)
+        verbose = self.gemini.generate_text_with_verbosity(prompt, system_instruction, "Verbose", use_reasoning=True)
+        return concise, verbose
 
 # Singleton management for the main service
 def get_ai_service():
     if 'ai_service' not in st.session_state:
         # Try to initialize if key is present
-        api_key = st.session_state.get('api_key')
-        if api_key:
-            st.session_state.ai_service = AIService(api_key)
+        provider = st.session_state.get("provider", "openai")
+        model_overrides = st.session_state.get("model_overrides", {})
+        if provider == "both":
+            openai_key = st.session_state.get("openai_api_key")
+            gemini_key = st.session_state.get("gemini_api_key")
+            if openai_key and gemini_key:
+                st.session_state.ai_service = MultiProviderAIService(openai_key, gemini_key, model_overrides=model_overrides)
+            else:
+                return None
         else:
-            return None
+            api_key = st.session_state.get('api_key')
+            if api_key:
+                st.session_state.ai_service = AIService(api_key, provider=provider, model_overrides=model_overrides.get(provider))
+            else:
+                return None
     return st.session_state.get('ai_service')

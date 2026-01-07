@@ -33,7 +33,12 @@ def init_session() -> None:
     if "openai_api_key" not in st.session_state:
         st.session_state.openai_api_key = _safe_secret("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
     if "gemini_api_key" not in st.session_state:
-        st.session_state.gemini_api_key = _safe_secret("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+        st.session_state.gemini_api_key = (
+            _safe_secret("GEMINI_API_KEY")
+            or _safe_secret("GOOGLE_API_KEY")
+            or os.getenv("GEMINI_API_KEY")
+            or os.getenv("GOOGLE_API_KEY")
+        )
 
     if "provider" not in st.session_state:
         if st.session_state.openai_api_key and st.session_state.gemini_api_key:
@@ -110,7 +115,7 @@ def sidebar_controls() -> tuple[date, date, List[str], str]:
         if st.checkbox("🇨🇦 Canada", value=True):
             regions.append("CA")
 
-    if st.sidebar.checkbox("🌎 LATAM (BR/MX/CO)", value=True):
+    if st.sidebar.checkbox(" LATAM (BR/MX/CO)", value=True):
         regions.append("LATAM")
 
     if st.sidebar.checkbox("🌏 APAC", value=False):

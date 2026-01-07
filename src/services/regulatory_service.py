@@ -6,6 +6,8 @@ from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import pandas as pd
+import requests
+from bs4 import BeautifulSoup
 
 from src.search.cpsc import cpsc_search
 from src.search.google_cse import google_search
@@ -129,6 +131,9 @@ class RegulatoryService:
             sanctions_hits = cls._search_sanctions(manufacturer, limit=limit)
             results.extend(sanctions_hits)
             status_log["Sanctions & Watchlists"] = len(sanctions_hits)
+            ofac_hits = cls._search_ofac(manufacturer, limit=limit)
+            results.extend(ofac_hits)
+            status_log["OFAC Sanctions"] = len(ofac_hits)
 
         if is_powerful:
             web_hits = cls._search_regulatory_web(terms, regions, limit=limit)
@@ -333,6 +338,91 @@ class RegulatoryService:
         query = f'"{manufacturer}" (sanction OR enforcement OR penalty OR debarment OR warning)'
         hits = google_search(query, num=min(limit, 10), pages=2, domains=cls.SANCTIONS_DOMAINS)
         return cls._google_hits_to_records(hits, "Sanctions & Watchlists", manufacturer)
+
+    @classmethod
+    def _search_ofac(cls, manufacturer: str, limit: int) -> List[Dict[str, Any]]:
+        if not manufacturer:
+            return []
+
+        session = requests.Session()
+        session.headers.update(
+            {
+                "User-Agent": "CAPA-Regulatory-Agent/1.0 (+https://sanctionssearch.ofac.treas.gov/)",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            }
+        )
+        base_url = "https://sanctionssearch.ofac.treas.gov"
+        token = None
+        try:
+            landing = session.get(base_url, timeout=15)
+            if landing.ok:
+                soup = BeautifulSoup(landing.text, "lxml")
+                token_input = soup.find("input", {"name": "__RequestVerificationToken"})
+                if token_input and token_input.get("value"):
+                    token = token_input["value"]
+        except requests.RequestException:
+            return []
+
+        payload = {
+            "searchValue": manufacturer,
+            "searchType": "Name",
+            "searchCriteria": "0",
+            "searchTypeId": "0",
+            "name": manufacturer,
+        }
+        if token:
+            payload["__RequestVerificationToken"] = token
+
+        endpoints = ["/Home/Search", "/Home/Search/"]
+        html = None
+        for endpoint in endpoints:
+            try:
+                response = session.post(f"{base_url}{endpoint}", data=payload, timeout=20)
+                if response.ok and response.text:
+                    html = response.text
+                    break
+            except requests.RequestException:
+                continue
+
+        if not html:
+            return []
+
+        soup = BeautifulSoup(html, "lxml")
+        table = soup.find("table")
+        if not table:
+            return []
+
+        headers = [th.get_text(strip=True) for th in table.find_all("th")]
+        records: List[Dict[str, Any]] = []
+        for row in table.find_all("tr"):
+            cells = [td.get_text(" ", strip=True) for td in row.find_all("td")]
+            if not cells:
+                continue
+            row_data = dict(zip(headers, cells)) if headers else {}
+            name = row_data.get("Name") or cells[0]
+            programs = row_data.get("Program") or row_data.get("Programs") or ""
+            sanctions_type = row_data.get("Type") or ""
+            reason = " | ".join([x for x in [programs, sanctions_type] if x])
+            link = base_url
+            records.append(
+                {
+                    "Source": "OFAC Sanctions Search",
+                    "Date": "",
+                    "Product": name,
+                    "Description": name,
+                    "Reason": reason or "OFAC sanctions list match",
+                    "Firm": name,
+                    "Model Info": "",
+                    "ID": f"OFAC:{name}",
+                    "Link": link,
+                    "Status": "Listed",
+                    "Risk_Level": "High",
+                    "Matched_Term": manufacturer,
+                }
+            )
+            if len(records) >= limit:
+                break
+        return records
 
     @classmethod
     def _search_media(cls, query_term: str, regions: Sequence[str]) -> List[Dict[str, Any]]:

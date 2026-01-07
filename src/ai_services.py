@@ -22,6 +22,8 @@ class AIServiceBase:
 
         try:
             if self.provider == "gemini":
+                if api_key.startswith("sk-"):
+                    logger.warning("Gemini API key appears to be an OpenAI key. Check GEMINI_API_KEY/GOOGLE_API_KEY.")
                 # Route through Google's OpenAI-compatible endpoint
                 self.client = openai.OpenAI(
                     api_key=api_key,
@@ -38,6 +40,16 @@ class AIServiceBase:
         except Exception as e:
             logger.error(f"Failed to initialize AI Client ({self.provider}): {e}")
             self.client = None
+
+    def _format_gemini_key_error(self, error: Exception) -> str | None:
+        if self.provider != "gemini":
+            return None
+        message = str(error)
+        if "API_KEY_INVALID" in message or "API key not valid" in message:
+            return (
+                "Error: Gemini API key invalid. Set GEMINI_API_KEY or GOOGLE_API_KEY with a valid Google AI Studio key."
+            )
+        return None
 
     @retry_with_backoff(retries=3, backoff_in_seconds=2)
     def _generate_with_retry(self, model: str, messages: List[Dict[str, str]], response_format=None, temperature=0.7):
@@ -84,6 +96,9 @@ class AIServiceBase:
         except json.JSONDecodeError:
              return {"error": "Failed to decode AI response as JSON"}
         except Exception as e:
+            gemini_hint = self._format_gemini_key_error(e)
+            if gemini_hint:
+                return {"error": gemini_hint}
             logger.error(f"AI Generation Error: {e}")
             return {"error": str(e)}
 
@@ -105,6 +120,9 @@ class AIServiceBase:
             )
             return response.choices[0].message.content
         except Exception as e:
+            gemini_hint = self._format_gemini_key_error(e)
+            if gemini_hint:
+                return gemini_hint
             logger.error(f"AI Text Generation Error: {e}")
             return f"Error: {str(e)}"
 

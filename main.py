@@ -1,4 +1,3 @@
-# main.py
 from __future__ import annotations
 
 import os
@@ -196,5 +195,3 @@ with tab_search:
                 
                 status.write(f"✅ Search Complete. Found {len(df)} records.")
                 status.update(label="Mission Complete", state="complete", expanded=False)
-
-    if logs:

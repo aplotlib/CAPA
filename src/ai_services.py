@@ -148,7 +148,6 @@ class AIServiceBase:
         use_reasoning: bool = False,
     ) -> Tuple[str, str]:
         concise = self.generate_text_with_verbosity(prompt, system_instruction, concise_label, use_reasoning=use_reasoning)
-        verbose = self.generate_text_with_verbosity(prompt, system_instruction, verbose_label, use_reasoning=use_reasoning)
         return concise, verbose
 
 # --- Specialized Services ---

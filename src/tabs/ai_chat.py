@@ -19,7 +19,15 @@ def display_chat_interface():
     # Display chat messages
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+            content = message["content"]
+            if isinstance(content, dict) and message["role"] == "assistant":
+                tab_concise, tab_verbose = st.tabs(["⚡ Pithy", "📚 Verbose"])
+                with tab_concise:
+                    st.markdown(content.get("concise", "No concise response available."))
+                with tab_verbose:
+                    st.markdown(content.get("verbose", "No verbose response available."))
+            else:
+                st.markdown(content)
 
     # Chat Input
     if prompt := st.chat_input("Ask about recalls, regulations, or draft a response..."):
@@ -62,8 +70,20 @@ def display_chat_interface():
                 If drafting text (emails, CAPAs), be professional and precise.
                 """
                 
-                response = ai._generate_text(full_prompt, system_instruction="You are a helpful Regulatory Assistant.")
-                st.markdown(response)
+                system_instruction = "You are a helpful Regulatory Assistant."
+                if hasattr(ai, "openai") and hasattr(ai, "gemini"):
+                    concise, verbose = ai.generate_dual_responses(full_prompt, system_instruction)
+                else:
+                    concise, verbose = ai.generate_dual_responses(full_prompt, system_instruction, use_reasoning=True)
+
+                tab_concise, tab_verbose = st.tabs(["⚡ Pithy", "📚 Verbose"])
+                with tab_concise:
+                    st.markdown(concise)
+                with tab_verbose:
+                    st.markdown(verbose)
                 
                 # Add assistant response to history
-                st.session_state.messages.append({"role": "assistant", "content": response})
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": {"concise": concise, "verbose": verbose}
+                })

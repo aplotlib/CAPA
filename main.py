@@ -5,6 +5,7 @@ import os
 import time
 import pandas as pd
 import streamlit as st
+import yaml
 from datetime import date, datetime, timedelta
 
 # Import Services and Tabs
@@ -29,19 +30,73 @@ def init_session():
     if "GOOGLE_API_KEY" not in st.secrets and "GOOGLE_API_KEY" in os.environ:
         pass 
 
+    if "openai_api_key" not in st.session_state:
+        st.session_state.openai_api_key = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+    if "gemini_api_key" not in st.session_state:
+        st.session_state.gemini_api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+
+    if "provider" not in st.session_state:
+        if st.session_state.openai_api_key and st.session_state.gemini_api_key:
+            st.session_state.provider = "both"
+        elif st.session_state.gemini_api_key:
+            st.session_state.provider = "gemini"
+        else:
+            st.session_state.provider = "openai"
+
+    if "model_overrides" not in st.session_state:
+        if os.path.exists("config.yaml"):
+            with open("config.yaml", "r", encoding="utf-8") as config_file:
+                config = yaml.safe_load(config_file) or {}
+            st.session_state.model_overrides = config.get("ai_models", {})
+
     if 'ai_service' not in st.session_state:
-        api_key = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
-        if api_key:
-            st.session_state.api_key = api_key
-            get_ai_service()
+        if st.session_state.provider == "openai":
+            st.session_state.api_key = st.session_state.openai_api_key
+        elif st.session_state.provider == "gemini":
+            st.session_state.api_key = st.session_state.gemini_api_key
+        get_ai_service()
 
 init_session()
-ai = get_ai_service()
 
 # ============================================================
 # SIDEBAR CONFIGURATION
 # ============================================================
 st.sidebar.title("🛡️ Mission Control")
+
+st.sidebar.header("0. AI Controls")
+provider_label_map = {
+    "openai": "OpenAI",
+    "gemini": "Gemini",
+    "both": "OpenAI + Gemini",
+}
+provider_choice = st.sidebar.selectbox(
+    "AI Provider",
+    list(provider_label_map.values()),
+    index=list(provider_label_map.keys()).index(st.session_state.provider),
+)
+selected_provider = {v: k for k, v in provider_label_map.items()}[provider_choice]
+if selected_provider != st.session_state.provider:
+    st.session_state.provider = selected_provider
+    st.session_state.pop("ai_service", None)
+
+verbosity = st.sidebar.select_slider(
+    "Verbosity",
+    options=["Pithy", "Balanced", "Verbose"],
+    value=st.session_state.get("verbosity", "Balanced"),
+)
+st.session_state.verbosity = verbosity
+
+if st.session_state.provider == "openai":
+    st.session_state.api_key = st.session_state.openai_api_key
+elif st.session_state.provider == "gemini":
+    st.session_state.api_key = st.session_state.gemini_api_key
+else:
+    st.session_state.api_key = st.session_state.openai_api_key
+
+if st.session_state.provider in {"openai", "both"} and not st.session_state.openai_api_key:
+    st.sidebar.warning("OpenAI API key not found in Streamlit secrets.")
+if st.session_state.provider in {"gemini", "both"} and not st.session_state.gemini_api_key:
+    st.sidebar.warning("Gemini API key not found in Streamlit secrets.")
 
 st.sidebar.header("1. Search Scope")
 date_mode = st.sidebar.selectbox(
@@ -69,7 +124,9 @@ with c1:
     if st.checkbox("🇪🇺 EU", value=True): regions.append("EU")
 with c2:
     if st.checkbox("🇬🇧 UK", value=True): regions.append("UK")
-    if st.checkbox("🌎 LATAM", value=True): regions.append("LATAM")
+    if st.checkbox("🇨🇦 Canada", value=True): regions.append("CA")
+
+if st.sidebar.checkbox("🌎 LATAM (BR/MX/CO)", value=True): regions.append("LATAM")
 
 if st.sidebar.checkbox("🌏 APAC", value=False): regions.append("APAC")
 
@@ -78,6 +135,8 @@ mode_select = st.sidebar.radio(
     ["⚡ Fast (APIs + Snippets)", "🧠 Powerful (Agentic Verify)"],
 )
 search_mode = "powerful" if "Powerful" in mode_select else "fast"
+
+ai = get_ai_service()
 
 # ============================================================
 # MAIN TABS
@@ -113,7 +172,7 @@ with tab_search:
         elif vendor_only and not manufacturer_query:
             st.error("Vendor-only mode requires a manufacturer/vendor name.")
         elif search_mode == "powerful" and not ai:
-            st.error("⚠️ Powerful mode requires OpenAI API Key.")
+            st.error("⚠️ Powerful mode requires a configured AI provider API key.")
         else:
             focus_label = "vendor enforcement" if vendor_only else "recalls, alerts, and enforcement"
             with st.status(f"Agent running {search_mode} surveillance for {focus_label}...", expanded=True) as status:
@@ -139,100 +198,3 @@ with tab_search:
                 status.update(label="Mission Complete", state="complete", expanded=False)
 
             if logs:
-                m_cols = st.columns(len(logs))
-                for i, (k, v) in enumerate(logs.items()):
-                    m_cols[i].metric(k, v)
-            
-            st.divider()
-
-            if not df.empty:
-                st.subheader("📝 Key Findings")
-                
-                # Sort logic
-                if "AI_Verified" in df.columns:
-                    df["_sort"] = df["AI_Verified"].apply(lambda x: 1 if x else 0)
-                    df = df.sort_values(by=["_sort", "Risk_Level", "Date"], ascending=[False, True, False])
-
-                for _, row in df.iterrows():
-                    risk = row.get("Risk_Level", "Medium")
-                    icon = "🔴" if risk == "High" else "🟠" if risk == "Medium" else "🟢"
-                    verified = "✅ VERIFIED" if row.get("AI_Verified") else ""
-                    
-                    title = f"{icon} {row['Source']} | {row['Date']} | {row['Product'][:60]}... {verified}"
-                    
-                    with st.expander(title):
-                        cA, cB = st.columns([3, 1])
-                        with cA:
-                            st.markdown(f"**Issue:** {row['Reason']}")
-                            st.caption(f"Manufacturer: {row['Firm']}")
-                            st.write(row['Description'])
-                        with cB:
-                            st.link_button("🔗 Open Source", row['Link'])
-                            if row.get("AI_Verified"):
-                                st.success("Confirmed relevant by Agent")
-
-                st.subheader("📊 Full Dataset")
-                st.dataframe(df, use_container_width=True)
-            else:
-                st.warning("No records found matching your criteria.")
-
-# ------------------------------------------------------------
-# TAB 2: BATCH SCAN
-# ------------------------------------------------------------
-with tab_batch:
-    st.info("Upload a CSV/Excel with columns: **SKU**, **Product Name**")
-    uploaded_file = st.file_uploader("Upload Fleet File", type=["csv", "xlsx"])
-    
-    if uploaded_file and st.button("🚀 Scan Entire Fleet"):
-        try:
-            if uploaded_file.name.endswith('.csv'): input_df = pd.read_csv(uploaded_file)
-            else: input_df = pd.read_excel(uploaded_file)
-            
-            input_df.columns = [c.strip() for c in input_df.columns]
-            if "Product Name" not in input_df.columns:
-                st.error("File must have a 'Product Name' column.")
-                st.stop()
-                
-            products = input_df["Product Name"].unique()
-            all_results = []
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            for i, prod in enumerate(products):
-                status_text.text(f"Scanning: {prod} ({i+1}/{len(products)})...")
-                progress_bar.progress((i+1)/len(products))
-                hits, _ = RegulatoryService.search_all_sources(
-                    query_term=str(prod),
-                    regions=regions,
-                    start_date=start_date,
-                    end_date=end_date,
-                    limit=20,
-                    mode=search_mode,
-                    ai_service=ai,
-                )
-                if not hits.empty:
-                    hits["Queried_Product"] = prod
-                    all_results.append(hits)
-            
-            progress_bar.empty()
-            status_text.success("Fleet Scan Complete!")
-            
-            if all_results:
-                final_df = pd.concat(all_results)
-                st.dataframe(final_df, use_container_width=True)
-            else:
-                st.info("No findings for the uploaded fleet.")
-        except Exception as e:
-            st.error(f"Error processing file: {e}")
-
-# ------------------------------------------------------------
-# TAB 3: AI ASSISTANT
-# ------------------------------------------------------------
-with tab_chat:
-    display_chat_interface()
-
-# ------------------------------------------------------------
-# TAB 4: WEB SEARCH
-# ------------------------------------------------------------
-with tab_web:
-    display_web_search()

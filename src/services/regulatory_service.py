@@ -139,7 +139,7 @@ class RegulatoryService:
             status_log["OFAC Sanctions"] = len(ofac_hits)
 
         if is_powerful:
-            web_hits = cls._search_regulatory_web(terms, regions, limit=limit)
+            web_hits = cls._safe_regulatory_web_search(terms, regions, limit=limit)
             results.extend(web_hits)
             status_log["Regulatory Web"] = len(web_hits)
 
@@ -360,6 +360,21 @@ class RegulatoryService:
         for region in regions:
             results.extend(media_svc.search_media(query_term, limit=10, region=region))
         return results
+
+    @classmethod
+    def _safe_regulatory_web_search(
+        cls,
+        terms: Sequence[str],
+        regions: Sequence[str],
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        search_fn = getattr(cls, "_search_regulatory_web", None)
+        if not callable(search_fn):
+            return []
+        try:
+            return search_fn(terms, regions, limit=limit)
+        except AttributeError:
+            return []
 
     @classmethod
     def _search_regulatory_web(

@@ -336,7 +336,7 @@ def render_table_view(df: pd.DataFrame) -> None:
     st.dataframe(
         df,
         column_config={"Link": st.column_config.LinkColumn("Source Link")},
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
     )
     csv = df.to_csv(index=False).encode("utf-8")
@@ -422,7 +422,7 @@ def render_batch_scan() -> None:
             return
 
         st.success(f"✅ Scan complete. Found {len(results)} potential matches.")
-        st.dataframe(results, width="stretch", hide_index=True)
+        st.dataframe(results, use_container_width=True, hide_index=True)
         csv = results.to_csv(index=False).encode("utf-8")
         st.download_button("💾 Download Batch Results", csv, "batch_scan_results.csv", "text/csv")
 
@@ -458,84 +458,48 @@ with tab_search:
         with st.form("regulatory_search_form"):
             form_col1, form_col2 = st.columns([2, 2])
             with form_col1:
-                query = st.text_input("Product Name / Keyword", placeholder="e.g. Infusion Pump")
-            with form_col2:
-                manufacturer_query = st.text_input(
-                    "Manufacturer / Vendor (optional)", placeholder="e.g. Acme Medical Devices"
-                )
+                st.subheader("Search Profile")
+                search_query = st.text_input("Product, category, or symptom", placeholder="e.g. defibrillator battery")
+                manufacturer = st.text_input("Manufacturer (optional)", placeholder="e.g. MedTech Inc.")
 
-            settings_col1, settings_col2, settings_col3 = st.columns([1, 1, 1])
-            with settings_col1:
-                vendor_only = st.checkbox("Vendor-only enforcement search", value=False)
-            with settings_col2:
-                include_sanctions = st.checkbox("Include sanctions & watchlists", value=True)
-            with settings_col3:
-                use_default_keywords = st.checkbox(
-                    "Use default safety keywords",
-                    value=True,
-                    help="Adds recall, alert, safety bulletin, and problem keywords to broaden matches.",
-                )
-                run_btn = st.form_submit_button("🚀 Run Surveillance", width="stretch", type="primary")
+            with form_col2:
+                st.subheader("Filters")
+                vendor_only = st.checkbox("Vendor enforcement or sanctions only", value=False)
+                include_sanctions = st.checkbox("Include sanctions/watchlists", value=True)
+                use_default_keywords = st.checkbox("Append default recall keywords", value=True)
+
+            run_btn = st.form_submit_button("🚀 Run Surveillance", width="stretch", type="primary")
 
     if run_btn:
-        if not query and not manufacturer_query:
-            st.error("Enter a product keyword or manufacturer/vendor name.")
-        elif vendor_only and not manufacturer_query:
-            st.error("Vendor-only mode requires a manufacturer/vendor name.")
-        else:
-            run_regulatory_search(
-                query=query,
-                manufacturer=manufacturer_query,
-                vendor_only=vendor_only,
-                include_sanctions=include_sanctions,
-                use_default_keywords=use_default_keywords,
-                regions=regions,
-                start_date=start_date,
-                end_date=end_date,
-                search_mode=search_mode,
-            )
+        run_regulatory_search(
+            query=search_query.strip(),
+            manufacturer=manufacturer.strip(),
+            vendor_only=vendor_only,
+            include_sanctions=include_sanctions,
+            use_default_keywords=use_default_keywords,
+            regions=regions,
+            start_date=start_date,
+            end_date=end_date,
+            search_mode=search_mode,
+        )
 
-    df = st.session_state.recall_hits
-    logs = st.session_state.recall_log
-    search_context = st.session_state.get("search_context", {})
-    active_query = query or search_context.get("query", "")
-    active_manufacturer = manufacturer_query or search_context.get("manufacturer", "")
+    if not st.session_state.recall_hits.empty:
+        render_search_summary(
+            st.session_state.recall_hits,
+            st.session_state.recall_log,
+            search_query,
+            manufacturer,
+            regions,
+            start_date,
+            end_date,
+            search_mode,
+        )
 
-    if not df.empty:
-        with st.container(border=True):
-            render_search_summary(
-                df=df,
-                logs=logs,
-                query=active_query,
-                manufacturer=active_manufacturer,
-                regions=regions,
-                start_date=start_date,
-                end_date=end_date,
-                search_mode=search_mode,
-            )
-
-        st.divider()
-        filter_col1, filter_col2 = st.columns([1, 1])
-        with filter_col1:
-            sources = ["All"] + sorted(df["Source"].dropna().unique().tolist())
-            selected_source = st.selectbox("Filter by Source", sources)
-        with filter_col2:
-            risks = ["All"] + sorted(df["Risk_Level"].fillna("TBD").unique().tolist())
-            selected_risk = st.selectbox("Filter by Risk Level", risks)
-
-        filtered_df = df.copy()
-        if selected_source != "All":
-            filtered_df = filtered_df[filtered_df["Source"] == selected_source]
-        if selected_risk != "All":
-            filtered_df = filtered_df[filtered_df["Risk_Level"] == selected_risk]
-
-        tab_smart, tab_table = st.tabs(["⚡ Smart Review", "📊 Data Table"])
-        with tab_smart:
-            render_smart_view(filtered_df)
+        tab_results, tab_table = st.tabs(["🧠 Smart View", "📊 Table"])
+        with tab_results:
+            render_smart_view(st.session_state.recall_hits)
         with tab_table:
-            render_table_view(filtered_df)
-    elif logs:
-        st.info("No records found for the current search parameters.")
+            render_table_view(st.session_state.recall_hits)
 
 with tab_batch:
     render_batch_scan()

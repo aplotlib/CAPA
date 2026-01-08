@@ -361,6 +361,33 @@ class RegulatoryService:
             results.extend(media_svc.search_media(query_term, limit=10, region=region))
         return results
 
+    @classmethod
+    def _search_regulatory_web(
+        cls,
+        terms: Sequence[str],
+        regions: Sequence[str],
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        if not terms:
+            return []
+        results: List[Dict[str, Any]] = []
+        per_query_limit = max(1, min(10, limit // max(1, len(terms))))
+        for term in terms:
+            for region in regions:
+                domains = cls.REGIONAL_DOMAINS.get(region, [])
+                for domain in domains:
+                    query = f"\"{term}\" site:{domain}"
+                    results.extend(
+                        cls._google_search(
+                            query,
+                            category=f"Regulatory Web ({region})",
+                            num=per_query_limit,
+                        )
+                    )
+                    if len(results) >= limit:
+                        return results[:limit]
+        return results[:limit]
+
     @staticmethod
     def _google_search(query: str, category: str = "Web Search", num: int = 10) -> List[Dict[str, Any]]:
         hits = google_search(query, num=min(max(num, 1), 10), pages=2)

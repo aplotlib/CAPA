@@ -371,21 +371,24 @@ class RegulatoryService:
         if not terms:
             return []
         results: List[Dict[str, Any]] = []
-        per_query_limit = max(1, min(10, limit // max(1, len(terms))))
+        query_specs: List[tuple[str, str]] = []
         for term in terms:
             for region in regions:
-                domains = cls.REGIONAL_DOMAINS.get(region, [])
-                for domain in domains:
-                    query = f"\"{term}\" site:{domain}"
-                    results.extend(
-                        cls._google_search(
-                            query,
-                            category=f"Regulatory Web ({region})",
-                            num=per_query_limit,
-                        )
-                    )
-                    if len(results) >= limit:
-                        return results[:limit]
+                for domain in cls.REGIONAL_DOMAINS.get(region, []):
+                    query_specs.append((f"\"{term}\" site:{domain}", region))
+
+        for query, region in query_specs:
+            remaining = limit - len(results)
+            if remaining <= 0:
+                break
+            per_query_limit = min(10, remaining)
+            results.extend(
+                cls._google_search(
+                    query,
+                    category=f"Regulatory Web ({region})",
+                    num=per_query_limit,
+                )
+            )
         return results[:limit]
 
     @staticmethod

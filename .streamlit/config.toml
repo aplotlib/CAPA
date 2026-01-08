@@ -1,8 +1,8 @@
 # .streamlit/config.toml
 
 [server]
-maxUploadSize = 350
-maxMessageSize = 350
+maxUploadSize = 550
+maxMessageSize = 550
 enableXsrfProtection = false
 
 [runner]

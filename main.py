@@ -267,7 +267,7 @@ def init_session() -> None:
     st.session_state.setdefault("recall_agent", RecallResponseAgent())
 
 
-def sidebar_controls() -> tuple[date, date, List[str], str]:
+def sidebar_controls() -> tuple[date, date, List[str], str, int]:
     st.sidebar.title("🛡️ Mission Control")
     st.sidebar.caption("Configure providers, time windows, and coverage zones.")
 
@@ -328,6 +328,9 @@ def sidebar_controls() -> tuple[date, date, List[str], str]:
     )
     search_mode = "powerful" if "Accuracy" in mode_select else "fast"
 
+    st.sidebar.header("Result Cap")
+    result_limit = st.sidebar.slider("Max results per search", min_value=100, max_value=800, value=300, step=50)
+
     st.sidebar.header("Key Status")
     if st.session_state.provider in {"openai", "both"} and not st.session_state.openai_api_key:
         st.sidebar.warning("OpenAI API key not found in Streamlit secrets.")
@@ -338,7 +341,7 @@ def sidebar_controls() -> tuple[date, date, List[str], str]:
             st.sidebar.warning("Gemini API key not found in Streamlit secrets.")
 
     st.sidebar.caption(f"📅 Range: {start_date} → {end_date}")
-    return start_date, end_date, regions, search_mode
+    return start_date, end_date, regions, search_mode, result_limit
 
 
 def render_operational_snapshot(
@@ -346,6 +349,7 @@ def render_operational_snapshot(
     search_mode: str,
     start_date: date,
     end_date: date,
+    result_limit: int,
 ) -> None:
     region_label = ", ".join(regions) if regions else "Global"
     mode_label = "Accuracy-first" if search_mode == "powerful" else "Fast"
@@ -383,6 +387,14 @@ def render_operational_snapshot(
                 </div>
                 <div class="hero-value">Operational</div>
                 <div class="hero-sub">Sources + AI ready</div>
+            </div>
+            <div class="hero-card">
+                <div class="hero-top">
+                    <div class="hero-label">Result Cap</div>
+                    <div class="hero-icon">📌</div>
+                </div>
+                <div class="hero-value">{result_limit}</div>
+                <div class="hero-sub">Per search run</div>
             </div>
         </div>
         """,
@@ -496,6 +508,7 @@ def run_regulatory_search(
     start_date: date,
     end_date: date,
     search_mode: str,
+    result_limit: int,
 ) -> None:
     augmented_query = query
     if use_default_keywords and query:
@@ -511,7 +524,7 @@ def run_regulatory_search(
             regions=regions,
             start_date=start_date,
             end_date=end_date,
-            limit=120,
+            limit=result_limit,
             mode=search_mode,
         )
 
@@ -572,7 +585,7 @@ def render_batch_scan() -> None:
 
 init_session()
 apply_enterprise_theme()
-start_date, end_date, regions, search_mode = sidebar_controls()
+start_date, end_date, regions, search_mode, result_limit = sidebar_controls()
 
 st.markdown(
     """
@@ -615,7 +628,7 @@ with tab_search:
                 st.caption("Use accuracy-first for global signal coverage.")
                 run_btn = st.form_submit_button("🚀 Run Surveillance", width="stretch", type="primary")
 
-    render_operational_snapshot(regions, search_mode, start_date, end_date)
+    render_operational_snapshot(regions, search_mode, start_date, end_date, result_limit)
 
     if run_btn:
         run_regulatory_search(
@@ -628,6 +641,7 @@ with tab_search:
             start_date=start_date,
             end_date=end_date,
             search_mode=search_mode,
+            result_limit=result_limit,
         )
 
     if not st.session_state.recall_hits.empty:

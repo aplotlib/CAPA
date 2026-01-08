@@ -29,21 +29,21 @@ def apply_enterprise_theme() -> None:
         """
         <style>
         :root {
-            --primary: #0b3d91;
-            --primary-dark: #092b63;
-            --accent: #23a6f0;
-            --bg: #f6f8fb;
+            --primary: #005ea2;
+            --primary-dark: #0b1f3b;
+            --accent: #00a6d6;
+            --bg: #f3f7fb;
             --card: #ffffff;
-            --text: #0f172a;
-            --muted: #64748b;
-            --border: #e2e8f0;
+            --text: #0b1f3b;
+            --muted: #5b6b7a;
+            --border: #d6e2f0;
         }
         .main .block-container {
             padding-top: 1.2rem;
             padding-bottom: 2.5rem;
         }
         .enterprise-header {
-            background: linear-gradient(135deg, #0b3d91 0%, #0f172a 55%, #111827 100%);
+            background: linear-gradient(135deg, #005ea2 0%, #0b1f3b 55%, #132b49 100%);
             color: #ffffff;
             padding: 1.6rem 2rem;
             border-radius: 16px;
@@ -66,8 +66,8 @@ def apply_enterprise_theme() -> None:
             flex-wrap: wrap;
         }
         .badge {
-            background: rgba(255, 255, 255, 0.15);
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.18);
+            border: 1px solid rgba(255, 255, 255, 0.25);
             padding: 0.25rem 0.6rem;
             border-radius: 999px;
             font-size: 0.75rem;
@@ -83,7 +83,7 @@ def apply_enterprise_theme() -> None:
             border: 1px solid var(--border);
             border-radius: 14px;
             padding: 0.9rem 1rem;
-            box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
+            box-shadow: 0 10px 20px rgba(11, 31, 59, 0.08);
         }
         .metric-title {
             color: var(--muted);
@@ -109,6 +109,44 @@ def apply_enterprise_theme() -> None:
         .stButton > button {
             border-radius: 10px;
             font-weight: 600;
+            padding: 0.55rem 1.2rem;
+        }
+        .stTextInput input, .stTextArea textarea {
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background-color: #f9fbff;
+        }
+        .stSelectbox div[data-baseweb="select"] > div {
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background-color: #f9fbff;
+        }
+        .stCheckbox > label {
+            padding: 0.35rem 0;
+        }
+        .status-card {
+            background: linear-gradient(135deg, rgba(0, 94, 162, 0.16), rgba(0, 166, 214, 0.08));
+            border: 1px solid rgba(0, 166, 214, 0.28);
+            border-radius: 16px;
+            padding: 1rem 1.2rem;
+            margin-top: 0.5rem;
+        }
+        .tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.2rem 0.6rem;
+            background: rgba(0, 94, 162, 0.14);
+            border-radius: 999px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: #004b84;
+        }
+        .fda-divider {
+            height: 4px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #00a6d6, #005ea2, #0b1f3b);
+            margin-top: 0.6rem;
         }
         </style>
         """,
@@ -190,7 +228,15 @@ def sidebar_controls() -> tuple[date, date, List[str], str]:
     selected_provider = {v: k for k, v in provider_label_map.items()}[provider_choice]
     if selected_provider != st.session_state.provider:
         st.session_state.provider = selected_provider
+        if selected_provider == "gemini":
+            st.session_state.api_key = st.session_state.gemini_api_key
+        elif selected_provider == "openai":
+            st.session_state.api_key = st.session_state.openai_api_key
+        else:
+            st.session_state.api_key = st.session_state.openai_api_key
         st.session_state.pop("ai_service", None)
+        st.session_state.pop("recall_agent", None)
+        st.session_state.recall_agent = RecallResponseAgent()
 
     st.sidebar.header("Search Window")
     date_mode = st.sidebar.selectbox(
@@ -256,9 +302,16 @@ def render_search_summary(
     start_date: date,
     end_date: date,
     search_mode: str,
+    use_default_keywords: bool,
 ) -> None:
     st.subheader("Coverage & Confidence")
-    terms = RegulatoryService.prepare_terms(query, manufacturer, max_terms=12 if search_mode == "powerful" else 6)
+    default_terms = DEFAULT_RECALL_KEYWORDS.split() if use_default_keywords else None
+    terms = RegulatoryService.prepare_terms(
+        query,
+        manufacturer,
+        max_terms=12 if search_mode == "powerful" else 10,
+        extra_terms=default_terms,
+    )
 
     st.markdown(
         f"""
@@ -282,6 +335,11 @@ def render_search_summary(
         </div>
         """,
         unsafe_allow_html=True,
+    )
+    st.caption(
+        "✨ Signal Boost: Default safety keywords are **enabled** to broaden matches."
+        if use_default_keywords
+        else "Signal Boost: Default safety keywords are **off**."
     )
 
     with st.expander("Search Coverage Details", expanded=False):
@@ -354,14 +412,12 @@ def run_regulatory_search(
     end_date: date,
     search_mode: str,
 ) -> None:
-    augmented_query = query
-    if use_default_keywords and query:
-        augmented_query = f"{query} {DEFAULT_RECALL_KEYWORDS}"
+    extra_terms = DEFAULT_RECALL_KEYWORDS.split() if use_default_keywords else None
     focus_label = "vendor enforcement" if vendor_only else "recalls, alerts, and enforcement"
     with st.status(f"Running {search_mode} surveillance for {focus_label}...", expanded=True) as status:
         st.write("📡 Connecting to regulatory databases, sanctions lists, and trusted media sources...")
         df, logs = RegulatoryService.search_all_sources(
-            query_term=augmented_query,
+            query_term=query,
             manufacturer=manufacturer,
             vendor_only=vendor_only,
             include_sanctions=include_sanctions,
@@ -370,6 +426,7 @@ def run_regulatory_search(
             end_date=end_date,
             limit=120,
             mode=search_mode,
+            extra_terms=extra_terms,
         )
 
         st.session_state.recall_hits = df
@@ -384,16 +441,63 @@ def run_regulatory_search(
         status.update(label="Mission Complete", state="complete", expanded=False)
 
 
-def render_batch_scan() -> None:
+def render_batch_scan(regions: List[str], default_start: date, default_end: date, default_mode: str) -> None:
     st.header("📂 Batch Fleet Scan")
-    st.caption("Upload a list of SKUs + Product Names to scan for recalls in bulk.")
+    st.caption("Upload a list of Product Names (Column A) + SKUs (Column B) to scan for recalls in bulk.")
 
-    col1, col2 = st.columns(2)
-    start_date = col1.date_input("Start Date", value=date.today() - timedelta(days=365))
-    end_date = col2.date_input("End Date", value=date.today())
+    st.session_state.setdefault("batch_results", pd.DataFrame())
+    st.session_state.setdefault("batch_log", [])
+    st.session_state.setdefault("batch_summary", {})
+    st.session_state.setdefault("batch_no_matches", pd.DataFrame())
 
-    scan_file = st.file_uploader("Upload CSV or Excel (SKU, Product Name)", type=["csv", "xlsx"])
-    fuzzy_threshold = st.slider("Match Threshold", min_value=0.4, max_value=0.9, value=0.7, step=0.05)
+    with st.container(border=True):
+        intro_left, intro_right = st.columns([2.2, 1.3])
+        with intro_left:
+            st.markdown(
+                """
+                **How this works**
+                1. Upload a CSV/XLSX with Column A = Product Name, Column B = SKU.
+                2. Optional Column C = Manufacturer/Vendor (for stricter matching).
+                3. We expand each product name into optimized regulatory search terms.
+                4. Results are fuzzy matched and risk scored for rapid triage.
+                """
+            )
+            st.caption("Tip: Use exact device family names to reduce false positives.")
+        with intro_right:
+            template_df = pd.DataFrame(
+                [
+                    {"Product Name": "Infusion Pump", "SKU": "SKU-1001", "Manufacturer": "Acme Medical"},
+                    {"Product Name": "Digital Blood Pressure Monitor", "SKU": "SKU-1002", "Manufacturer": "Acme Medical"},
+                ]
+            )
+            template_bytes = template_df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "⬇️ Download Template",
+                template_bytes,
+                "batch_scan_template.csv",
+                "text/csv",
+            )
+
+    scan_left, scan_right = st.columns([2, 1])
+    with scan_left:
+        scan_file = st.file_uploader(
+            "Upload CSV or Excel (Column A: Product Name, Column B: SKU, Column C: Manufacturer)",
+            type=["csv", "xlsx"],
+        )
+        col1, col2 = st.columns(2)
+        start_date = col1.date_input("Start Date", value=default_start)
+        end_date = col2.date_input("End Date", value=default_end)
+
+    with scan_right:
+        search_label = "Powerful" if default_mode == "powerful" else "Fast"
+        st.markdown("**Search Depth**")
+        st.info(f"{search_label} (mirrors Mission Control)")
+        fuzzy_threshold = st.slider("Match Threshold", min_value=0.4, max_value=0.9, value=0.7, step=0.05)
+        use_default_keywords = st.checkbox(
+            "Use default safety keywords",
+            value=True,
+            help="Adds recall, alert, safety bulletin, and hazard keywords to broaden matches.",
+        )
 
     if st.button("🚀 Run Batch Scan", type="primary", width="stretch"):
         if not scan_file:
@@ -407,24 +511,69 @@ def render_batch_scan() -> None:
             progress.progress(pct, text=message)
 
         with st.spinner("Scanning product list..."):
-            results, log_messages = agent.run_bulk_scan(
+            extra_terms = DEFAULT_RECALL_KEYWORDS.split() if use_default_keywords else None
+            mode_key = "powerful" if default_mode == "powerful" else "fast"
+            results, no_matches, log_messages = agent.run_bulk_scan(
                 scan_file,
                 start_date=start_date,
                 end_date=end_date,
                 fuzzy_threshold=fuzzy_threshold,
                 progress_callback=progress_callback,
+                regions=regions,
+                mode=mode_key,
+                extra_terms=extra_terms,
             )
         progress.empty()
 
-        if results.empty:
-            st.warning("No matches found. Consider lowering the match threshold or extending the date range.")
-            st.caption(", ".join(log_messages))
-            return
+        st.session_state.batch_results = results
+        st.session_state.batch_log = log_messages
+        st.session_state.batch_no_matches = no_matches
+        scanned_count = 0
+        if "My SKU" in results.columns:
+            scanned_count += results["My SKU"].nunique()
+        if not no_matches.empty:
+            scanned_count += no_matches["SKU"].nunique()
+        st.session_state.batch_summary = {
+            "products_scanned": scanned_count,
+            "matches_found": len(results),
+            "search_depth": search_label,
+        }
 
-        st.success(f"✅ Scan complete. Found {len(results)} potential matches.")
-        st.dataframe(results, width="stretch", hide_index=True)
-        csv = results.to_csv(index=False).encode("utf-8")
-        st.download_button("💾 Download Batch Results", csv, "batch_scan_results.csv", "text/csv")
+    if not st.session_state.batch_results.empty or not st.session_state.batch_no_matches.empty:
+        summary = st.session_state.batch_summary
+        metric_left, metric_center, metric_right = st.columns(3)
+        metric_left.metric("Products Scanned", summary.get("products_scanned", "-"))
+        metric_center.metric("Potential Matches", summary.get("matches_found", "-"))
+        metric_right.metric("Search Depth", summary.get("search_depth", "-"))
+        st.caption("🔎 Summary aligns to the Mission Control coverage window and search depth.")
+
+        if not st.session_state.batch_results.empty:
+            st.dataframe(st.session_state.batch_results, width="stretch", hide_index=True)
+            csv = st.session_state.batch_results.to_csv(index=False).encode("utf-8")
+            st.download_button("💾 Download Batch Results", csv, "batch_scan_results.csv", "text/csv")
+        if st.session_state.batch_log:
+            st.caption(", ".join(st.session_state.batch_log))
+        if st.session_state.batch_results.empty:
+            st.warning("No matches found. Consider lowering the match threshold or extending the date range.")
+
+    if not st.session_state.batch_no_matches.empty:
+        st.subheader("✅ No-Match Attestation")
+        st.caption("Export no-match results with an attestation for audit evidence.")
+        reviewed = st.checkbox("I attest these no-match records were manually reviewed for accuracy.")
+        reviewer_name = st.text_input("Reviewer name")
+        if reviewed and reviewer_name.strip():
+            attested = st.session_state.batch_no_matches.copy()
+            attested["Reviewed By"] = reviewer_name.strip()
+            attested["Reviewed At"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            no_match_csv = attested.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "🧾 Download No-Match Attestation (CSV)",
+                no_match_csv,
+                "batch_no_match_attestation.csv",
+                "text/csv",
+            )
+        elif reviewed:
+            st.info("Enter a reviewer name to enable the attestation download.")
 
 
 init_session()
@@ -437,11 +586,12 @@ st.markdown(
         <h1>CAPA Regulatory Intelligence Hub</h1>
         <p>Enterprise-grade regulatory surveillance spanning recalls, enforcement actions, sanctions, and media signals.</p>
         <div class="badge-row">
+            <span class="badge">FDA-Inspired Oversight</span>
             <span class="badge">ISO 13485 Ready</span>
-            <span class="badge">Global Coverage</span>
+            <span class="badge">MedTech Focus</span>
             <span class="badge">Audit Trail Friendly</span>
-            <span class="badge">Risk-Led Triage</span>
         </div>
+        <div class="fda-divider"></div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -477,6 +627,22 @@ with tab_search:
                 )
                 run_btn = st.form_submit_button("🚀 Run Surveillance", width="stretch", type="primary")
 
+    boost_label = (
+        "Signal Boost is on: safety keywords will expand the search net."
+        if use_default_keywords
+        else "Signal Boost is off: searching only your exact product/manufacturer keywords."
+    )
+    boost_tag = "Enabled" if use_default_keywords else "Disabled"
+    st.markdown(
+        f"""
+        <div class="status-card">
+            <span class="tag">✨ Signal Boost • {boost_tag}</span>
+            <div style="margin-top:0.35rem;">{boost_label}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     if run_btn:
         if not query and not manufacturer_query:
             st.error("Enter a product keyword or manufacturer/vendor name.")
@@ -500,6 +666,7 @@ with tab_search:
     search_context = st.session_state.get("search_context", {})
     active_query = query or search_context.get("query", "")
     active_manufacturer = manufacturer_query or search_context.get("manufacturer", "")
+    active_default_keywords = search_context.get("use_default_keywords", use_default_keywords)
 
     if not df.empty:
         with st.container(border=True):
@@ -512,6 +679,7 @@ with tab_search:
                 start_date=start_date,
                 end_date=end_date,
                 search_mode=search_mode,
+                use_default_keywords=active_default_keywords,
             )
 
         st.divider()
@@ -538,7 +706,7 @@ with tab_search:
         st.info("No records found for the current search parameters.")
 
 with tab_batch:
-    render_batch_scan()
+    render_batch_scan(regions, start_date, end_date, search_mode)
 
 with tab_chat:
     display_chat_interface()

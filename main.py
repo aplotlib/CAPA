@@ -16,10 +16,102 @@ from src.tabs.web_search import display_web_search
 
 
 st.set_page_config(
-    page_title="CAPA Regulatory Agent",
+    page_title="CAPA Regulatory Intelligence Hub",
     layout="wide",
     page_icon="🛡️",
 )
+
+
+def apply_enterprise_theme() -> None:
+    st.markdown(
+        """
+        <style>
+        :root {
+            --primary: #0b3d91;
+            --primary-dark: #092b63;
+            --accent: #23a6f0;
+            --bg: #f6f8fb;
+            --card: #ffffff;
+            --text: #0f172a;
+            --muted: #64748b;
+            --border: #e2e8f0;
+        }
+        .main .block-container {
+            padding-top: 1.2rem;
+            padding-bottom: 2.5rem;
+        }
+        .enterprise-header {
+            background: linear-gradient(135deg, #0b3d91 0%, #0f172a 55%, #111827 100%);
+            color: #ffffff;
+            padding: 1.6rem 2rem;
+            border-radius: 16px;
+            box-shadow: 0 16px 32px rgba(15, 23, 42, 0.2);
+            margin-bottom: 1.5rem;
+        }
+        .enterprise-header h1 {
+            margin: 0;
+            font-size: 1.8rem;
+            letter-spacing: 0.02em;
+        }
+        .enterprise-header p {
+            margin: 0.35rem 0 0;
+            color: rgba(255, 255, 255, 0.85);
+        }
+        .badge-row {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.8rem;
+            flex-wrap: wrap;
+        }
+        .badge {
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 0.25rem 0.6rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+        }
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+        .metric-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 0.9rem 1rem;
+            box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
+        }
+        .metric-title {
+            color: var(--muted);
+            font-size: 0.75rem;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+        .metric-value {
+            font-size: 1.4rem;
+            font-weight: 600;
+            color: var(--text);
+        }
+        .section-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 1.2rem;
+            box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
+        }
+        .sidebar .sidebar-content {
+            background-color: var(--bg);
+        }
+        .stButton > button {
+            border-radius: 10px;
+            font-weight: 600;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _safe_secret(key: str) -> str | None:
@@ -70,6 +162,7 @@ def init_session() -> None:
 
 def sidebar_controls() -> tuple[date, date, List[str], str]:
     st.sidebar.title("🛡️ Mission Control")
+    st.sidebar.caption("Configure providers, time windows, and coverage zones.")
 
     provider_label_map = {
         "openai": "OpenAI",
@@ -95,14 +188,7 @@ def sidebar_controls() -> tuple[date, date, List[str], str]:
     if date_mode == "Custom":
         start_date = st.sidebar.date_input("Start", value=date.today() - timedelta(days=365))
         end_date = st.sidebar.date_input("End", value=date.today())
-    else:
-        days_map = {"Last 30 days": 30, "Last 90 days": 90, "Last 1 Year": 365, "Last 2 Years": 730}
-        days = days_map.get(date_mode, 365)
-        end_date = date.today()
-        start_date = end_date - timedelta(days=days)
-
-    st.sidebar.header("Coverage Regions")
-    regions: List[str] = []
+@@ -101,77 +199,96 @@ def sidebar_controls() -> tuple[date, date, List[str], str]:
     c1, c2 = st.sidebar.columns(2)
     with c1:
         if st.checkbox("🇺🇸 US", value=True):
@@ -115,7 +201,7 @@ def sidebar_controls() -> tuple[date, date, List[str], str]:
         if st.checkbox("🇨🇦 Canada", value=True):
             regions.append("CA")
 
-    if st.sidebar.checkbox(" LATAM (BR/MX/CO)", value=True):
+    if st.sidebar.checkbox("🌎 LATAM (BR/MX/CO)", value=True):
         regions.append("LATAM")
 
     if st.sidebar.checkbox("🌏 APAC", value=False):
@@ -128,6 +214,7 @@ def sidebar_controls() -> tuple[date, date, List[str], str]:
     )
     search_mode = "powerful" if "Accuracy" in mode_select else "fast"
 
+    st.sidebar.header("Key Status")
     if st.session_state.provider in {"openai", "both"} and not st.session_state.openai_api_key:
         st.sidebar.warning("OpenAI API key not found in Streamlit secrets.")
     if st.session_state.provider in {"gemini", "both"} and not st.session_state.gemini_api_key:
@@ -150,11 +237,29 @@ def render_search_summary(
     st.subheader("Coverage & Confidence")
     terms = RegulatoryService.prepare_terms(query, manufacturer, max_terms=12 if search_mode == "powerful" else 6)
 
-    metrics = st.columns(4)
-    metrics[0].metric("Total Results", f"{len(df):,}")
-    metrics[1].metric("Sources Queried", f"{len(logs)}")
-    metrics[2].metric("Search Terms", f"{len(terms)}")
-    metrics[3].metric("Regions", ", ".join(regions) if regions else "Global")
+    st.markdown(
+        f"""
+        <div class="metric-grid">
+            <div class="metric-card">
+                <div class="metric-title">Total Results</div>
+                <div class="metric-value">{len(df):,}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Sources Queried</div>
+                <div class="metric-value">{len(logs)}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Search Terms</div>
+                <div class="metric-value">{len(terms)}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Regions</div>
+                <div class="metric-value">{", ".join(regions) if regions else "Global"}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     with st.expander("Search Coverage Details", expanded=False):
         st.markdown("**Search Inputs**")
@@ -180,9 +285,7 @@ def render_smart_view(df: pd.DataFrame) -> None:
 
     for _, row in df.iterrows():
         risk = row.get("Risk_Level", "TBD")
-        risk_color = "🔴" if risk == "High" else "🟠" if risk == "Medium" else "🟢" if risk == "Low" else "⚪"
-        title = str(row.get("Product", "Unknown"))[:80]
-        source = row.get("Source", "Unknown")
+@@ -181,51 +298,51 @@ def render_smart_view(df: pd.DataFrame) -> None:
         date_str = row.get("Date", "N/A")
         matched_term = row.get("Matched_Term", "")
         label = f"{risk_color} {risk} | {date_str} | {source} | {title}"
@@ -208,7 +311,7 @@ def render_table_view(df: pd.DataFrame) -> None:
     st.dataframe(
         df,
         column_config={"Link": st.column_config.LinkColumn("Source Link")},
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
     csv = df.to_csv(index=False).encode("utf-8")
@@ -234,9 +337,7 @@ def run_regulatory_search(
             vendor_only=vendor_only,
             include_sanctions=include_sanctions,
             regions=regions,
-            start_date=start_date,
-            end_date=end_date,
-            limit=120,
+@@ -235,146 +352,164 @@ def run_regulatory_search(
             mode=search_mode,
         )
 
@@ -262,7 +363,7 @@ def render_batch_scan() -> None:
     scan_file = st.file_uploader("Upload CSV or Excel (SKU, Product Name)", type=["csv", "xlsx"])
     fuzzy_threshold = st.slider("Match Threshold", min_value=0.4, max_value=0.9, value=0.7, step=0.05)
 
-    if st.button("🚀 Run Batch Scan", type="primary", use_container_width=True):
+    if st.button("🚀 Run Batch Scan", type="primary", width="stretch"):
         if not scan_file:
             st.error("Please upload a CSV or Excel file.")
             return
@@ -289,16 +390,30 @@ def render_batch_scan() -> None:
             return
 
         st.success(f"✅ Scan complete. Found {len(results)} potential matches.")
-        st.dataframe(results, use_container_width=True, hide_index=True)
+        st.dataframe(results, width="stretch", hide_index=True)
         csv = results.to_csv(index=False).encode("utf-8")
         st.download_button("💾 Download Batch Results", csv, "batch_scan_results.csv", "text/csv")
 
 
 init_session()
+apply_enterprise_theme()
 start_date, end_date, regions, search_mode = sidebar_controls()
 
-st.title("🛡️ Global Regulatory Intelligence Agent")
-st.caption("Accuracy-first regulatory surveillance across recalls, enforcement actions, and media signals.")
+st.markdown(
+    """
+    <div class="enterprise-header">
+        <h1>CAPA Regulatory Intelligence Hub</h1>
+        <p>Enterprise-grade regulatory surveillance spanning recalls, enforcement actions, sanctions, and media signals.</p>
+        <div class="badge-row">
+            <span class="badge">ISO 13485 Ready</span>
+            <span class="badge">Global Coverage</span>
+            <span class="badge">Audit Trail Friendly</span>
+            <span class="badge">Risk-Led Triage</span>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 tab_search, tab_batch, tab_chat, tab_web = st.tabs(
     ["🔎 Regulatory Search", "📂 Batch Fleet Scan", "💬 AI Assistant", "🌐 Web Search"]
@@ -308,21 +423,24 @@ with tab_search:
     st.header("🔎 Regulatory Search")
     st.caption("Find recalls, safety notices, and enforcement actions with expanded coverage.")
 
-    with st.form("regulatory_search_form"):
-        form_col1, form_col2 = st.columns([2, 2])
-        with form_col1:
-            query = st.text_input("Product Name / Keyword", placeholder="e.g. Infusion Pump")
-        with form_col2:
-            manufacturer_query = st.text_input("Manufacturer / Vendor (optional)", placeholder="e.g. Acme Medical Devices")
+    with st.container(border=True):
+        with st.form("regulatory_search_form"):
+            form_col1, form_col2 = st.columns([2, 2])
+            with form_col1:
+                query = st.text_input("Product Name / Keyword", placeholder="e.g. Infusion Pump")
+            with form_col2:
+                manufacturer_query = st.text_input(
+                    "Manufacturer / Vendor (optional)", placeholder="e.g. Acme Medical Devices"
+                )
 
-        settings_col1, settings_col2, settings_col3 = st.columns([1, 1, 1])
-        with settings_col1:
-            vendor_only = st.checkbox("Vendor-only enforcement search", value=False)
-        with settings_col2:
-            include_sanctions = st.checkbox("Include sanctions & watchlists", value=True)
-        with settings_col3:
-            st.write("")
-            run_btn = st.form_submit_button("🚀 Run Surveillance", use_container_width=True, type="primary")
+            settings_col1, settings_col2, settings_col3 = st.columns([1, 1, 1])
+            with settings_col1:
+                vendor_only = st.checkbox("Vendor-only enforcement search", value=False)
+            with settings_col2:
+                include_sanctions = st.checkbox("Include sanctions & watchlists", value=True)
+            with settings_col3:
+                st.write("")
+                run_btn = st.form_submit_button("🚀 Run Surveillance", width="stretch", type="primary")
 
     if run_btn:
         if not query and not manufacturer_query:
@@ -348,16 +466,17 @@ with tab_search:
     active_manufacturer = manufacturer_query or search_context.get("manufacturer", "")
 
     if not df.empty:
-        render_search_summary(
-            df=df,
-            logs=logs,
-            query=active_query,
-            manufacturer=active_manufacturer,
-            regions=regions,
-            start_date=start_date,
-            end_date=end_date,
-            search_mode=search_mode,
-        )
+        with st.container(border=True):
+            render_search_summary(
+                df=df,
+                logs=logs,
+                query=active_query,
+                manufacturer=active_manufacturer,
+                regions=regions,
+                start_date=start_date,
+                end_date=end_date,
+                search_mode=search_mode,
+            )
 
         st.divider()
         filter_col1, filter_col2 = st.columns([1, 1])
@@ -383,10 +502,3 @@ with tab_search:
         st.info("No records found for the current search parameters.")
 
 with tab_batch:
-    render_batch_scan()
-
-with tab_chat:
-    display_chat_interface()
-
-with tab_web:
-    display_web_search()

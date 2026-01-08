@@ -17,7 +17,7 @@ def display_dashboard():
         
         rd_file = st.file_uploader("Upload R&D Spec (DOCX)", type=['docx'], key="rd_uploader")
         
-        if rd_file and st.button("✨ Auto-Configure Project", type="primary", use_container_width=True):
+        if rd_file and st.button("✨ Auto-Configure Project", type="primary", width="stretch"):
             if st.session_state.api_key_missing:
                 st.error("API Key required for AI processing.")
             else:
@@ -80,7 +80,7 @@ def display_dashboard():
         sales_file = c1.file_uploader("Upload Sales/Forecast Data (CSV/Excel)", type=['csv', 'xlsx'])
         returns_file = c2.file_uploader("Upload Returns Pivot/Report (CSV/Excel)", type=['csv', 'xlsx'])
         
-        if st.button("🚀 Process Data & Run Analysis", type="primary", use_container_width=True):
+        if st.button("🚀 Process Data & Run Analysis", type="primary", width="stretch"):
             if sales_file and returns_file:
                 with st.spinner("Processing data across SKUs..."):
                     try:
@@ -159,7 +159,7 @@ def display_dashboard():
                 "return_rate": st.column_config.NumberColumn("Return Rate (%)", format="%.2f%%"),
                 "quality_status": "Status"
             },
-            use_container_width=True,
+            width="stretch",
             hide_index=True
         )
 
@@ -215,7 +215,7 @@ def display_dashboard():
             }
         ))
         fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", font={'color': "white"}, height=300)
-        st.plotly_chart(fig, use_container_width=True) 
+        st.plotly_chart(fig, use_container_width=True)
     
     with col_ai:
         st.subheader(f"🤖 AI Insight: {selected_sku}")

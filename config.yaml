@@ -1,6 +1,6 @@
 app:
   name: "AQMS"
-  version: "2.1.0"
+  version: "5.1.0"
 quality_thresholds:
   critical_return_rate: 15
   warning_return_rate: 10

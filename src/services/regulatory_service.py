@@ -7,9 +7,9 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import pandas as pd
 import requests
-from bs4 import BeautifulSoup
 
 from src.search.cpsc import cpsc_search
+from src.search.health_agency_feeds import fetch_agency_alerts
 from src.search.google_cse import google_search
 from src.search.openfda import search_device_enforcement, search_device_recall
 from src.services.adverse_event_service import AdverseEventService
@@ -142,6 +142,10 @@ class RegulatoryService:
             web_hits = cls._safe_regulatory_web_search(terms, regions, limit=limit)
             results.extend(web_hits)
             status_log["Regulatory Web"] = len(web_hits)
+
+            agency_hits = cls._search_global_agencies(terms, regions, limit=limit)
+            results.extend(agency_hits)
+            status_log["Global Health Agencies"] = len(agency_hits)
 
             media_hits = cls._search_media(query_term or manufacturer, regions)
             results.extend(media_hits)
@@ -406,6 +410,17 @@ class RegulatoryService:
             )
         return results[:limit]
 
+    @classmethod
+    def _search_global_agencies(
+        cls,
+        terms: Sequence[str],
+        regions: Sequence[str],
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        if not terms:
+            return []
+        return fetch_agency_alerts(terms, regions, limit=limit)
+
     @staticmethod
     def _google_search(query: str, category: str = "Web Search", num: int = 10) -> List[Dict[str, Any]]:
         hits = google_search(query, num=min(max(num, 1), 10), pages=2)
@@ -487,7 +502,7 @@ class RegulatoryService:
 
         dedupe_key = id_series.where(id_series != "", link_series.where(link_series != "", product_series))
         df["__dedupe_key"] = dedupe_key
-        df = df.drop_duplicates(subset=["Source", "__dedupe_key"])
+        df = df.drop_duplicates(subset=["__dedupe_key"])
         df.drop(columns="__dedupe_key", inplace=True)
         return df
 

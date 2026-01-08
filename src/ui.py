@@ -112,7 +112,11 @@ def display_recalls_tab():
                             st.caption("Click 'AI Screen for Relevance' to analyze this record.")
         
         with tab_raw:
-            st.dataframe(df, column_config={"Link": st.column_config.LinkColumn("Source Link")}, width="stretch")
+            st.dataframe(
+                df,
+                column_config={"Link": st.column_config.LinkColumn("Source Link")},
+                use_container_width=True,
+            )
             st.divider()
             if st.button("📄 Generate DOCX Report"):
                 if 'doc_generator' in st.session_state:
@@ -154,8 +158,12 @@ def run_search_logic(term, start, end, auto_expand, ai, manufacturer, vendor_onl
     prog.empty()
     if not all_res.empty:
         # Drop duplicates based on ID if available, otherwise strict duplicate check
-        all_res = all_res.drop_duplicates(subset=['ID'])
-        if 'Date' in all_res.columns: all_res.sort_values('Date', ascending=False, inplace=True)
+        if 'ID' in all_res.columns:
+            all_res = all_res.drop_duplicates(subset=['ID'])
+        else:
+            all_res = all_res.drop_duplicates()
+        if 'Date' in all_res.columns:
+            all_res.sort_values('Date', ascending=False, inplace=True)
     
     st.session_state.recall_hits = all_res
     st.session_state.recall_log = logs

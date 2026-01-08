@@ -53,7 +53,7 @@ def display_recalls_tab():
         vendor_only = st.checkbox("Vendor-only enforcement/sanctions search", value=False)
         include_sanctions = st.checkbox("Include sanctions & watchlists", value=True)
         
-        if st.button("🚀 Run Deep Scan", type="primary", use_container_width=True):
+        if st.button("🚀 Run Deep Scan", type="primary", width="stretch"):
             if not p_name:
                 st.error("Enter a search query.")
             else:
@@ -70,7 +70,7 @@ def display_recalls_tab():
         with c_act1: st.subheader(f"Findings: {len(df)} Records")
         with c_act2:
             if "AI_Risk_Level" not in df.columns:
-                if st.button("🤖 AI Screen for Relevance", type="secondary", use_container_width=True):
+                if st.button("🤖 AI Screen for Relevance", type="secondary", width="stretch"):
                     if not ai or not ai.model:
                         st.error("AI Service not available (Check API Key).")
                     else:
@@ -112,7 +112,7 @@ def display_recalls_tab():
                             st.caption("Click 'AI Screen for Relevance' to analyze this record.")
         
         with tab_raw:
-            st.dataframe(df, column_config={"Link": st.column_config.LinkColumn("Source Link")}, use_container_width=True)
+            st.dataframe(df, column_config={"Link": st.column_config.LinkColumn("Source Link")}, width="stretch")
             st.divider()
             if st.button("📄 Generate DOCX Report"):
                 if 'doc_generator' in st.session_state:

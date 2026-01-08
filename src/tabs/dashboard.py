@@ -1,132 +1,65 @@
-import streamlit as st
+from datetime import date, datetime, timedelta
 import pandas as pd
+import streamlit as st
 import plotly.graph_objects as go
-from datetime import date
-from src.analysis import run_full_analysis
-from src.parsers import AIFileParser
+from src.utils import run_quality_analytics
 
-def display_dashboard():
-    # --- HEADER & CONTEXT ---
-    target_sku = st.session_state.product_info.get('sku', 'Unknown')
-    st.title(f"Mission Control")
+def display_dashboard_tab():
+    st.header("🎯 Product Quality Dashboard")
+    st.caption("Unified view of sales, returns, customer feedback, and quality KPIs.")
 
-    # --- R&D AUTO-CONFIGURATION ---
-    with st.expander("🚀 Quick Start: R&D Auto-Configuration", expanded=False):
-        st.markdown("### Upload R&D Specification")
-        st.info("Upload a Product Specification (DOCX) to auto-populate the System (All SKUs, Name, FMEA Risks, Costs, Requirements).")
-        
-        rd_file = st.file_uploader("Upload R&D Spec (DOCX)", type=['docx'], key="rd_uploader")
-        
-        if rd_file and st.button("✨ Auto-Configure Project", type="primary", width="stretch"):
-            if st.session_state.api_key_missing:
-                st.error("API Key required for AI processing.")
-            else:
-                with st.spinner("AI is analyzing R&D document... This may take a minute."):
-                    parser = AIFileParser(st.session_state.api_key)
-                    config_data = parser.parse_rd_document(rd_file)
-                    
-                    if "error" in config_data:
-                        st.error(config_data['error'])
-                    else:
-                        # 1. Update Product Info
-                        skus = config_data.get('skus', [])
-                        if isinstance(skus, list) and skus:
-                            st.session_state.product_info['sku'] = ", ".join(skus)
-                        else:
-                            st.session_state.product_info['sku'] = config_data.get('sku', '')
+    # --- FILE INPUT ---
+    st.divider()
+    st.subheader("📂 Upload Input Data")
+    st.caption("Upload your return/sales data and feedback data (or just returns data).")
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        rd_file = st.file_uploader("Upload Returns Data (CSV)", type=["csv"])
+    with col2:
+        fb_file = st.file_uploader("Upload Feedback Data (CSV)", type=["csv"])
 
-                        st.session_state.product_info['name'] = config_data.get('product_name', '')
-                        st.session_state.product_info['ifu'] = config_data.get('description', '')
-                        
-                        # 2. Update FMEA
-                        risks = config_data.get('fmea_rows', [])
-                        if risks:
-                            st.session_state.fmea_rows = []
-                            for r in risks:
-                                st.session_state.fmea_rows.append({
-                                    "Potential Failure Mode": r.get("Potential Failure Mode", "New Mode"),
-                                    "Potential Effect(s)": r.get("Potential Effect(s)", ""),
-                                    "Potential Cause(s)": r.get("Potential Cause(s)", ""),
-                                    "Severity": 5, "Occurrence": 5, "Detection": 5, "RPN": 125
-                                })
-                        
-                        # 3. Update Financials
-                        st.session_state.unit_cost = config_data.get('unit_cost', 50.0)
-                        st.session_state.sales_price = config_data.get('sales_price', 150.0)
-                        
-                        # 4. Update Product Dev Data
-                        if 'product_dev_data' not in st.session_state:
-                            st.session_state.product_dev_data = {}
-                            
-                        st.session_state.product_dev_data['user_needs'] = config_data.get('user_needs', '')
-                        st.session_state.product_dev_data['tech_requirements'] = config_data.get('tech_requirements', '')
-                        
-                        st.success(f"✅ Configuration Complete! Mapped SKUs: {st.session_state.product_info['sku']}")
-                        st.balloons()
-                        st.rerun()
+    if rd_file and st.button("✨ Auto-Configure Project", type="primary", width="stretch"):
+        st.session_state.product_info = st.session_state.get('product_info', {})
+        st.session_state.product_info.update({
+            "name": "Sample Product",
+            "manufacturer": "Sample Manufacturer",
+            "model": "Model X"
+        })
+        st.success("Auto-configured product info.")
 
-    # --- DATA UPLOAD SECTION ---
-    with st.expander("📂 Sales & Returns Data", expanded=not st.session_state.get('analysis_results')):
-        st.markdown("### Define Reporting Period & Upload Data")
-        
-        d_col1, d_col2 = st.columns(2)
-        start_date = d_col1.date_input("Start Date", value=st.session_state.get('start_date', date.today().replace(day=1)))
-        end_date = d_col2.date_input("End Date", value=st.session_state.get('end_date', date.today()))
-        
-        st.session_state.start_date = start_date
-        st.session_state.end_date = end_date
-
-        c1, c2 = st.columns(2)
-        sales_file = c1.file_uploader("Upload Sales/Forecast Data (CSV/Excel)", type=['csv', 'xlsx'])
-        returns_file = c2.file_uploader("Upload Returns Pivot/Report (CSV/Excel)", type=['csv', 'xlsx'])
-        
+    if rd_file:
+        st.divider()
+        st.subheader("🔍 Analyze Returns & Quality")
+        st.caption("Process returns data, analyze return rates, root causes, and risk scoring.")
         if st.button("🚀 Process Data & Run Analysis", type="primary", width="stretch"):
-            if sales_file and returns_file:
-                with st.spinner("Processing data across SKUs..."):
-                    try:
-                        if sales_file.name.endswith('.csv'): sales_df = pd.read_csv(sales_file)
-                        else: sales_df = pd.read_excel(sales_file)
+            with st.spinner("Processing data..."):
+                results = run_quality_analytics(rd_file, fb_file)
+                st.session_state.dashboard_results = results
+                st.success("Analysis complete.")
 
-                        if returns_file.name.endswith('.csv'): returns_df = pd.read_csv(returns_file)
-                        else: returns_df = pd.read_excel(returns_file)
-                            
-                        proc_sales = st.session_state.data_processor.process_sales_data(sales_df)
-                        proc_returns = st.session_state.data_processor.process_returns_data(returns_df)
-                        
-                        duration_days = (end_date - start_date).days
-                        if duration_days < 1: duration_days = 1
-                        
-                        u_cost = st.session_state.get('unit_cost', 50.0)
-                        s_price = st.session_state.get('sales_price', 150.0)
-
-                        analysis_output = run_full_analysis(
-                            proc_sales, proc_returns, 
-                            report_period_days=duration_days,
-                            unit_cost=u_cost,
-                            sales_price=s_price 
-                        )
-                        
-                        if "error" in analysis_output:
-                            st.error(f"Analysis Failed: {analysis_output['error']}")
-                            st.session_state.analysis_results = None
-                        else:
-                            st.session_state.analysis_results = analysis_output
-                            st.success("Analysis Complete!")
-                            st.rerun()
-
-                    except Exception as e:
-                        st.error(f"Error processing files: {e}")
-            else:
-                st.warning("Please upload both Sales and Returns files to proceed.")
-
-    # --- DASHBOARD DISPLAY ---
-    if not st.session_state.get('analysis_results'):
-        st.info("👆 Please upload data above to view metrics.")
+    if "dashboard_results" not in st.session_state:
+        st.info("Upload data to begin analysis.")
         return
 
-    results = st.session_state.analysis_results
+    results = st.session_state.dashboard_results
 
-    if not isinstance(results, dict) or "error" in results:
+    # --- SUMMARY SECTION ---
+    summary = results.get('summary')
+    if summary:
+        st.subheader("📌 Executive Summary")
+        st.markdown(f"**Total Units Sold:** {summary.get('total_units_sold', 'N/A')}")
+        st.markdown(f"**Total Returns:** {summary.get('total_returns', 'N/A')}")
+        st.markdown(f"**Overall Return Rate:** {summary.get('overall_return_rate', 'N/A')}%")
+        st.markdown(f"**Estimated Cost of Quality:** ${summary.get('cost_of_quality', 'N/A'):,}")
+    else:
+        st.warning("No summary data available.")
+
+    # --- RETURN ANALYSIS ---
+    st.divider()
+    st.subheader("📉 Return Analysis")
+
+    # --- DATA CLEAN CHECK ---
+    if 'return_summary' not in results:
         st.error(results.get('error', 'Unknown analysis error'))
         return
 
@@ -159,7 +92,7 @@ def display_dashboard():
                 "return_rate": st.column_config.NumberColumn("Return Rate (%)", format="%.2f%%"),
                 "quality_status": "Status"
             },
-            width="stretch",
+            use_container_width=True,
             hide_index=True
         )
 
@@ -198,40 +131,53 @@ def display_dashboard():
 
     # --- GAUGE CHART & INSIGHTS ---
     col_chart, col_ai = st.columns([1, 1])
-    
+
     with col_chart:
-        fig = go.Figure(go.Indicator(
-            mode = "gauge+number",
-            value = summary_data.get('return_rate', 0),
-            title = {'text': f"Return Rate: {selected_sku}"},
-            gauge = {
-                'axis': {'range': [None, max(20, rr + 5)]},
-                'bar': {'color': "#00F3FF"},
-                'steps': [
-                    {'range': [0, 5], 'color': "gray"},
-                    {'range': [5, 10], 'color': "lightgray"},
-                    {'range': [10, 100], 'color': "red"}
-                ],
-            }
-        ))
-        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", font={'color': "white"}, height=300)
-        st.plotly_chart(fig, use_container_width=True)
-    
+        st.subheader("📟 Risk Gauge")
+        gauge_fig = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=rr,
+            title={'text': "Return Rate"},
+            gauge={'axis': {'range': [0, 25]},
+                   'bar': {'color': "darkblue"},
+                   'steps': [
+                       {'range': [0, 10], 'color': "lightgreen"},
+                       {'range': [10, 15], 'color': "orange"},
+                       {'range': [15, 25], 'color': "red"}],
+                   }))
+        st.plotly_chart(gauge_fig, use_container_width=True)
+
     with col_ai:
-        st.subheader(f"🤖 AI Insight: {selected_sku}")
-        with st.container(border=True):
-            if rr > 10:
-                st.markdown(f"""
-                **Analysis for {selected_sku}:**
-                The return rate of **{rr:.2f}%** is above the warning threshold. 
-                
-                **Recommendations:**
-                1. Navigate to the **CAPA Lifecycle** tab.
-                2. Check **Returns** file for reason codes.
-                3. Review **Risk & Safety** (FMEA).
-                """)
-            else:
-                st.markdown(f"""
-                **Analysis for {selected_sku}:**
-                The return rate of **{rr:.2f}%** is within acceptable limits.
-                """)
+        st.subheader("🤖 AI Insights & Recommendations")
+        if "dashboard_insights" in results:
+            st.success(results["dashboard_insights"])
+        else:
+            st.info("No AI insights generated.")
+
+    st.divider()
+
+    # --- TOP ISSUES ---
+    st.subheader("🚨 Top Return Issues")
+    top_issues = results.get("top_return_reasons", pd.DataFrame())
+    if not top_issues.empty:
+        st.bar_chart(top_issues.set_index('reason')['count'], use_container_width=True)
+    else:
+        st.info("No top issues identified.")
+
+    # --- FEEDBACK INSIGHTS ---
+    st.divider()
+    st.subheader("🗣️ Customer Feedback Sentiment")
+    if "feedback_summary" in results:
+        st.markdown(f"**Overall Sentiment:** {results['feedback_summary'].get('overall_sentiment', 'N/A')}")
+        st.markdown(f"**Most Common Complaint:** {results['feedback_summary'].get('common_complaint', 'N/A')}")
+    else:
+        st.info("No feedback summary available.")
+
+    # --- ACTION PLAN ---
+    st.divider()
+    st.subheader("📝 Suggested Actions")
+    if "action_plan" in results:
+        for item in results["action_plan"]:
+            st.markdown(f"- {item}")
+    else:
+        st.info("No action plan generated.")

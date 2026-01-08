@@ -1,3 +1,4 @@
+import re
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
@@ -108,30 +109,46 @@ class RecallResponseAgent:
         for idx, row in df_input.iterrows():
             sku = str(row['SKU'])
             p_name = str(row['Product Name'])
-            
+            cleaned_name = self._clean_product_name(p_name)
+
             if progress_callback:
                 progress = (idx + 1) / total_items
                 progress_callback(progress, f"Scanning {idx+1}/{total_items}: {p_name}...")
 
-            # 1. SEARCH
-            hits, _ = self.regulatory.search_all_sources(
-                query_term=p_name,
-                start_date=start_date,
-                end_date=end_date,
-                limit=20,
-            )
+            search_terms = self._generate_search_terms(cleaned_name)
+            hits_frames = []
+            for term in search_terms:
+                if not term:
+                    continue
+                hits, _ = self.regulatory.search_all_sources(
+                    query_term=term,
+                    start_date=start_date,
+                    end_date=end_date,
+                    limit=20,
+                )
+                if not hits.empty:
+                    hits = hits.copy()
+                    hits["Search Term"] = term
+                    hits_frames.append(hits)
+
+            if hits_frames:
+                hits = pd.concat(hits_frames, ignore_index=True)
+                hits = RegulatoryService._dedupe(hits)
+            else:
+                hits = pd.DataFrame()
             
             if not hits.empty:
                 # 2. FUZZY MATCH FILTERING
                 for h_idx, hit in hits.iterrows():
                     hit_product = str(hit.get('Product', '')).lower()
-                    target_product = p_name.lower()
+                    target_product = cleaned_name.lower()
+                    term_matches = any(term.lower() in hit_product for term in search_terms if term)
                     
                     # Calculate similarity ratio
                     score = self._fuzzy_score(target_product, hit_product)
                     
                     # If score is good OR the product name is explicitly in the hit text
-                    if score >= fuzzy_threshold or target_product in hit_product:
+                    if score >= fuzzy_threshold or target_product in hit_product or term_matches:
                         # Append to results
                         consolidated_results.append({
                             "My SKU": sku,
@@ -154,6 +171,49 @@ class RecallResponseAgent:
         """Calculates fuzzy similarity ratio between two strings."""
         if not s1 or not s2: return 0.0
         return difflib.SequenceMatcher(None, s1, s2).ratio()
+
+    def _clean_product_name(self, product_name: str) -> str:
+        if not product_name:
+            return ""
+        cleaned = re.sub(r"\bvive\b", "", product_name, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned
+
+    def _generate_search_terms(self, product_name: str) -> list:
+        base_name = self._clean_product_name(product_name)
+        if not base_name:
+            return []
+
+        prompt = (
+            "Extract 3-6 short, generic product keywords for regulatory recall searching. "
+            "Exclude brand names and vendors. Ignore the word 'Vive' entirely. "
+            "Return a comma-separated list only.\n\n"
+            f"Product name: {base_name}"
+        )
+        keywords_text = ""
+        try:
+            keywords_text = self.ai._generate_text(prompt)
+        except Exception:
+            keywords_text = ""
+
+        keywords = []
+        if keywords_text and "Error:" not in keywords_text:
+            keywords = [k.strip() for k in keywords_text.split(",") if k.strip()]
+
+        keywords = [self._clean_product_name(k) for k in keywords if k]
+        keywords = [k for k in keywords if k]
+        if base_name not in keywords:
+            keywords.insert(0, base_name)
+
+        seen = set()
+        deduped = []
+        for term in keywords:
+            lower = term.lower()
+            if lower in seen:
+                continue
+            seen.add(lower)
+            deduped.append(term)
+        return deduped
 
     def _execute_response_protocol(self, record, analysis, source_type):
         """

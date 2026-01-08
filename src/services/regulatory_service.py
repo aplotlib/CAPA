@@ -86,6 +86,7 @@ class RegulatoryService:
         manufacturer: Optional[str] = None,
         vendor_only: bool = False,
         include_sanctions: bool = True,
+        extra_terms: Optional[Sequence[str]] = None,
     ) -> tuple[pd.DataFrame, dict]:
         """
         Main entry point.
@@ -102,10 +103,12 @@ class RegulatoryService:
 
         start_dt = _as_date(start_date) or date.today().replace(year=date.today().year - DEFAULT_LOOKBACK_YEARS)
         end_dt = _as_date(end_date) or date.today()
+        if start_dt > end_dt:
+            start_dt, end_dt = end_dt, start_dt
         is_powerful = mode == "powerful"
-        max_terms = 12 if is_powerful else 6
+        max_terms = 12 if is_powerful else 10
 
-        terms = cls.prepare_terms(query_term, manufacturer, max_terms=max_terms)
+        terms = cls.prepare_terms(query_term, manufacturer, max_terms=max_terms, extra_terms=extra_terms)
 
         if not vendor_only:
             fda_recalls = cls._fetch_openfda_device_recalls(terms, limit, start_dt, end_dt)
@@ -154,7 +157,23 @@ class RegulatoryService:
         return df, status_log
 
     @classmethod
-    def prepare_terms(cls, query_term: str, manufacturer: str, max_terms: int = 8) -> List[str]:
+    def search_all_sources_safe(cls, **kwargs: Any) -> tuple[pd.DataFrame, dict]:
+        try:
+            return cls.search_all_sources(**kwargs)
+        except TypeError as exc:
+            if "extra_terms" in str(exc):
+                kwargs.pop("extra_terms", None)
+                return cls.search_all_sources(**kwargs)
+            raise
+
+    @classmethod
+    def prepare_terms(
+        cls,
+        query_term: str,
+        manufacturer: str,
+        max_terms: int = 8,
+        extra_terms: Optional[Sequence[str]] = None,
+    ) -> List[str]:
         base_terms = []
         if query_term:
             base_terms.append(query_term)
@@ -163,6 +182,9 @@ class RegulatoryService:
         if query_term and manufacturer:
             base_terms.append(f"{manufacturer} {query_term}")
             base_terms.append(f"{manufacturer} {query_term} recall")
+        if query_term and extra_terms:
+            for keyword in _safe_list(extra_terms):
+                base_terms.append(f"{query_term} {keyword}")
 
         expanded: List[str] = []
         for term in base_terms:
@@ -206,223 +228,128 @@ class RegulatoryService:
         return out
 
     @classmethod
-    def _fetch_openfda_device_recalls(
-        cls,
-        terms: Sequence[str],
-        limit: int,
-        start_date: date,
-        end_date: date,
-    ) -> List[Dict[str, Any]]:
+    def _fetch_openfda_device_recalls(cls, terms: Sequence[str], limit: int, start: date, end: date) -> List[Dict[str, Any]]:
         results: List[Dict[str, Any]] = []
-        per_term_limit = max(10, min(limit, 100))
-        for term in _safe_list(terms):
-            try:
-                hits = search_device_recall(term, start_date, end_date, limit=per_term_limit)
-            except Exception:
-                hits = []
-            for item in hits:
-                recall_number = item.get("recall_number") or item.get("event_id") or ""
-                classification = (item.get("classification") or "").title() or "Unspecified"
-                risk_level = cls._risk_from_classification(classification)
-                results.append(
-                    {
-                        "Source": "FDA Device Recall",
-                        "Date": item.get("report_date") or item.get("recall_initiation_date"),
-                        "Product": item.get("product_description", term),
-                        "Description": item.get("product_description", ""),
-                        "Reason": item.get("reason_for_recall", ""),
-                        "Firm": item.get("recalling_firm", ""),
-                        "Model Info": item.get("code_info") or item.get("product_code") or "",
-                        "ID": recall_number,
-                        "Link": cls._openfda_link("recall", recall_number),
-                        "Status": item.get("status", ""),
-                        "Risk_Level": risk_level,
-                        "Matched_Term": term,
-                        "Recall_Class": classification,
-                    }
-                )
-        return results
-
-    @classmethod
-    def _fetch_openfda_enforcement(
-        cls,
-        terms: Sequence[str],
-        limit: int,
-        start_date: date,
-        end_date: date,
-    ) -> List[Dict[str, Any]]:
-        results: List[Dict[str, Any]] = []
-        per_term_limit = max(10, min(limit, 100))
-        for term in _safe_list(terms):
-            try:
-                hits = search_device_enforcement(term, start_date, end_date, limit=per_term_limit)
-            except Exception:
-                hits = []
-            for item in hits:
-                recall_number = item.get("recall_number") or item.get("event_id") or ""
-                classification = (item.get("classification") or "").title() or "Unspecified"
-                risk_level = cls._risk_from_classification(classification)
-                results.append(
-                    {
-                        "Source": "FDA Enforcement",
-                        "Date": item.get("report_date") or item.get("recall_initiation_date"),
-                        "Product": item.get("product_description", term),
-                        "Description": item.get("product_description", ""),
-                        "Reason": item.get("reason_for_recall", ""),
-                        "Firm": item.get("recalling_firm", ""),
-                        "Model Info": item.get("code_info") or item.get("product_code") or "",
-                        "ID": recall_number,
-                        "Link": cls._openfda_link("enforcement", recall_number),
-                        "Status": item.get("status", ""),
-                        "Risk_Level": risk_level,
-                        "Matched_Term": term,
-                        "Recall_Class": classification,
-                    }
-                )
-        return results
-
-    @classmethod
-    def _fetch_cpsc(
-        cls,
-        terms: Sequence[str],
-        start_date: date,
-        end_date: date,
-        limit: int,
-    ) -> List[Dict[str, Any]]:
-        results: List[Dict[str, Any]] = []
-        per_term_limit = max(10, min(limit, 200))
-        for term in _safe_list(terms):
-            try:
-                hits = cpsc_search(term, start_date, end_date, limit=per_term_limit)
-            except Exception:
-                hits = []
-            for item in hits:
-                recall_number = item.get("RecallNumber") or item.get("RecallID") or ""
-                results.append(
-                    {
-                        "Source": "CPSC Recalls",
-                        "Date": item.get("RecallDate"),
-                        "Product": item.get("Title", term),
-                        "Description": item.get("Title", ""),
-                        "Reason": item.get("Description", ""),
-                        "Firm": item.get("CompanyName") or item.get("Manufacturers") or "",
-                        "Model Info": item.get("ModelNumber") or "",
-                        "ID": recall_number,
-                        "Link": item.get("URL", ""),
-                        "Status": item.get("RecallStatus") or "",
-                        "Risk_Level": "High" if "death" in str(item.get("Description", "")).lower() else "Medium",
-                        "Matched_Term": term,
-                    }
-                )
-        return results
-
-    @classmethod
-    def _search_regulatory_web(
-        cls,
-        terms: Sequence[str],
-        regions: Sequence[str],
-        limit: int,
-    ) -> List[Dict[str, Any]]:
-        results: List[Dict[str, Any]] = []
-        per_term_limit = max(5, min(limit, 10))
-        for region in regions:
-            domains = cls.REGIONAL_DOMAINS.get(region, [])
-            for term in _safe_list(terms):
-                query = f'"{term}" (recall OR warning OR safety alert OR enforcement)'
-                hits = google_search(query, num=per_term_limit, pages=2, domains=domains)
-                results.extend(cls._google_hits_to_records(hits, f"Regulatory Web ({region})", term))
-        return results
-
-    @classmethod
-    def _search_sanctions(cls, manufacturer: str, limit: int) -> List[Dict[str, Any]]:
-        query = f'"{manufacturer}" (sanction OR enforcement OR penalty OR debarment OR warning)'
-        hits = google_search(query, num=min(limit, 10), pages=2, domains=cls.SANCTIONS_DOMAINS)
-        return cls._google_hits_to_records(hits, "Sanctions & Watchlists", manufacturer)
-
-    @classmethod
-    def _search_ofac(cls, manufacturer: str, limit: int) -> List[Dict[str, Any]]:
-        if not manufacturer:
-            return []
-
-        session = requests.Session()
-        session.headers.update(
-            {
-                "User-Agent": "CAPA-Regulatory-Agent/1.0 (+https://sanctionssearch.ofac.treas.gov/)",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            }
-        )
-        base_url = "https://sanctionssearch.ofac.treas.gov"
-        token = None
-        try:
-            landing = session.get(base_url, timeout=15)
-            if landing.ok:
-                soup = BeautifulSoup(landing.text, "lxml")
-                token_input = soup.find("input", {"name": "__RequestVerificationToken"})
-                if token_input and token_input.get("value"):
-                    token = token_input["value"]
-        except requests.RequestException:
-            return []
-
-        payload = {
-            "searchValue": manufacturer,
-            "searchType": "Name",
-            "searchCriteria": "0",
-            "searchTypeId": "0",
-            "name": manufacturer,
-        }
-        if token:
-            payload["__RequestVerificationToken"] = token
-
-        endpoints = ["/Home/Search", "/Home/Search/"]
-        html = None
-        for endpoint in endpoints:
-            try:
-                response = session.post(f"{base_url}{endpoint}", data=payload, timeout=20)
-                if response.ok and response.text:
-                    html = response.text
-                    break
-            except requests.RequestException:
-                continue
-
-        if not html:
-            return []
-
-        soup = BeautifulSoup(html, "lxml")
-        table = soup.find("table")
-        if not table:
-            return []
-
-        headers = [th.get_text(strip=True) for th in table.find_all("th")]
-        records: List[Dict[str, Any]] = []
-        for row in table.find_all("tr"):
-            cells = [td.get_text(" ", strip=True) for td in row.find_all("td")]
-            if not cells:
-                continue
-            row_data = dict(zip(headers, cells)) if headers else {}
-            name = row_data.get("Name") or cells[0]
-            programs = row_data.get("Program") or row_data.get("Programs") or ""
-            sanctions_type = row_data.get("Type") or ""
-            reason = " | ".join([x for x in [programs, sanctions_type] if x])
-            link = base_url
-            records.append(
-                {
-                    "Source": "OFAC Sanctions Search",
-                    "Date": "",
-                    "Product": name,
-                    "Description": name,
-                    "Reason": reason or "OFAC sanctions list match",
-                    "Firm": name,
-                    "Model Info": "",
-                    "ID": f"OFAC:{name}",
-                    "Link": link,
-                    "Status": "Listed",
-                    "Risk_Level": "High",
-                    "Matched_Term": manufacturer,
+        for term in terms:
+            hits = search_device_recall(term, start, end, limit=limit)
+            for hit in hits:
+                recall_number = hit.get("recall_number", "")
+                reason = hit.get("reason_for_recall", "")
+                classification = hit.get("classification", "")
+                record = {
+                    "Source": "FDA Device Recall",
+                    "Date": hit.get("report_date", ""),
+                    "Product": hit.get("product_description", ""),
+                    "Description": hit.get("product_description", ""),
+                    "Reason": reason,
+                    "Firm": hit.get("recalling_firm", ""),
+                    "Model Info": hit.get("model_number", "") or hit.get("code_info", ""),
+                    "ID": recall_number,
+                    "Link": cls._openfda_link("recall", recall_number),
+                    "Status": hit.get("status", ""),
+                    "Risk_Level": cls._risk_from_classification(classification),
+                    "Matched_Term": term,
                 }
-            )
-            if len(records) >= limit:
+                results.append(record)
+            if len(results) >= limit:
                 break
-        return records
+        return results
+
+    @classmethod
+    def _fetch_openfda_enforcement(cls, terms: Sequence[str], limit: int, start: date, end: date) -> List[Dict[str, Any]]:
+        results: List[Dict[str, Any]] = []
+        for term in terms:
+            hits = search_device_enforcement(term, start, end, limit=limit)
+            for hit in hits:
+                recall_number = hit.get("recall_number", "")
+                reason = hit.get("reason_for_recall", "")
+                classification = hit.get("classification", "")
+                record = {
+                    "Source": "FDA Enforcement",
+                    "Date": hit.get("report_date", ""),
+                    "Product": hit.get("product_description", ""),
+                    "Description": hit.get("product_description", ""),
+                    "Reason": reason,
+                    "Firm": hit.get("recalling_firm", ""),
+                    "Model Info": hit.get("model_number", "") or hit.get("code_info", ""),
+                    "ID": recall_number,
+                    "Link": cls._openfda_link("enforcement", recall_number),
+                    "Status": hit.get("status", ""),
+                    "Risk_Level": cls._risk_from_classification(classification),
+                    "Matched_Term": term,
+                }
+                results.append(record)
+            if len(results) >= limit:
+                break
+        return results
+
+    @classmethod
+    def _fetch_cpsc(cls, terms: Sequence[str], start: date, end: date, limit: int = 100) -> List[Dict[str, Any]]:
+        results: List[Dict[str, Any]] = []
+        for term in terms:
+            hits = cpsc_search(term, start, end, limit=limit)
+            for hit in hits:
+                record = {
+                    "Source": "CPSC Recall",
+                    "Date": hit.get("RecallDate", ""),
+                    "Product": hit.get("Title", ""),
+                    "Description": hit.get("Title", ""),
+                    "Reason": hit.get("Description", ""),
+                    "Firm": hit.get("Manufacturer", ""),
+                    "Model Info": hit.get("ProductID", ""),
+                    "ID": hit.get("RecallID", ""),
+                    "Link": hit.get("URL", ""),
+                    "Status": hit.get("Status", ""),
+                    "Risk_Level": "Medium",
+                    "Matched_Term": term,
+                }
+                results.append(record)
+            if len(results) >= limit:
+                break
+        return results
+
+    @classmethod
+    def _search_sanctions(cls, manufacturer: str, limit: int = 50) -> List[Dict[str, Any]]:
+        results: List[Dict[str, Any]] = []
+        for domain in cls.SANCTIONS_DOMAINS:
+            results.extend(cls._google_search(f'"{manufacturer}" site:{domain}', category="Sanctions", num=limit))
+        return results[:limit]
+
+    @classmethod
+    def _search_ofac(cls, manufacturer: str, limit: int = 50) -> List[Dict[str, Any]]:
+        results: List[Dict[str, Any]] = []
+        url = "https://www.treasury.gov/ofac/downloads/sdn.csv"
+        try:
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            lines = response.text.splitlines()
+        except Exception:
+            return results
+
+        for line in lines[1:]:
+            fields = line.split(",")
+            name = fields[1] if len(fields) > 1 else ""
+            if manufacturer.lower() in name.lower():
+                link = "https://www.treasury.gov/ofac/downloads/sdn.csv"
+                results.append(
+                    {
+                        "Source": "OFAC Sanctions",
+                        "Date": "",
+                        "Product": name,
+                        "Description": name,
+                        "Reason": "OFAC sanctions list match",
+                        "Firm": name,
+                        "Model Info": "",
+                        "ID": f"OFAC:{name}",
+                        "Link": link,
+                        "Status": "Listed",
+                        "Risk_Level": "High",
+                        "Matched_Term": manufacturer,
+                    }
+                )
+            if len(results) >= limit:
+                break
+        return results
 
     @classmethod
     def _search_media(cls, query_term: str, regions: Sequence[str]) -> List[Dict[str, Any]]:
@@ -450,6 +377,7 @@ class RegulatoryService:
             link = item.get("link", "")
             snippet = item.get("snippet") or ""
             title = item.get("title") or snippet
+            risk_level = RegulatoryService._risk_from_keywords(f"{title} {snippet}")
             records.append(
                 {
                     "Source": source_label,
@@ -462,11 +390,30 @@ class RegulatoryService:
                     "ID": link,
                     "Link": link,
                     "Status": "Published",
-                    "Risk_Level": "Medium",
+                    "Risk_Level": risk_level,
                     "Matched_Term": matched_term,
                 }
             )
         return records
+
+    @staticmethod
+    def _risk_from_keywords(text: str) -> str:
+        if not text:
+            return "Medium"
+        normalized = text.lower()
+        high_risk_terms = [
+            "class i",
+            "class ii",
+            "class iii",
+            "recall",
+            "safety alert",
+            "field safety",
+            "warning",
+            "urgent",
+        ]
+        if any(term in normalized for term in high_risk_terms):
+            return "High"
+        return "Medium"
 
     @staticmethod
     def _risk_from_classification(classification: str) -> str:

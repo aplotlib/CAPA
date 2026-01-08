@@ -1,64 +1,39 @@
+# src/search/openfda.py
+from __future__ import annotations
 import requests
-import pandas as pd
-import streamlit as st
+from datetime import date
+from typing import Any, Dict, List
 
-class OpenFDAService:
-    """
-    Service to interact with the openFDA API for real-time regulatory data.
-    Documentation: https://open.fda.gov/apis/device/enforcement/
-    """
-    
-    BASE_URL = "https://api.fda.gov/device/enforcement.json"
+DEVICE_RECALL_ENDPOINT = "https://api.fda.gov/device/recall.json"
+DEVICE_ENF_ENDPOINT    = "https://api.fda.gov/device/enforcement.json"
 
-    @staticmethod
-    def search_recalls(query_term: str, limit: int = 10) -> pd.DataFrame:
-        """
-        Searches the FDA Device Enforcement endpoint for real recalls.
-        """
-        if not query_term:
-            return pd.DataFrame()
+def _yyyymmdd(d: date) -> str:
+    return d.strftime("%Y%m%d")
 
-        # Construct query: Search description, product code, or reason
-        # We replace spaces with '+' for the API syntax
-        sanitized_term = query_term.strip().replace(" ", "+")
-        
-        # Search syntax: (product_description:"term"+OR+reason_for_recall:"term")
-        search_query = f'(product_description:"{sanitized_term}"+OR+reason_for_recall:"{sanitized_term}")'
-        
-        params = {
-            'search': search_query,
-            'limit': limit,
-            'sort': 'recall_initiation_date:desc' # Get newest first
-        }
+def _date_range_clause(start: date, end: date) -> str:
+    date_range = f"{_yyyymmdd(start)} TO {_yyyymmdd(end)}"
+    return f"(report_date:[{date_range}] OR recall_initiation_date:[{date_range}])"
 
-        try:
-            response = requests.get(OpenFDAService.BASE_URL, params=params)
-            data = response.json()
+def _openfda(endpoint: str, search: str, limit: int = 100) -> List[Dict[str, Any]]:
+    params = {"search": search, "limit": min(max(limit, 1), 1000)}
+    r = requests.get(endpoint, params=params, timeout=30)
+    # openFDA returns 404 when no results; treat as empty.
+    if r.status_code == 404:
+        return []
+    r.raise_for_status()
+    return r.json().get("results", []) or []
 
-            if "error" in data:
-                # Handle "No matches found" gracefully
-                return pd.DataFrame()
+def search_device_recall(product_name: str, start: date, end: date, limit: int = 100):
+    # Match product text + date window (report_date is a common choice; fallback to recall_initiation_date if needed)
+    s = (
+        f'(product_description:"{product_name}" OR reason_for_recall:"{product_name}" OR recalling_firm:"{product_name}")'
+        f" AND {_date_range_clause(start, end)}"
+    )
+    return _openfda(DEVICE_RECALL_ENDPOINT, s, limit)
 
-            if "results" in data:
-                results = data["results"]
-                
-                # Extract relevant fields for the UI
-                processed_data = []
-                for item in results:
-                    processed_data.append({
-                        "Date": item.get("recall_initiation_date"),
-                        "Class": item.get("classification"),
-                        "Product": item.get("product_description"),
-                        "Reason": item.get("reason_for_recall"),
-                        "Firm": item.get("recalling_firm"),
-                        "Status": item.get("status"),
-                        "Recall #": item.get("recall_number")
-                    })
-                
-                return pd.DataFrame(processed_data)
-            
-            return pd.DataFrame()
-
-        except Exception as e:
-            st.error(f"Failed to connect to FDA API: {e}")
-            return pd.DataFrame()
+def search_device_enforcement(product_name: str, start: date, end: date, limit: int = 100):
+    s = (
+        f'(product_description:"{product_name}" OR reason_for_recall:"{product_name}" OR recalling_firm:"{product_name}")'
+        f" AND {_date_range_clause(start, end)}"
+    )
+    return _openfda(DEVICE_ENF_ENDPOINT, s, limit)

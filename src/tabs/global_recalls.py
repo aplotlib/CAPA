@@ -46,7 +46,7 @@ def display_recalls_tab():
         mode_key = "powerful" if "Powerful" in search_mode else "fast"
         
         btn_col, _ = st.columns([1, 2])
-        if btn_col.button("🚀 Launch Surveillance Mission", type="primary", use_container_width=True):
+        if btn_col.button("🚀 Launch Surveillance Mission", type="primary", width="stretch"):
             if not search_term and not manufacturer:
                 st.error("Please enter a search term or manufacturer.")
             elif vendor_only and not manufacturer:
@@ -124,7 +124,7 @@ def display_recalls_tab():
             st.dataframe(
                 df, 
                 column_config={"Link": st.column_config.LinkColumn("Link")}, 
-                use_container_width=True
+                width="stretch"
             )
             
             # Export

@@ -1,9 +1,10 @@
 # .streamlit/config.toml
 
 [server]
-maxUploadSize = 550
-maxMessageSize = 550
+maxUploadSize = 500
+maxMessageSize = 500
 enableXsrfProtection = false
+fileWatcherType = "none"
 
 [runner]
 fastReruns = true

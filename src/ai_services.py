@@ -356,11 +356,38 @@ class MultiProviderAIService:
         model_overrides = model_overrides or {}
         self.openai = AIService(openai_key, provider="openai", model_overrides=model_overrides.get("openai"))
         self.gemini = AIService(gemini_key, provider="gemini", model_overrides=model_overrides.get("gemini"))
+        self.default_provider = "openai"
 
     def generate_dual_responses(self, prompt: str, system_instruction: str) -> Tuple[str, str]:
         concise = self.openai.generate_text_with_verbosity(prompt, system_instruction, "Pithy", use_reasoning=True)
         verbose = self.gemini.generate_text_with_verbosity(prompt, system_instruction, "Verbose", use_reasoning=True)
         return concise, verbose
+
+    def _base(self) -> AIService:
+        return self.openai if self.default_provider == "openai" else self.gemini
+
+    def _generate_text(self, prompt: str, system_instruction: str = None, use_reasoning: bool = False) -> str:
+        return self._base()._generate_text(prompt, system_instruction=system_instruction, use_reasoning=use_reasoning)
+
+    def _generate_json(self, prompt: str, system_instruction: str = None, use_reasoning: bool = False) -> Dict[str, Any]:
+        return self._base()._generate_json(prompt, system_instruction=system_instruction, use_reasoning=use_reasoning)
+
+    def assess_relevance_json(self, my_context: str, record_text: str) -> Dict[str, str]:
+        return self._base().assess_relevance_json(my_context, record_text)
+
+    def generate_text_with_verbosity(
+        self,
+        prompt: str,
+        system_instruction: str,
+        verbosity: str,
+        use_reasoning: bool = False,
+    ) -> str:
+        return self._base().generate_text_with_verbosity(
+            prompt,
+            system_instruction=system_instruction,
+            verbosity=verbosity,
+            use_reasoning=use_reasoning,
+        )
 
 # Singleton management for the main service
 def get_ai_service():

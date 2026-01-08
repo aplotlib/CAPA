@@ -188,7 +188,14 @@ def sidebar_controls() -> tuple[date, date, List[str], str]:
     if date_mode == "Custom":
         start_date = st.sidebar.date_input("Start", value=date.today() - timedelta(days=365))
         end_date = st.sidebar.date_input("End", value=date.today())
-@@ -101,77 +199,96 @@ def sidebar_controls() -> tuple[date, date, List[str], str]:
+    else:
+        days_map = {"Last 30 days": 30, "Last 90 days": 90, "Last 1 Year": 365, "Last 2 Years": 730}
+        days = days_map.get(date_mode, 365)
+        end_date = date.today()
+        start_date = end_date - timedelta(days=days)
+
+    st.sidebar.header("Coverage Regions")
+    regions: List[str] = []
     c1, c2 = st.sidebar.columns(2)
     with c1:
         if st.checkbox("🇺🇸 US", value=True):
@@ -285,7 +292,9 @@ def render_smart_view(df: pd.DataFrame) -> None:
 
     for _, row in df.iterrows():
         risk = row.get("Risk_Level", "TBD")
-@@ -181,51 +298,51 @@ def render_smart_view(df: pd.DataFrame) -> None:
+        risk_color = "🔴" if risk == "High" else "🟠" if risk == "Medium" else "🟢" if risk == "Low" else "⚪"
+        title = str(row.get("Product", "Unknown"))[:80]
+        source = row.get("Source", "Unknown")
         date_str = row.get("Date", "N/A")
         matched_term = row.get("Matched_Term", "")
         label = f"{risk_color} {risk} | {date_str} | {source} | {title}"
@@ -337,7 +346,9 @@ def run_regulatory_search(
             vendor_only=vendor_only,
             include_sanctions=include_sanctions,
             regions=regions,
-@@ -235,146 +352,164 @@ def run_regulatory_search(
+            start_date=start_date,
+            end_date=end_date,
+            limit=120,
             mode=search_mode,
         )
 
@@ -415,9 +426,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-tab_search, tab_batch, tab_chat, tab_web = st.tabs(
-    ["🔎 Regulatory Search", "📂 Batch Fleet Scan", "💬 AI Assistant", "🌐 Web Search"]
-)
+tab_labels = ["🔎 Regulatory Search", "📂 Batch Fleet Scan", "💬 AI Assistant", "🌐 Web Search"]
+tab_search, tab_batch, tab_chat, tab_web = st.tabs(tab_labels)
 
 with tab_search:
     st.header("🔎 Regulatory Search")
@@ -502,3 +512,10 @@ with tab_search:
         st.info("No records found for the current search parameters.")
 
 with tab_batch:
+    render_batch_scan()
+
+with tab_chat:
+    display_chat_interface()
+
+with tab_web:
+    display_web_search()

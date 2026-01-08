@@ -53,7 +53,7 @@ def display_web_search():
                     left, right = st.columns([2, 1])
                     with left:
                         for _, row in df.iterrows():
-                            with st.expander(f" {row['Description']}"):
+                            with st.expander(f"📰 {row['Description']}"):
                                 st.write(f"**Source:** {row['Source']}")
                                 st.write(f"**Date:** {row['Date']}")
                                 st.info(row.get("Reason", "No snippet"))

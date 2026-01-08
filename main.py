@@ -121,16 +121,27 @@ def _safe_secret(key: str) -> str | None:
         return None
 
 
+def _normalize_gemini_key(api_key: str | None) -> tuple[str | None, str | None]:
+    if not api_key:
+        return None, None
+    if api_key.startswith("sk-"):
+        return None, "Gemini API key appears to be an OpenAI key. Check GEMINI_API_KEY/GOOGLE_API_KEY."
+    return api_key, None
+
+
 def init_session() -> None:
     if "openai_api_key" not in st.session_state:
         st.session_state.openai_api_key = _safe_secret("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
     if "gemini_api_key" not in st.session_state:
-        st.session_state.gemini_api_key = (
+        gemini_api_key = (
             _safe_secret("GEMINI_API_KEY")
             or _safe_secret("GOOGLE_API_KEY")
             or os.getenv("GEMINI_API_KEY")
             or os.getenv("GOOGLE_API_KEY")
         )
+        gemini_api_key, gemini_warning = _normalize_gemini_key(gemini_api_key)
+        st.session_state.gemini_api_key = gemini_api_key
+        st.session_state.gemini_key_warning = gemini_warning
 
     if "provider" not in st.session_state:
         if st.session_state.openai_api_key and st.session_state.gemini_api_key:
@@ -225,7 +236,10 @@ def sidebar_controls() -> tuple[date, date, List[str], str]:
     if st.session_state.provider in {"openai", "both"} and not st.session_state.openai_api_key:
         st.sidebar.warning("OpenAI API key not found in Streamlit secrets.")
     if st.session_state.provider in {"gemini", "both"} and not st.session_state.gemini_api_key:
-        st.sidebar.warning("Gemini API key not found in Streamlit secrets.")
+        if st.session_state.get("gemini_key_warning"):
+            st.sidebar.warning(st.session_state.gemini_key_warning)
+        else:
+            st.sidebar.warning("Gemini API key not found in Streamlit secrets.")
 
     st.sidebar.caption(f"📅 Range: {start_date} → {end_date}")
     return start_date, end_date, regions, search_mode

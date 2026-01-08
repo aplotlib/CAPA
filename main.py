@@ -14,6 +14,8 @@ from src.services.regulatory_service import RegulatoryService
 from src.tabs.ai_chat import display_chat_interface
 from src.tabs.web_search import display_web_search
 
+DEFAULT_RECALL_KEYWORDS = "recall alert safety bulletin problem issue hazard warning defect"
+
 
 st.set_page_config(
     page_title="CAPA Regulatory Intelligence Hub",
@@ -346,16 +348,20 @@ def run_regulatory_search(
     manufacturer: str,
     vendor_only: bool,
     include_sanctions: bool,
+    use_default_keywords: bool,
     regions: List[str],
     start_date: date,
     end_date: date,
     search_mode: str,
 ) -> None:
+    augmented_query = query
+    if use_default_keywords and query:
+        augmented_query = f"{query} {DEFAULT_RECALL_KEYWORDS}"
     focus_label = "vendor enforcement" if vendor_only else "recalls, alerts, and enforcement"
     with st.status(f"Running {search_mode} surveillance for {focus_label}...", expanded=True) as status:
         st.write("📡 Connecting to regulatory databases, sanctions lists, and trusted media sources...")
         df, logs = RegulatoryService.search_all_sources(
-            query_term=query,
+            query_term=augmented_query,
             manufacturer=manufacturer,
             vendor_only=vendor_only,
             include_sanctions=include_sanctions,
@@ -371,6 +377,7 @@ def run_regulatory_search(
         st.session_state.search_context = {
             "query": query,
             "manufacturer": manufacturer,
+            "use_default_keywords": use_default_keywords,
         }
 
         status.write(f"✅ Search Complete. Found {len(df)} records.")
@@ -463,7 +470,11 @@ with tab_search:
             with settings_col2:
                 include_sanctions = st.checkbox("Include sanctions & watchlists", value=True)
             with settings_col3:
-                st.write("")
+                use_default_keywords = st.checkbox(
+                    "Use default safety keywords",
+                    value=True,
+                    help="Adds recall, alert, safety bulletin, and problem keywords to broaden matches.",
+                )
                 run_btn = st.form_submit_button("🚀 Run Surveillance", width="stretch", type="primary")
 
     if run_btn:
@@ -477,6 +488,7 @@ with tab_search:
                 manufacturer=manufacturer_query,
                 vendor_only=vendor_only,
                 include_sanctions=include_sanctions,
+                use_default_keywords=use_default_keywords,
                 regions=regions,
                 start_date=start_date,
                 end_date=end_date,

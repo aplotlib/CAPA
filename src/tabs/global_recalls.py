@@ -34,7 +34,7 @@ def display_recalls_tab():
             search_mode = st.radio("Mode", ["Fast (APIs + Snippets)", "Powerful (Agentic Scrape)"], label_visibility="collapsed")
         with col3:
             st.markdown("**Lookback**")
-            days_back = st.selectbox("Period", [30, 90, 365, 730], index=1, label_visibility="collapsed")
+            days_back = st.selectbox("Period", [30, 90, 365, 730], index=2, label_visibility="collapsed")
             include_sanctions = st.checkbox("Sanctions/Watchlists", value=True)
             vendor_only = st.checkbox("Vendor-only search", value=False)
 
@@ -77,11 +77,29 @@ def display_recalls_tab():
                     
                     st.session_state.recall_hits = df
                     st.session_state.recall_log = logs
+                    st.session_state.recall_terms = RegulatoryService.prepare_terms(
+                        search_term,
+                        manufacturer,
+                        max_terms=12 if mode_key == "powerful" else 10,
+                    )
                     st.rerun()
 
     # --- RESULTS DASHBOARD ---
     df = st.session_state.recall_hits
     logs = st.session_state.recall_log
+    terms_used = st.session_state.get("recall_terms", [])
+
+    if logs:
+        summary = st.container()
+        with summary:
+            st.subheader("🧭 Mission Summary")
+            left, center, right = st.columns([1.2, 1, 1])
+            total_results = int(len(df)) if not df.empty else 0
+            left.metric("Total Findings", total_results)
+            center.metric("Search Window", f"{days_back} days")
+            right.metric("Mode", "Powerful" if mode_key == "powerful" else "Fast")
+            if terms_used:
+                st.caption(f"Search terms expanded to {len(terms_used)} variants: " + ", ".join(terms_used))
 
     if logs:
         # Metrics Bar

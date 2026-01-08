@@ -13,9 +13,12 @@ def cpsc_search(product_name: str, start: date, end: date, limit: int = 200) -> 
         "RecallDateStart": start.isoformat(),  # YYYY-MM-DD
         "RecallDateEnd": end.isoformat(),
     }
-    r = requests.get(CPSC_ENDPOINT, params=params, timeout=30)
-    r.raise_for_status()
-    data = r.json()
+    try:
+        r = requests.get(CPSC_ENDPOINT, params=params, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+    except requests.RequestException:
+        return []
     # API returns a list of recalls
     if isinstance(data, list):
         return data[:limit]

@@ -80,7 +80,7 @@ class RegulatoryService:
         regions: Optional[List[str]] = None,
         start_date: Any = None,
         end_date: Any = None,
-        limit: int = 100,
+        limit: int = 300,
         mode: str = "fast",
         ai_service: Any = None,
         manufacturer: Optional[str] = None,

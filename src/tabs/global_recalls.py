@@ -1,122 +1,67 @@
 import streamlit as st
 import pandas as pd
-import time
-from datetime import datetime, timedelta
 from src.services.regulatory_service import RegulatoryService
 
-def get_ai_service():
-    """Retrieves AI Service from session state."""
-    return st.session_state.get('ai_service')
+def display_global_recalls_tab():
+    st.header("🌐 Global Recall & Alert Intelligence")
+    st.caption("Scan FDA, EU, UK, Health Canada, TGA, and other authorities for emerging safety alerts.")
 
-def display_recalls_tab():
-    st.header("🌍 Global Regulatory Intelligence & Agentic Surveillance")
-    st.caption("Deep-scan surveillance: FDA, CPSC, Global Regulators (EU/UK/LATAM), and Media.")
-
-    ai = get_ai_service()
-    
-    # Initialize Session State
-    if 'recall_hits' not in st.session_state: 
-        st.session_state.recall_hits = pd.DataFrame()
-    if 'recall_log' not in st.session_state: 
-        st.session_state.recall_log = {}
-
-    p_info = st.session_state.get('product_info', {})
-    default_name = p_info.get('name', '')
-
-    # --- CONFIGURATION PANEL ---
-    with st.expander("🛠️ Search Configuration", expanded=True):
-        col1, col2, col3 = st.columns([2, 1, 1])
+    # --- SIDEBAR FILTERS ---
+    with st.expander("🔍 Surveillance Filters", expanded=True):
+        col1, col2 = st.columns([1, 1])
         with col1:
-            search_term = st.text_input("Product Name / Search Term", value=default_name, placeholder="e.g. Infusion Pump")
-            manufacturer = st.text_input("Manufacturer / Vendor (optional)", value=p_info.get('manufacturer', ''), placeholder="e.g. Acme Medical")
+            query = st.text_input("Product Search (e.g. pacemaker, infusion pump)")
         with col2:
-            st.markdown("**Search Depth**")
-            search_mode = st.radio("Mode", ["Fast (APIs + Snippets)", "Powerful (Agentic Scrape)"], label_visibility="collapsed")
-        with col3:
-            st.markdown("**Lookback**")
-            days_back = st.selectbox("Period", [30, 90, 365, 730], index=2, label_visibility="collapsed")
-            include_sanctions = st.checkbox("Sanctions/Watchlists", value=True)
-            vendor_only = st.checkbox("Vendor-only search", value=False)
+            manufacturer = st.text_input("Manufacturer (Optional)")
+        
+        date_range = st.slider("Lookback Period (days)", min_value=30, max_value=3650, value=730, step=30)
+        vendor_only = st.checkbox("Vendor Enforcement Actions Only", value=False)
+        include_sanctions = st.checkbox("Include Sanctions/Watchlists", value=True)
+    
+    btn_col, _ = st.columns([1, 4])
+    if btn_col.button("🚀 Launch Surveillance Mission", type="primary", width="stretch"):
+        if not query:
+            st.warning("Enter a product search term.")
+            return
 
-        # Date Calculation
+        start_date = datetime.now() - timedelta(days=date_range)
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=days_back)
-        
-        # Calculate Mode
-        mode_key = "powerful" if "Powerful" in search_mode else "fast"
-        
-        btn_col, _ = st.columns([1, 2])
-        if btn_col.button("🚀 Launch Surveillance Mission", type="primary", width="stretch"):
-            if not search_term and not manufacturer:
-                st.error("Please enter a search term or manufacturer.")
-            elif vendor_only and not manufacturer:
-                st.error("Vendor-only search requires a manufacturer/vendor name.")
-            else:
-                if mode_key == "powerful" and not ai:
-                    st.warning("⚠️ Powerful mode requires AI. Please check your API keys. Switching to Fast mode.")
-                    mode_key = "fast"
-                
-                with st.spinner(f"Running {mode_key.upper()} surveillance across US, EU, UK, LATAM..."):
-                    # Clear previous
-                    st.session_state.recall_hits = pd.DataFrame()
-                    st.session_state.recall_log = {}
 
-                    # EXECUTE SEARCH
-                    df, logs = RegulatoryService.search_all_sources(
-                        query_term=search_term, 
-                        regions=["US", "EU", "UK", "LATAM", "APAC"],
-                        manufacturer=manufacturer,
-                        vendor_only=vendor_only,
-                        include_sanctions=include_sanctions,
-                        start_date=start_date, 
-                        end_date=end_date,
-                        limit=100,
-                        mode=mode_key,
-                        ai_service=ai
-                    )
-                    
-                    st.session_state.recall_hits = df
-                    st.session_state.recall_log = logs
-                    st.session_state.recall_terms = RegulatoryService.prepare_terms(
-                        search_term,
-                        manufacturer,
-                        max_terms=12 if mode_key == "powerful" else 10,
-                    )
-                    st.rerun()
+        with st.spinner("Scanning global regulatory sources..."):
+            df, logs = RegulatoryService.search_all_sources(
+                query_term=query,
+                manufacturer=manufacturer,
+                start_date=start_date,
+                end_date=end_date,
+                vendor_only=vendor_only,
+                include_sanctions=include_sanctions,
+                limit=200
+            )
+            st.session_state.global_recalls_df = df
+            st.session_state.global_recalls_log = logs
 
-    # --- RESULTS DASHBOARD ---
-    df = st.session_state.recall_hits
-    logs = st.session_state.recall_log
-    terms_used = st.session_state.get("recall_terms", [])
+    if "global_recalls_df" not in st.session_state:
+        st.info("No data loaded yet.")
+        return
 
-    if logs:
-        summary = st.container()
-        with summary:
-            st.subheader("🧭 Mission Summary")
-            left, center, right = st.columns([1.2, 1, 1])
-            total_results = int(len(df)) if not df.empty else 0
-            left.metric("Total Findings", total_results)
-            center.metric("Search Window", f"{days_back} days")
-            right.metric("Mode", "Powerful" if mode_key == "powerful" else "Fast")
-            if terms_used:
-                st.caption(f"Search terms expanded to {len(terms_used)} variants: " + ", ".join(terms_used))
+    df = st.session_state.global_recalls_df
+    logs = st.session_state.global_recalls_log
 
-    if logs:
-        # Metrics Bar
-        cols = st.columns(len(logs))
-        for i, (source, count) in enumerate(logs.items()):
-            cols[i].metric(source, count)
+    if df is not None and not df.empty:
         st.divider()
+        st.subheader(f"🚨 {len(df)} Global Alerts Found")
+        
+        # --- AI RISK CLASSIFY ---
+        if "AI_Verified" not in df.columns:
+            if st.button("🤖 Verify Relevance with AI"):
+                with st.spinner("AI is reviewing matches..."):
+                    df = RegulatoryService.classify_recall_risk(df)
+                    st.session_state.global_recalls_df = df
+                    st.success("AI verification complete.")
 
-    if not df.empty:
-        # Risk Formatting
-        if "Risk_Level" in df.columns:
-            df["Risk_Level"] = df["Risk_Level"].fillna("TBD")
-        
-        tab_list, tab_raw = st.tabs(["⚡ Smart Findings", "📊 Data Grid"])
-        
-        with tab_list:
-            # Sort: High Risk First, then Verified, then Recent
+        # --- RESULTS TABS ---
+        tab_smart, tab_raw = st.tabs(["🧠 Smart View", "📜 Full Record Table"])
+        with tab_smart:
             if "AI_Verified" in df.columns:
                 df = df.sort_values(by=["Risk_Level", "AI_Verified"], ascending=[True, False]) # High < Low alphabetically, wait. High/Medium/Low.
                 # Custom sort usually better, but simplified here.
@@ -142,7 +87,7 @@ def display_recalls_tab():
             st.dataframe(
                 df, 
                 column_config={"Link": st.column_config.LinkColumn("Link")}, 
-                width="stretch"
+                use_container_width=True
             )
             
             # Export

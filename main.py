@@ -29,35 +29,54 @@ def apply_enterprise_theme() -> None:
         """
         <style>
         :root {
-            --primary: #0b3d91;
-            --primary-dark: #092b63;
-            --accent: #23a6f0;
-            --bg: #f6f8fb;
+            --primary: #1f2a44;
+            --primary-dark: #162033;
+            --accent: #3b82f6;
+            --accent-soft: #e0f2fe;
+            --bg: #f5f7fb;
             --card: #ffffff;
             --text: #0f172a;
             --muted: #64748b;
             --border: #e2e8f0;
+            --success: #16a34a;
+            --warning: #f97316;
+            --danger: #dc2626;
+        }
+        body {
+            background-color: var(--bg);
         }
         .main .block-container {
-            padding-top: 1.2rem;
-            padding-bottom: 2.5rem;
+            padding-top: 1rem;
+            padding-bottom: 3rem;
         }
         .enterprise-header {
-            background: linear-gradient(135deg, #0b3d91 0%, #0f172a 55%, #111827 100%);
+            background: linear-gradient(135deg, #1f2a44 0%, #111827 60%, #0b1324 100%);
             color: #ffffff;
-            padding: 1.6rem 2rem;
-            border-radius: 16px;
-            box-shadow: 0 16px 32px rgba(15, 23, 42, 0.2);
-            margin-bottom: 1.5rem;
+            padding: 1.8rem 2.2rem;
+            border-radius: 18px;
+            box-shadow: 0 18px 36px rgba(15, 23, 42, 0.25);
+            margin-bottom: 1.2rem;
+            position: relative;
+            overflow: hidden;
         }
         .enterprise-header h1 {
             margin: 0;
-            font-size: 1.8rem;
+            font-size: 1.85rem;
             letter-spacing: 0.02em;
         }
         .enterprise-header p {
             margin: 0.35rem 0 0;
             color: rgba(255, 255, 255, 0.85);
+        }
+        .enterprise-header::after {
+            content: "";
+            position: absolute;
+            top: -40px;
+            right: -60px;
+            width: 180px;
+            height: 180px;
+            background: rgba(59, 130, 246, 0.25);
+            border-radius: 999px;
         }
         .badge-row {
             display: flex;
@@ -66,11 +85,54 @@ def apply_enterprise_theme() -> None:
             flex-wrap: wrap;
         }
         .badge {
-            background: rgba(255, 255, 255, 0.15);
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.16);
+            border: 1px solid rgba(255, 255, 255, 0.25);
             padding: 0.25rem 0.6rem;
             border-radius: 999px;
             font-size: 0.75rem;
+        }
+        .hero-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 0.95rem;
+            margin-bottom: 1.3rem;
+        }
+        .hero-card {
+            background: var(--card);
+            border-radius: 16px;
+            padding: 1rem 1.1rem;
+            border: 1px solid var(--border);
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+        }
+        .hero-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.6rem;
+        }
+        .hero-icon {
+            background: var(--accent-soft);
+            color: var(--primary-dark);
+            border-radius: 10px;
+            padding: 0.35rem 0.5rem;
+            font-size: 0.9rem;
+        }
+        .hero-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
+        }
+        .hero-value {
+            font-size: 1.35rem;
+            font-weight: 700;
+            margin-top: 0.35rem;
+            color: var(--text);
+        }
+        .hero-sub {
+            margin-top: 0.3rem;
+            color: var(--muted);
+            font-size: 0.85rem;
         }
         .metric-grid {
             display: grid;
@@ -103,12 +165,44 @@ def apply_enterprise_theme() -> None:
             padding: 1.2rem;
             box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
         }
+        .section-title {
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 0.25rem;
+        }
         .sidebar .sidebar-content {
             background-color: var(--bg);
         }
         .stButton > button {
             border-radius: 10px;
             font-weight: 600;
+        }
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.25rem 0.6rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            border: 1px solid var(--border);
+            background: #fff;
+        }
+        .pill-success {
+            color: var(--success);
+        }
+        .pill-warning {
+            color: var(--warning);
+        }
+        .pill-danger {
+            color: var(--danger);
+        }
+        .subtle-card {
+            border: 1px dashed var(--border);
+            padding: 0.75rem;
+            border-radius: 12px;
+            background: #fff;
         }
         </style>
         """,
@@ -245,6 +339,55 @@ def sidebar_controls() -> tuple[date, date, List[str], str]:
 
     st.sidebar.caption(f"📅 Range: {start_date} → {end_date}")
     return start_date, end_date, regions, search_mode
+
+
+def render_operational_snapshot(
+    regions: List[str],
+    search_mode: str,
+    start_date: date,
+    end_date: date,
+) -> None:
+    region_label = ", ".join(regions) if regions else "Global"
+    mode_label = "Accuracy-first" if search_mode == "powerful" else "Fast"
+    st.markdown(
+        f"""
+        <div class="hero-grid">
+            <div class="hero-card">
+                <div class="hero-top">
+                    <div class="hero-label">Coverage Regions</div>
+                    <div class="hero-icon">🌍</div>
+                </div>
+                <div class="hero-value">{len(regions) if regions else "All"}</div>
+                <div class="hero-sub">{region_label}</div>
+            </div>
+            <div class="hero-card">
+                <div class="hero-top">
+                    <div class="hero-label">Search Window</div>
+                    <div class="hero-icon">🗓️</div>
+                </div>
+                <div class="hero-value">{(end_date - start_date).days} days</div>
+                <div class="hero-sub">{start_date} → {end_date}</div>
+            </div>
+            <div class="hero-card">
+                <div class="hero-top">
+                    <div class="hero-label">Search Emphasis</div>
+                    <div class="hero-icon">🎯</div>
+                </div>
+                <div class="hero-value">{mode_label}</div>
+                <div class="hero-sub">APIs + Web + Media</div>
+            </div>
+            <div class="hero-card">
+                <div class="hero-top">
+                    <div class="hero-label">System Status</div>
+                    <div class="hero-icon">✅</div>
+                </div>
+                <div class="hero-value">Operational</div>
+                <div class="hero-sub">Sources + AI ready</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_search_summary(
@@ -456,7 +599,7 @@ with tab_search:
 
     with st.container(border=True):
         with st.form("regulatory_search_form"):
-            form_col1, form_col2 = st.columns([2, 2])
+            form_col1, form_col2, form_col3 = st.columns([2, 2, 1.2])
             with form_col1:
                 st.subheader("Search Profile")
                 search_query = st.text_input("Product, category, or symptom", placeholder="e.g. defibrillator battery")
@@ -467,8 +610,12 @@ with tab_search:
                 vendor_only = st.checkbox("Vendor enforcement or sanctions only", value=False)
                 include_sanctions = st.checkbox("Include sanctions/watchlists", value=True)
                 use_default_keywords = st.checkbox("Append default recall keywords", value=True)
+            with form_col3:
+                st.subheader("Run")
+                st.caption("Use accuracy-first for global signal coverage.")
+                run_btn = st.form_submit_button("🚀 Run Surveillance", width="stretch", type="primary")
 
-            run_btn = st.form_submit_button("🚀 Run Surveillance", width="stretch", type="primary")
+    render_operational_snapshot(regions, search_mode, start_date, end_date)
 
     if run_btn:
         run_regulatory_search(

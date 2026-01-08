@@ -80,35 +80,52 @@ class RecallResponseAgent:
         self._log(mission_log, f"🏁 MISSION COMPLETE. Generated {len(artifacts)} response packages.")
         return mission_log, artifacts
 
-    def run_bulk_scan(self, file_obj, start_date, end_date, fuzzy_threshold=0.6, progress_callback=None):
+    def run_bulk_scan(
+        self,
+        file_obj,
+        start_date,
+        end_date,
+        fuzzy_threshold=0.6,
+        progress_callback=None,
+        regions=None,
+        mode="fast",
+        extra_terms=None,
+    ):
         """
         Runs surveillance on a list of products provided in an Excel/CSV file.
-        Format: Col A = SKU, Col B = Product Name.
+        Format: Col A = Product Name, Col B = SKU, Col C (optional) = Manufacturer.
         """
         try:
             # Parse File
-            if file_obj.name.endswith('.csv'):
-                df_input = pd.read_csv(file_obj)
+            file_name = (file_obj.name or "").lower()
+            if file_name.endswith(".csv"):
+                df_input = pd.read_csv(file_obj, dtype=str)
             else:
-                df_input = pd.read_excel(file_obj)
-            
-            # Normalize headers (take first two columns regardless of name)
+                df_input = pd.read_excel(file_obj, dtype=str)
+
+            if df_input.empty:
+                return pd.DataFrame(), pd.DataFrame(), ["Error: File is empty."]
+
             if len(df_input.columns) < 2:
-                return pd.DataFrame(), ["Error: File must have at least 2 columns (SKU, Product Name)."]
-            
-            # Rename for consistency
-            df_input = df_input.iloc[:, :2]
-            df_input.columns = ['SKU', 'Product Name']
-            df_input = df_input.dropna(subset=['Product Name'])
+                return pd.DataFrame(), pd.DataFrame(), ["Error: File must include Product Name (Column A) and SKU (Column B)."]
+
+            df_input = df_input.iloc[:, :3].copy()
+            column_names = ["Product Name", "SKU", "Manufacturer"]
+            df_input.columns = column_names[: len(df_input.columns)]
+            df_input = df_input.dropna(subset=["Product Name"])
         except Exception as e:
-            return pd.DataFrame(), [f"Error parsing file: {e}"]
+            return pd.DataFrame(), pd.DataFrame(), [f"Error parsing file: {e}"]
 
         consolidated_results = []
+        no_match_rows = []
         total_items = len(df_input)
-        
+        if total_items == 0:
+            return pd.DataFrame(), pd.DataFrame(), ["Error: No valid rows found after parsing."]
+
         for idx, row in df_input.iterrows():
-            sku = str(row['SKU'])
-            p_name = str(row['Product Name'])
+            p_name = str(row.get("Product Name", "")).strip()
+            sku = str(row.get("SKU", "")).strip()
+            manufacturer = str(row.get("Manufacturer", "")).strip() if "Manufacturer" in row else ""
             cleaned_name = self._clean_product_name(p_name)
 
             if progress_callback:
@@ -116,6 +133,22 @@ class RecallResponseAgent:
                 progress_callback(progress, f"Scanning {idx+1}/{total_items}: {p_name}...")
 
             search_terms = self._generate_search_terms(cleaned_name)
+            if extra_terms and cleaned_name:
+                for keyword in extra_terms:
+                    keyword = str(keyword).strip()
+                    if keyword:
+                        search_terms.append(f"{cleaned_name} {keyword}")
+
+            seen_terms = set()
+            deduped_terms = []
+            for term in search_terms:
+                term_key = term.lower().strip()
+                if not term_key or term_key in seen_terms:
+                    continue
+                seen_terms.add(term_key)
+                deduped_terms.append(term)
+            search_terms = deduped_terms
+
             hits_frames = []
             for term in search_terms:
                 if not term:
@@ -125,6 +158,10 @@ class RecallResponseAgent:
                     start_date=start_date,
                     end_date=end_date,
                     limit=20,
+                    regions=regions,
+                    mode=mode,
+                    manufacturer=manufacturer or None,
+                    extra_terms=extra_terms,
                 )
                 if not hits.empty:
                     hits = hits.copy()
@@ -138,6 +175,7 @@ class RecallResponseAgent:
                 hits = pd.DataFrame()
             
             if not hits.empty:
+                matched_any = False
                 # 2. FUZZY MATCH FILTERING
                 for h_idx, hit in hits.iterrows():
                     hit_product = str(hit.get('Product', '')).lower()
@@ -150,9 +188,11 @@ class RecallResponseAgent:
                     # If score is good OR the product name is explicitly in the hit text
                     if score >= fuzzy_threshold or target_product in hit_product or term_matches:
                         # Append to results
+                        matched_any = True
                         consolidated_results.append({
                             "My SKU": sku,
                             "My Product": p_name,
+                            "Manufacturer": manufacturer,
                             "Match Score": f"{score:.2f}",
                             "Source": hit['Source'],
                             "Date": hit['Date'],
@@ -161,11 +201,18 @@ class RecallResponseAgent:
                             "Risk Level": "High" if score > 0.8 else "Medium",
                             "Link": hit['Link']
                         })
+                if not matched_any:
+                    no_match_rows.append(
+                        {"Product Name": p_name, "SKU": sku, "Manufacturer": manufacturer}
+                    )
+            else:
+                no_match_rows.append({"Product Name": p_name, "SKU": sku, "Manufacturer": manufacturer})
         
-        if not consolidated_results:
-            return pd.DataFrame(), ["No results found."]
-            
-        return pd.DataFrame(consolidated_results), ["Success"]
+        results_df = pd.DataFrame(consolidated_results)
+        no_matches_df = pd.DataFrame(no_match_rows)
+        if results_df.empty:
+            return results_df, no_matches_df, ["No results found."]
+        return results_df, no_matches_df, ["Success"]
 
     def _fuzzy_score(self, s1, s2):
         """Calculates fuzzy similarity ratio between two strings."""
